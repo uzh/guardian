@@ -1,0 +1,7 @@
+(library
+ (public_name ocaml_authorize)
+ (inline_tests)
+ (name ocaml_authorize)
+ (libraries lwt base64 uuidm)
+ (preprocess
+  (pps ppx_inline_test ppx_deriving.make ppx_deriving.ord ppx_deriving.show ppx_deriving.eq)))
