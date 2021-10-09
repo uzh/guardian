@@ -11,7 +11,11 @@ module User = struct
   type t = string
 
   let toEntity t =
-    Ocaml_authorize.Entity.make ~roles:("User" :: UserStore.getRoles t) ~repr:t ()
+    let open Ocaml_authorize in
+    Entity.make
+      ~roles:(RoleSet.of_list ("User" :: UserStore.getRoles t))
+      ~repr:t
+      ()
 
   let can =
     Ocaml_authorize.Authorizer.makeChecker
@@ -30,7 +34,11 @@ module Article = struct
     } [@@deriving make]
 
   let toEntity t =
-    Ocaml_authorize.Entity.make ~roles:["Article"] ~owner:(User.toEntity t.author) ()
+    let open Ocaml_authorize in
+    Entity.make
+      ~roles:RoleSet.(add "Article" empty)
+      ~owner:(User.toEntity t.author)
+      ()
 
   let can =
     Ocaml_authorize.Authorizer.makeChecker

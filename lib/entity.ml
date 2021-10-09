@@ -1,8 +1,8 @@
 type t =
-  { roles: Role.t list
+  { roles: RoleSet.t
   ; owner: t option
   ; hash: string option
-  } [@@deriving show,eq]
+  } [@@deriving eq]
 
 let make ~roles ?owner ?repr () =
   { roles
@@ -17,7 +17,7 @@ let serializeRoles t =
   let roles =
     List.map
       Base64.encode_exn
-      t.roles
+      (RoleSet.elements t.roles)
   in
   String.concat "," roles
 
@@ -25,4 +25,4 @@ let aOwnsB a b =
   Option.map (equal a) b.owner = Some true
 
 let hasRole t role =
-  List.exists (Role.equal role) t.roles
+  RoleSet.exists (Role.equal role) t.roles
