@@ -1,16 +1,13 @@
 type t =
   { roles: Role_set.t
   ; owner: t option
-  ; hash: string option
+  ; uuid: Uuidm.t
   } [@@deriving eq]
 
-let make ~roles ?owner ?repr () =
+let make ~roles ?owner uuid =
   { roles
   ; owner
-  ; hash =
-      match repr with
-      | None -> None
-      | Some x -> Some (Printf.sprintf "%08x" (Hashtbl.hash x))
+  ; uuid
   }
 
 let serialize_roles t =

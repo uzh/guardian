@@ -3,8 +3,8 @@ let _ = (module User : Ocaml_authorize.Authorizer.Authorizable_entity)
 
 let _ = (module Article : Ocaml_authorize.Authorizer.Authorizable_entity)
 
-let chris = "Chris"
-let aron = "Aron"
+let chris = "Chris", Uuidm.create `V4
+let aron = "Aron", Uuidm.create `V4
 let chris_article = Article.make ~title:"Foo" ~content:"Bar" ~author:chris
 let aron_article = Article.make ~title:"Fizz" ~content:"Buzz" ~author:aron
 

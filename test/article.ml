@@ -10,7 +10,7 @@ let to_entity t =
   Entity.make
     ~roles:Role_set.(add "Article" empty)
     ~owner:(User.to_entity t.author)
-    ()
+    (snd t.author)
 
 let can =
   Ocaml_authorize.Authorizer.make_checker
