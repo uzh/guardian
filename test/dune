@@ -1,4 +1,4 @@
 (test
- (name ocaml_authorize)
+ (name main)
  (libraries alcotest ocaml_authorize)
  (preprocess (pps ppx_deriving.make)))
