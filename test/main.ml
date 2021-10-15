@@ -1,10 +1,11 @@
 (* ensure that the `User` module conforms to the `Authorizable_entity` module type. *)
-let _ = (module User : Ocaml_authorize.Authorizer.Authorizable_entity)
+(* let _ = (module User : Ocaml_authorize.Authorizer.Authorizable_entity)
 
-let _ = (module Article : Ocaml_authorize.Authorizer.Authorizable_entity)
+   let _ = (module Article : Ocaml_authorize.Authorizer.Authorizable_entity) *)
 
 let chris = "Chris", Uuidm.create `V4
 let aron = "Aron", Uuidm.create `V4
+let ben: Hacker.t = "Ben Hackerman", Uuidm.create `V4
 let chris_article = Article.make ~title:"Foo" ~content:"Bar" ~author:chris
 let aron_article = Article.make ~title:"Fizz" ~content:"Buzz" ~author:aron
 
@@ -37,13 +38,23 @@ let can_update_self () =
     true
 
 let article_cannot_update_other_article () =
+  let () = print_endline "about to run a test" in
   Alcotest.(check bool)
     "Article cannot update another article."
     (Result.is_error
        (Article.update_title (Article.to_entity chris_article) aron_article "Updated Title"))
     true
 
+let hacker_cannot_update_article () =
+  let () = print_endline "about to run a test" in
+  Alcotest.(check bool)
+    "Article cannot update another article."
+    (Result.is_error
+       (Article.update_title (Hacker.to_entity ben) aron_article "Updated Title"))
+    true
+
 let () =
+  let () = print_endline "About to run alcotest." in
   Alcotest.run "Authorization"
     [ ( "Admins should be able to do everything."
       , [ Alcotest.test_case "Update someone else's article." `Quick test_admin_update_others'
@@ -60,6 +71,7 @@ let () =
     ; ( "Entities should be denied access to entities they shouldn't access."
       , [ Alcotest.test_case "Cannot update" `Quick cannot_update
         ; Alcotest.test_case "Cannot update" `Quick article_cannot_update_other_article
+        ; Alcotest.test_case "Cannot update" `Quick hacker_cannot_update_article
         ]
       )
     ]

@@ -1,13 +1,15 @@
-type t =
+type 'a t =
   { roles: Role_set.t
-  ; owner: t option
+  ; owner: unit t option
   ; uuid: Uuidm.t
-  } [@@deriving eq]
+  ; typ: 'a option
+  } [@@deriving eq,ord,show]
 
-let make ~roles ?owner uuid =
+let make ~roles ?typ ?owner uuid =
   { roles
   ; owner
   ; uuid
+  ; typ
   }
 
 let serialize_roles t =
@@ -19,7 +21,7 @@ let serialize_roles t =
   String.concat "," roles
 
 let a_owns_b a b =
-  Option.map (equal a) b.owner = Some true
+  Option.map (fun b' -> a.uuid = b'.uuid) b.owner = Some true
 
 let has_role t role =
   Role_set.mem role t.roles

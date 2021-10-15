@@ -7,16 +7,32 @@ type t =
 
 let to_entity t =
   let open Ocaml_authorize in
+  let owner =
+    let acc = User.to_entity t.author in
+    {acc with typ = Some ()}
+  in
   Entity.make
     ~roles:Role_set.(add "Article" empty)
-    ~owner:(User.to_entity t.author)
+    ~owner
     (snd t.author)
 
-let can =
-  Ocaml_authorize.Authorizer.make_checker
-    [ ("Admin", [`Create; `Read; `Update; `Delete]) ]
+type _ permitted_actor =
+  | Article : t -> t permitted_actor
+  | User : User.t -> User.t permitted_actor
 
-let update_title actor (t: t) new_title =
+(* let can =
+   Ocaml_authorize.Authorizer.make_checker
+    [ ("Admin", [`Create; `Read; `Update; `Delete]) ] *)
+
+let update_title (actor: [`User | `Article] Ocaml_authorize.Entity.t) t new_title =
+  let can =
+    Ocaml_authorize.Authorizer.make_checker
+      [ ("Admin", [`Create; `Read; `Update; `Delete]) ]
+  in
   if can actor `Update (to_entity t)
   then let _ = t.title <- new_title in Ok t
   else Error "Insufficient access"
+(* let update_title actor (t: t) new_title =
+   if can actor `Update (to_entity t)
+   then let _ = t.title <- new_title in Ok t
+   else Error "Insufficient access" *)

@@ -1,5 +1,5 @@
 include Set.Make(Role)
 
-let pp t =
+let pp fmt t =
   let show = [%show: Role.t list] in
-  show (elements t)
+  Format.fprintf fmt "[%s]" (show (elements t))

@@ -3,6 +3,6 @@ type t = [
     `Read |
     `Update |
     `Delete
-] [@@deriving ord]
+] [@@deriving ord,show]
 
 let manage = [`Create; `Read; `Update; `Delete]
