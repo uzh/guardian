@@ -1,7 +1,7 @@
 (* ensure that the `User` module conforms to the `Authorizable_entity` module type. *)
-(* let _ = (module User : Ocaml_authorize.Authorizer.Authorizable_entity)
+let _ = (module User : Ocaml_authorize.Authorizer.Authorizable_entity)
 
-   let _ = (module Article : Ocaml_authorize.Authorizer.Authorizable_entity) *)
+let _ = (module Article : Ocaml_authorize.Authorizer.Authorizable_entity)
 
 let chris = "Chris", Uuidm.create `V4
 let aron = "Aron", Uuidm.create `V4
@@ -45,13 +45,21 @@ let article_cannot_update_other_article () =
        (Article.update_title (Article.to_entity chris_article) aron_article "Updated Title"))
     true
 
-let hacker_cannot_update_article () =
-  let () = print_endline "about to run a test" in
-  Alcotest.(check bool)
+(** IMPORTANT: the following tests should not compile! *)
+(* let hacker_cannot_update_article () =
+   let () = print_endline "about to run a test" in
+   Alcotest.(check bool)
     "Article cannot update another article."
     (Result.is_error
        (Article.update_title (Hacker.to_entity ben) aron_article "Updated Title"))
     true
+
+   let owner_can_do_nothing () =
+   Alcotest.(check bool)
+    "entity.owner shouldn't be allowed to do anything."
+    (Result.is_error
+       (Article.update_title (Article.to_entity aron_article).owner aron_article "Updated Title"))
+    true *)
 
 let () =
   let () = print_endline "About to run alcotest." in
@@ -71,7 +79,7 @@ let () =
     ; ( "Entities should be denied access to entities they shouldn't access."
       , [ Alcotest.test_case "Cannot update" `Quick cannot_update
         ; Alcotest.test_case "Cannot update" `Quick article_cannot_update_other_article
-        ; Alcotest.test_case "Cannot update" `Quick hacker_cannot_update_article
+          (* ; Alcotest.test_case "Cannot update" `Quick hacker_cannot_update_article *)
         ]
       )
     ]

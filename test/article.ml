@@ -5,6 +5,8 @@ type t =
   ; mutable author: User.t
   } [@@deriving make]
 
+type kind = [ `Article ]
+
 let to_entity t =
   let open Ocaml_authorize in
   let owner =
@@ -20,10 +22,6 @@ type _ permitted_actor =
   | Article : t -> t permitted_actor
   | User : User.t -> User.t permitted_actor
 
-(* let can =
-   Ocaml_authorize.Authorizer.make_checker
-    [ ("Admin", [`Create; `Read; `Update; `Delete]) ] *)
-
 let update_title (actor: [`User | `Article] Ocaml_authorize.Entity.t) t new_title =
   let can =
     Ocaml_authorize.Authorizer.make_checker
@@ -32,7 +30,3 @@ let update_title (actor: [`User | `Article] Ocaml_authorize.Entity.t) t new_titl
   if can actor `Update (to_entity t)
   then let _ = t.title <- new_title in Ok t
   else Error "Insufficient access"
-(* let update_title actor (t: t) new_title =
-   if can actor `Update (to_entity t)
-   then let _ = t.title <- new_title in Ok t
-   else Error "Insufficient access" *)

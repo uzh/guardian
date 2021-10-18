@@ -1,5 +1,7 @@
 type t = string * Uuidm.t
 
+type kind = [ `User ]
+
 let make s : t = s, Uuidm.create `V4
 
 let to_entity (t: t) =
