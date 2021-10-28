@@ -10,6 +10,8 @@ let to_entity (t: t) =
     ~roles:(Role_set.of_list ("User" :: User_store.get_roles t))
     ~typ:`User
     (snd t)
+let to_entity =
+  Ocauth_store.decorate_to_entity to_entity
 
 (* let can:
    [ `User] Ocaml_authorize.Entity.t ->

@@ -5,36 +5,56 @@ let _ = (module Article : Ocaml_authorize.Authorizer.Authorizable_entity)
 
 let chris = "Chris", Uuidm.create `V4
 let aron = "Aron", Uuidm.create `V4
-let ben: Hacker.t = "Ben Hackerman", Uuidm.create `V4
-let chris_article = Article.make ~title:"Foo" ~content:"Bar" ~author:chris
-let aron_article = Article.make ~title:"Fizz" ~content:"Buzz" ~author:aron
+let ben : Hacker.t = "Ben Hackerman", Uuidm.create `V4
+let chris_article =
+  Article.make
+    ~title:"Foo"
+    ~content:"Bar"
+    ~uuid:(Uuidm.create `V4)
+    ~author:chris
+let aron_article =
+  Article.make
+    ~title:"Fizz"
+    ~content:"Buzz"
+    ~uuid:(Uuidm.create `V4)
+    ~author:aron
+
+let ( let* ) = Result.bind
 
 let test_update_owned () =
   Alcotest.(check bool)
     "Chris can update an article owned by Chris."
     (Result.is_ok
-       (Article.update_title (User.to_entity chris) chris_article "Updated Title"))
+       ( let* chris_ent = User.to_entity chris in
+         Article.update_title chris_ent chris_article "Updated Title"
+       )
+    )
     true
 
 let test_admin_update_others' () =
   Alcotest.(check bool)
     "Aron (admin) can update an article Chris owns"
     (Result.is_ok
-       (Article.update_title (User.to_entity aron) chris_article "Updated Title"))
+       ( let* aron_ent = User.to_entity aron in
+         Article.update_title aron_ent chris_article "Updated Title"
+       )
+    )
     true
 
 let cannot_update () =
   Alcotest.(check bool)
     "Chris cannot update an article Aron owns"
     (Result.is_error
-       (Article.update_title (User.to_entity chris) aron_article "Updated Title"))
+       ( let* chris_ent = User.to_entity chris in
+         Article.update_title chris_ent aron_article "Updated Title"))
     true
 
 let can_update_self () =
   Alcotest.(check bool)
     "Article can update itself."
     (Result.is_ok
-       (Article.update_title (Article.to_entity chris_article) chris_article "Updated Title"))
+       ( let* chris_article_entity = Article.to_entity chris_article in
+         Article.update_title chris_article_entity chris_article "Updated Title"))
     true
 
 let article_cannot_update_other_article () =
@@ -42,7 +62,8 @@ let article_cannot_update_other_article () =
   Alcotest.(check bool)
     "Article cannot update another article."
     (Result.is_error
-       (Article.update_title (Article.to_entity chris_article) aron_article "Updated Title"))
+       ( let* chris_article_entity = Article.to_entity chris_article in
+         Article.update_title chris_article_entity aron_article "Updated Title"))
     true
 
 (** IMPORTANT: the following tests should not compile! *)

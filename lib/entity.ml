@@ -1,11 +1,27 @@
+module Uuidm = struct
+  include Uuidm
+
+  let to_yojson t =
+    `String (to_string t)
+
+  let of_yojson = function
+    | `String s ->
+      of_string s
+      |> begin function
+        | Some x -> Ok x
+        | None -> Error("Invalid UUID: " ^ s)
+      end
+    | _ -> raise (Invalid_argument "")
+end
+
 type 'a t =
   { roles: Role_set.t
   ; owner: unit t option
   ; uuid: Uuidm.t
-  ; typ: 'a option
-  } [@@deriving eq,ord,show]
+  ; typ: 'a
+  } [@@deriving eq,ord,show,yojson]
 
-let make ~roles ?typ ?owner uuid =
+let make ~roles ~typ ?owner uuid =
   { roles
   ; owner
   ; uuid

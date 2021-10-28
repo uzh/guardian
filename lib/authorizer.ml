@@ -1,3 +1,7 @@
+type actor_spec = [ `Role of Role.t | `Uniq of Uuidm.t ]
+
+type auth_rule = actor_spec * Action.t * actor_spec
+
 (** actor * actions * target *)
 type role_rule = Role.t * Action.t list
 
@@ -15,17 +19,19 @@ let make_checker (rules: role_rule list) = fun actor (action: Action.t) target -
          List.exists ((=) action) authorized_actions && Entity.has_role actor role)
       rules
   in
-  let evt =
-    let () = print_endline "Running checker." in
-    let status =
-      match rv with
-      | true -> Logger.Approved
-      | false -> Denied
+  let () =
+    let evt =
+      let () = print_endline "Running checker." in
+      let status =
+        match rv with
+        | true -> Logger.Approved
+        | false -> Denied
+      in
+      let time = Option.get @@ Ptime.of_float_s (Unix.gettimeofday()) in
+      Logger.make_authorization_event ~actor ~target ~time ~action ~status
     in
-    let time = Option.get @@ Ptime.of_float_s (Unix.gettimeofday()) in
-    Logger.make_authorization_event ~actor ~target ~time ~action ~status
+    Logger.log evt
   in
-  let () = Logger.log evt in
   rv
 
 module type Authorizable_entity = sig
@@ -36,5 +42,5 @@ module type Authorizable_entity = sig
   (** [to_entity x] converts [x] to a uniquely identifiable entity, complete
     * with roles. The entity may not, however, be converted back into type [t].
    **)
-  val to_entity : t -> kind Entity.t
+  val to_entity : t -> (kind Entity.t, string) result
 end
