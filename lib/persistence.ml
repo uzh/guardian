@@ -17,19 +17,17 @@ end
 module Make(BES : Backend_store_s) = struct
   include BES
   let get_entity ~(typ : 'kind) id =
-    let rv: ('kind Entity.t, string) result =
-      if BES.mem_entity id
-      then
-        let ( let* ) = Result.bind in
-        let* roles = BES.get_roles id in
-        (* let* owner_id = BES.get_owner id in
-           let* owner_roles = BES.get_roles owner_id in
-           let* owner = get_entity ~typ:() owner_id in *)
-        Ok(Entity.make ~roles ~typ id)
-      else
-        Error(Printf.sprintf "Entity %s doesn't exist." (Uuidm.to_string id))
-    in
-    rv
+    if BES.mem_entity id
+    then
+      let ( let* ) = Result.bind in
+      let* roles = BES.get_roles id in
+      (** TODO: owner *)
+      (* let* owner_id = BES.get_owner id in
+         let* owner_roles = BES.get_roles owner_id in
+         let* owner = get_entity ~typ:() owner_id in *)
+      Ok(Entity.make ~roles ~typ id)
+    else
+      Error(Printf.sprintf "Entity %s doesn't exist." (Uuidm.to_string id))
 
   (** This convenience function should be used to decorate the [to_entity]
     * functions of authorizable modules.

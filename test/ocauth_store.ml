@@ -54,7 +54,12 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
     | Some uuid -> Ok(Some uuid)
     | None -> Error("Failed to parse UUID")
 
-  let get_perms _ = []
+  let get_perms spec =
+    match spec with
+    | `Uniq _uuidm ->
+      []
+    | `Role _role ->
+      []
 
   let grant_roles id roles =
     let id' = Uuidm.to_string id in
