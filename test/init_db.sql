@@ -4,14 +4,10 @@ CREATE TABLE entities (
     parent TEXT
 );
 
-CREATE TABLE role_rules (
-    actor_role TEXT NOT NULL,
+CREATE TABLE rules (
+    actor_id TEXT,
+    actor_role TEXT,
     act TEXT NOT NULL,
-    target_role TEXT NOT NULL
-);
-
-CREATE TABLE individual_rules (
-    actor_id TEXT NOT NULL,
-    act TEXT NOT NULL,
-    target_id TEXT NOT NULL
+    target_id TEXT,
+    target_role TEXT
 );

@@ -1,19 +1,18 @@
 (rule
  (target test_db.sqlite3)
- (deps
-    article.ml
-    hacker.ml
-    init_db.sql
-    main.ml
-    ocauth_store.ml
-    user_store.ml
-    user.ml)
+ (deps init_db.sql)
  (action (with-stdin-from init_db.sql
     (run sqlite3 -batch %{target}))))
 
 (test
  (name main)
  (libraries alcotest ocaml_authorize sqlite3)
- (preprocess (pps ppx_deriving.make))
- (deps init_db.sql)
+ (preprocess (pps ppx_deriving.make ppx_deriving.show))
+ (deps
+  article.ml
+  hacker.ml
+  test_db.sqlite3
+  main.ml
+  ocauth_store.ml
+  user.ml)
  (action (run %{test} -e)))

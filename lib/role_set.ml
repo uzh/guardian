@@ -1,5 +1,11 @@
 include Set.Make(Role)
 
+let mem elt t =
+  mem (String.lowercase_ascii elt) t
+
+let add elt t =
+  add (String.lowercase_ascii elt) t
+
 let to_yojson t : Yojson.Safe.t =
   `List(List.map (fun s -> `String s) (elements t))
 

@@ -3,6 +3,8 @@ module type Backend_store_s = sig
 
   val get_perms : Authorizer.actor_spec -> Authorizer.auth_rule list
 
+  val put_perm : Authorizer.auth_rule -> (unit, string) result
+
   val grant_roles : Uuidm.t -> Role_set.t -> (unit, string) result
 
   val create_entity : ?id:Uuidm.t -> Role_set.t -> (unit, string) result
@@ -28,11 +30,33 @@ module Make(BES : Backend_store_s) = struct
       Ok(Entity.make ~roles ~typ id)
     else
       Error(Printf.sprintf "Entity %s doesn't exist." (Uuidm.to_string id))
+  
+  (** [put_perms perms] adds all the permissions [perms] to the backend. If
+      there is an error at any point, it returns a `result` containing all of
+      the items that were not added. *)
+  let put_perms perms =
+    List.fold_left
+      (fun acc x ->
+        match acc with
+        | Ok acc' ->
+          begin match BES.put_perm x with
+          | Ok() -> Ok(x :: acc')
+          | Error _ -> Error [x]
+          end
+        | Error xs ->
+          Error(x :: xs)
+      )
+      (Ok [])
+      perms
 
   (** This convenience function should be used to decorate the [to_entity]
-    * functions of authorizable modules.
+    * functions of authorizable modules. The newly decorated function connects
+    * to the persistent backend to ensure that the entity's roles and ownership
+    * are consistent in both spaces.
   *)
-  let decorate_to_entity (to_entity : 'a -> 'kind Entity.t) : 'a -> ('kind Entity.t, string) result =
+  let decorate_to_entity
+      (to_entity : 'a -> 'kind Entity.t)
+      : 'a -> ('kind Entity.t, string) result =
     fun x ->
     let (ent : 'kind Entity.t) = to_entity x in
     let uuid = ent.uuid in
@@ -42,17 +66,28 @@ module Make(BES : Backend_store_s) = struct
       let* ent' = get_entity ~typ:ent.typ ent.uuid in
       let roles = Role_set.union ent.roles ent'.roles in
       let* () = BES.grant_roles uuid roles in
-      (** TODO: must save the entity if the roles or owner are different *)
       Result.Ok Entity.{uuid; roles; owner = ent.owner; typ = ent.typ}
     else
       let* () = BES.create_entity ~id:uuid ent.roles in
       Ok ent
 
-  let get_checker entity actions : Authorizer.auth_rule list =
-    Role_set.elements entity.Entity.roles
-    |> List.map (fun r -> `Role r)
-    |> List.cons (`Uniq entity.Entity.uuid)
-    |> List.map BES.get_perms
-    |> List.flatten
-    |> List.filter (fun (_, action, _) -> List.mem action actions)
+  let get_checker entity =
+    let auth_rules =
+      Role_set.elements entity.Entity.roles
+      |> List.map (fun r -> `Role r)
+      |> List.cons (`Uniq entity.Entity.uuid)
+      |> List.map BES.get_perms
+      |> List.flatten
+    in
+    fun actor action ->
+      let actor_roles = actor.Entity.roles in
+      List.exists
+        (fun (actor', action', _) ->
+          match actor' with
+          | `Uniq id ->
+            actor.uuid = id && action = action'
+          | `Role role ->
+            Role_set.mem role actor_roles && action = action'
+        )
+        auth_rules
 end

@@ -82,25 +82,52 @@ let article_cannot_update_other_article () =
        (Article.update_title (Article.to_entity aron_article).owner aron_article "Updated Title"))
     true *)
 
-let () =
-  let () = print_endline "About to run alcotest." in
-  Alcotest.run "Authorization"
-    [ ( "Admins should be able to do everything."
-      , [ Alcotest.test_case "Update someone else's article." `Quick test_admin_update_others'
-        ]
-      )
-    ; ( "An entity should be able to do everything to entities it owns."
-      , [ Alcotest.test_case "Update own article." `Quick test_update_owned
-        ]
-      )
-    ; ( "An entity should be able to do everything to itself."
-      , [ Alcotest.test_case "Update" `Quick can_update_self
-        ]
-      )
-    ; ( "Entities should be denied access to entities they shouldn't access."
-      , [ Alcotest.test_case "Cannot update" `Quick cannot_update
-        ; Alcotest.test_case "Cannot update" `Quick article_cannot_update_other_article
-          (* ; Alcotest.test_case "Cannot update" `Quick hacker_cannot_update_article *)
-        ]
-      )
+let init () =
+  (* let ( let* ) = Result.bind in *)
+  let _ = Ocauth_store.put_perms
+    [ `Role "user", `Read, `Role "article"
+    ; `Uniq (snd aron), `Create, `Role "article"
+    ; `Uniq (snd aron), `Read, `Role "article"
+    ; `Uniq (snd aron), `Update, `Role "article"
+    ; `Uniq (snd aron), `Delete, `Role "article"
     ]
+  in
+  ()
+
+let _ =
+  let () = print_endline "About to run alcotest." in
+  (* let* aron_ent =
+    match User.to_entity aron with
+    | Ok aron_ent -> Ok aron_ent
+    | Error err as err' ->
+      let () = print_endline ("Error: " ^ err) in
+      err'
+  in
+  let () = print_endline "Successfully made aron into an entity" in
+  let ent =
+    Ocaml_authorize.Entity.show (fun _ _ -> ()) aron_ent
+  in
+  let () = print_endline ent in *)
+  let _ =
+    Alcotest.run "Authorization"
+      [ ( "Admins should be able to do everything."
+        , [ Alcotest.test_case "Update someone else's article." `Quick test_admin_update_others'
+          ]
+        )
+      ; ( "An entity should be able to do everything to entities it owns."
+        , [ Alcotest.test_case "Update own article." `Quick test_update_owned
+          ]
+        )
+      ; ( "An entity should be able to do everything to itself."
+        , [ Alcotest.test_case "Update" `Quick can_update_self
+          ]
+        )
+      ; ( "Entities should be denied access to entities they shouldn't access."
+        , [ Alcotest.test_case "Cannot update" `Quick cannot_update
+          ; Alcotest.test_case "Cannot update" `Quick article_cannot_update_other_article
+            (* ; Alcotest.test_case "Cannot update" `Quick hacker_cannot_update_article *)
+          ]
+        )
+      ]
+  in
+  Ok ()

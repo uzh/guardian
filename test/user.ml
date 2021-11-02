@@ -1,4 +1,4 @@
-type t = string * Uuidm.t
+type t = (string * Uuidm.t) [@@deriving show]
 
 type kind = [ `User ]
 
@@ -7,7 +7,7 @@ let make s : t = s, Uuidm.create `V4
 let to_entity (t: t) =
   let open Ocaml_authorize in
   Entity.make
-    ~roles:(Role_set.of_list ("User" :: User_store.get_roles t))
+    ~roles:(Role_set.singleton "User")
     ~typ:`User
     (snd t)
 let to_entity =
