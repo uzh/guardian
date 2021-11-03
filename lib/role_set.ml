@@ -1,5 +1,8 @@
 include Set.Make(Role)
 
+let singleton elt =
+  singleton (String.lowercase_ascii elt)
+
 let mem elt t =
   mem (String.lowercase_ascii elt) t
 

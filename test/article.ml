@@ -4,7 +4,7 @@ type t =
   ; mutable content: string
   ; mutable author: User.t
   ; uuid: Uuidm.t
-  } [@@deriving make]
+  } [@@deriving make,show]
 
 type kind = [ `Article ]
 
@@ -23,18 +23,15 @@ let to_entity t =
     ~roles
     ?owner
     ~typ:`Article
-    (snd t.author)
+    t.uuid
 
 let to_entity =
   Ocauth_store.decorate_to_entity to_entity
 
 let update_title (actor: [`User | `Article] Ocaml_authorize.Entity.t) t new_title =
-  let can =
-    Ocaml_authorize.Authorizer.make_checker
-      [ ("Admin", [`Create; `Read; `Update; `Delete]) ]
-  in
   let ( let* ) = Result.bind in
   let* ent = to_entity t in
-  if can actor `Update ent
+  let can = Ocauth_store.get_checker ent in
+  if can actor `Update
   then let _ = t.title <- new_title in Ok t
   else Error "Insufficient access"

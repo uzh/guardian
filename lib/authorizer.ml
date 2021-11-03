@@ -1,6 +1,6 @@
-type actor_spec = [ `Role of Role.t | `Uniq of Uuidm.t ]
+type actor_spec = [ `Role of Role.t | `Uniq of Uuidm.t ] [@@deriving show]
 
-type auth_rule = actor_spec * Action.t * actor_spec
+type auth_rule = actor_spec * Action.t * actor_spec [@@deriving show]
 
 (** actor * actions * target *)
 type role_rule = Role.t * Action.t list

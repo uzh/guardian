@@ -30,21 +30,21 @@ module Make(BES : Backend_store_s) = struct
       Ok(Entity.make ~roles ~typ id)
     else
       Error(Printf.sprintf "Entity %s doesn't exist." (Uuidm.to_string id))
-  
+
   (** [put_perms perms] adds all the permissions [perms] to the backend. If
       there is an error at any point, it returns a `result` containing all of
       the items that were not added. *)
   let put_perms perms =
     List.fold_left
       (fun acc x ->
-        match acc with
-        | Ok acc' ->
-          begin match BES.put_perm x with
-          | Ok() -> Ok(x :: acc')
-          | Error _ -> Error [x]
-          end
-        | Error xs ->
-          Error(x :: xs)
+         match acc with
+         | Ok acc' ->
+           begin match BES.put_perm x with
+             | Ok() -> Ok(x :: acc')
+             | Error _ -> Error [x]
+           end
+         | Error xs ->
+           Error(x :: xs)
       )
       (Ok [])
       perms
@@ -56,7 +56,7 @@ module Make(BES : Backend_store_s) = struct
   *)
   let decorate_to_entity
       (to_entity : 'a -> 'kind Entity.t)
-      : 'a -> ('kind Entity.t, string) result =
+    : 'a -> ('kind Entity.t, string) result =
     fun x ->
     let (ent : 'kind Entity.t) = to_entity x in
     let uuid = ent.uuid in
@@ -80,14 +80,23 @@ module Make(BES : Backend_store_s) = struct
       |> List.flatten
     in
     fun actor action ->
-      let actor_roles = actor.Entity.roles in
-      List.exists
-        (fun (actor', action', _) ->
-          match actor' with
-          | `Uniq id ->
-            actor.uuid = id && action = action'
-          | `Role role ->
-            Role_set.mem role actor_roles && action = action'
-        )
-        auth_rules
+      let is_owner =
+        match entity.Entity.owner with
+        | Some x -> Entity.(actor.uuid = x.uuid)
+        | None -> false
+      in
+      let is_self = Entity.(actor.uuid = entity.uuid) in
+      if is_self || is_owner
+      then true
+      else
+        let actor_roles = actor.Entity.roles in
+        List.exists
+          (fun (actor', action', _) ->
+             match actor' with
+             | `Uniq id ->
+               actor.uuid = id && action = action'
+             | `Role role ->
+               Role_set.mem role actor_roles && action = action'
+          )
+          auth_rules
 end

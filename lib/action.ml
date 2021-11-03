@@ -8,11 +8,11 @@ type t = [
 let to_string = show
 
 let of_string s =
-  match String.lowercase_ascii s with
-  | "create" -> `Create
-  | "read" -> `Read
-  | "update" -> `Update
-  | "delete" -> `Delete
+  match String.(trim s |> lowercase_ascii) with
+  | "create" | "`create" -> `Create
+  | "read" | "`read" -> `Read
+  | "update" | "`update" -> `Update
+  | "delete" | "`delete" -> `Delete
   | _ -> raise (Invalid_argument("Invalid action: " ^ s))
 
 let manage = [`Create; `Read; `Update; `Delete]

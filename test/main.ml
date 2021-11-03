@@ -19,6 +19,15 @@ let aron_article =
     ~uuid:(Uuidm.create `V4)
     ~author:aron
 
+let () =
+  print_endline "Users:";
+  print_endline (User.show chris);
+  print_endline (User.show aron);
+  print_endline (User.show ben);
+  print_endline "Articles:";
+  print_endline (Article.show chris_article);
+  print_endline (Article.show aron_article)
+
 let ( let* ) = Result.bind
 
 let test_update_owned () =
@@ -82,32 +91,25 @@ let article_cannot_update_other_article () =
        (Article.update_title (Article.to_entity aron_article).owner aron_article "Updated Title"))
     true *)
 
-let init () =
-  (* let ( let* ) = Result.bind in *)
-  let _ = Ocauth_store.put_perms
-    [ `Role "user", `Read, `Role "article"
-    ; `Uniq (snd aron), `Create, `Role "article"
-    ; `Uniq (snd aron), `Read, `Role "article"
-    ; `Uniq (snd aron), `Update, `Role "article"
-    ; `Uniq (snd aron), `Delete, `Role "article"
-    ]
+let return =
+  let* () = Ocauth_store.grant_roles (snd aron) (Ocaml_authorize.Role_set.singleton "admin") in
+  let* () =
+    match
+      Ocauth_store.put_perms
+        [ `Role "user", `Read, `Role "article"
+        ; `Role "admin", `Create, `Role "article"
+        ; `Role "admin", `Read, `Role "article"
+        ; `Role "admin", `Update, `Role "article"
+        ; `Role "admin", `Delete, `Role "article"
+        ]
+    with
+    | Ok perms ->
+      let () = print_endline "Successfully put some perms: " in
+      let () = print_endline ([%show: Ocaml_authorize.Authorizer.auth_rule list] perms) in
+      Ok ()
+    | Error _ ->
+      Error "Failed to put some perms"
   in
-  ()
-
-let _ =
-  let () = print_endline "About to run alcotest." in
-  (* let* aron_ent =
-    match User.to_entity aron with
-    | Ok aron_ent -> Ok aron_ent
-    | Error err as err' ->
-      let () = print_endline ("Error: " ^ err) in
-      err'
-  in
-  let () = print_endline "Successfully made aron into an entity" in
-  let ent =
-    Ocaml_authorize.Entity.show (fun _ _ -> ()) aron_ent
-  in
-  let () = print_endline ent in *)
   let _ =
     Alcotest.run "Authorization"
       [ ( "Admins should be able to do everything."
@@ -131,3 +133,12 @@ let _ =
       ]
   in
   Ok ()
+
+let () =
+  if Sqlite3.db_close Ocauth_store.db
+  then
+    match return with
+    | Ok _ -> print_endline "returned successfully"
+    | Error s -> print_endline("Error: " ^ s)
+  else
+    print_endline "Failed to close db"
