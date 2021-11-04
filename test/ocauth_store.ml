@@ -3,8 +3,8 @@ let db = Sqlite3.db_open "test_db.sqlite3"
 let ( let* ) = Result.bind
 
 module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
-  let return_rc ?(value = ()) = function
-    | Sqlite3.Rc.OK | DONE | ROW -> Ok value
+  let return_rc = function
+    | Sqlite3.Rc.OK | DONE | ROW -> Ok()
     | rc -> Error(Sqlite3.Rc.to_string rc)
 
   let create_entity ?(id = Uuidm.create `V4) roles =
@@ -123,7 +123,7 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
     return_rc (Sqlite3.step stmt)
 
   let get_perms spec =
-    let stmt =
+    let* stmt =
       let open Sqlite3 in
       match spec with
       | `Uniq uuidm ->
@@ -131,18 +131,20 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
           "SELECT act, actor_id, actor_role FROM rules WHERE target_id = ?"
           |> prepare db
         in
-        let _ = bind_values stmt [Data.TEXT(Uuidm.to_string uuidm)] in
-        stmt
+        let* () = return_rc(bind_values stmt [Data.TEXT(Uuidm.to_string uuidm)]) in
+        Ok stmt
       | `Role role ->
         let stmt =
           "SELECT act, actor_id, actor_role FROM rules WHERE target_role = ?"
           |> prepare db
         in
-        let _ = bind_values stmt [Data.TEXT role] in
-        stmt
+        let () = Printf.printf "Searching for role: %s\n" role in
+        let* () = return_rc(bind_values stmt [Data.TEXT role]) in
+        Ok stmt
     in
-    let _rc, rv =
-      Sqlite3.fold stmt
+    let rc, rv =
+      Sqlite3.fold
+        stmt
         ~f:(fun acc row ->
             let action =
               row.(0)
@@ -163,7 +165,9 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
           )
         ~init:[]
     in
-    rv
+    let* () = return_rc rc in
+    Ok rv
+
   let mem_entity id =
     let stmt =
       Sqlite3.prepare
@@ -176,6 +180,7 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
     in
     let (_, rv) = Sqlite3.fold stmt ~f:(fun _acc _row -> Some true) ~init:None in
     Option.value rv ~default:false
+
   let grant_roles id roles =
     let id' = Uuidm.to_string id in
     let* roles' =
@@ -185,10 +190,10 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
       |> Yojson.Safe.to_string
       |> Result.ok
     in
-    let stmt =
+    let* stmt =
       if mem_entity id
-      then Sqlite3.prepare db "UPDATE entities SET roles = ? WHERE id = ?"
-      else Sqlite3.prepare db "INSERT INTO entities (roles, id) VALUES (?, ?)"
+      then Ok(Sqlite3.prepare db "UPDATE entities SET roles = ? WHERE id = ?")
+      else Error("Cannot grant a role to an entity which doesn't exist.")
     in
     let () =
       let open Sqlite3 in

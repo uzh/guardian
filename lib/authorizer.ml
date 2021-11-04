@@ -1,6 +1,11 @@
-type actor_spec = [ `Role of Role.t | `Uniq of Uuidm.t ] [@@deriving show]
+type actor_spec = [ `Role of Role.t | `Uniq of Uuidm.t ] [@@deriving show,ord]
 
-type auth_rule = actor_spec * Action.t * actor_spec [@@deriving show]
+type auth_rule = actor_spec * Action.t * actor_spec [@@deriving show,ord]
+
+module Auth_rule_set = Set.Make(struct
+    type t = auth_rule
+    let compare = compare_auth_rule
+  end)
 
 (** actor * actions * target *)
 type role_rule = Role.t * Action.t list

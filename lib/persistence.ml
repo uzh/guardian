@@ -1,7 +1,7 @@
 module type Backend_store_s = sig
   val get_roles : Uuidm.t -> (Role_set.t, string) result
 
-  val get_perms : Authorizer.actor_spec -> Authorizer.auth_rule list
+  val get_perms : Authorizer.actor_spec -> (Authorizer.auth_rule list, string) result
 
   val put_perm : Authorizer.auth_rule -> (unit, string) result
 
@@ -72,13 +72,23 @@ module Make(BES : Backend_store_s) = struct
       Ok ent
 
   let get_checker entity =
-    let auth_rules =
+    let ( let* ) = Result.bind in
+    let* auth_rules =
       Role_set.elements entity.Entity.roles
       |> List.map (fun r -> `Role r)
       |> List.cons (`Uniq entity.Entity.uuid)
       |> List.map BES.get_perms
-      |> List.flatten
+      |> List.fold_left
+          (fun acc x ->
+            match acc, x with
+            | Ok acc, Ok perms ->
+              Ok(perms @ acc)
+            | Error err, _
+            | _, Error err ->
+              Error err)
+          (Ok[])
     in
+    Result.ok @@
     fun actor action ->
       let is_owner =
         match entity.Entity.owner with

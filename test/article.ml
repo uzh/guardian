@@ -31,7 +31,7 @@ let to_entity =
 let update_title (actor: [`User | `Article] Ocaml_authorize.Entity.t) t new_title =
   let ( let* ) = Result.bind in
   let* ent = to_entity t in
-  let can = Ocauth_store.get_checker ent in
+  let* can = Ocauth_store.get_checker ent in
   if can actor `Update
   then let _ = t.title <- new_title in Ok t
   else Error "Insufficient access"

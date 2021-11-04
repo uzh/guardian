@@ -19,16 +19,83 @@ let aron_article =
     ~uuid:(Uuidm.create `V4)
     ~author:aron
 
-let () =
-  print_endline "Users:";
-  print_endline (User.show chris);
-  print_endline (User.show aron);
-  print_endline (User.show ben);
-  print_endline "Articles:";
-  print_endline (Article.show chris_article);
-  print_endline (Article.show aron_article)
+let global_perms =
+  [ `Role "user", `Read, `Role "article"
+  ; `Role "admin", `Create, `Role "article"
+  ; `Role "admin", `Read, `Role "article"
+  ; `Role "admin", `Update, `Role "article"
+  ; `Role "admin", `Delete, `Role "article"
+  ]
 
 let ( let* ) = Result.bind
+
+let test_create_entity () =
+  Alcotest.(check (result unit string))
+    "Create an entity."
+    ( let* _aron_ent = User.to_entity aron in
+      let* _chris_ent = User.to_entity chris in
+      let* _ben_ent = Hacker.to_entity ben in
+      let* _chris_art_ent = Article.to_entity chris_article in
+      let* _aron_art_ent = Article.to_entity aron_article in
+      Ok()
+    )
+    (Ok())
+
+let test_grant_roles () =
+  Alcotest.(check (result unit string))
+    "Grant a role."
+    (Ocauth_store.grant_roles (snd aron) (Ocaml_authorize.Role_set.singleton "admin"))
+    (Ok())
+
+let test_check_roles () =
+  Alcotest.(check (result unit string))
+    "Check a user's roles."
+    ( let* roles = Ocauth_store.get_roles (snd aron) in
+      let expected = Ocaml_authorize.Role_set.of_list ["user"; "admin"] in
+      let diff =
+        Ocaml_authorize.Role_set.(
+          union (diff expected roles) (diff roles expected)
+          |> elements
+        )
+      in
+      if diff = []
+      then Ok()
+      else
+        let open Ocaml_authorize.Role_set in
+        let received = [%show: string list] (elements roles) in
+        let expected = [%show: string list] (elements expected) in
+        Error(
+          Printf.sprintf
+            "Got %s for roles of entity %s, but expected %s."
+            received
+            (Uuidm.to_string (snd aron))
+            expected)
+    )
+    (Ok())
+
+let test_push_perms () =
+  Alcotest.(check bool)
+    "Push global permissions."
+    (Result.is_ok
+       (Ocauth_store.put_perms global_perms))
+    true
+
+let test_read_perms () =
+  Alcotest.(check (result unit string))
+    "Read the global permissions we've just pushed."
+    ( let* perms = Ocauth_store.get_perms (`Role "article") in
+      let global_set = Ocaml_authorize.Authorizer.Auth_rule_set.of_list global_perms in
+      let retrieved_set = Ocaml_authorize.Authorizer.Auth_rule_set.of_list perms in
+      let diff = Ocaml_authorize.Authorizer.Auth_rule_set.diff global_set retrieved_set in
+      let diff' =
+        Ocaml_authorize.Authorizer.Auth_rule_set.elements diff
+        |> [%show: Ocaml_authorize.Authorizer.auth_rule list]
+      in
+      if Ocaml_authorize.Authorizer.Auth_rule_set.compare global_set retrieved_set = 0
+      then Ok ()
+      else Error(Printf.sprintf "Permissions diff: %s." diff')
+    )
+    (Ok())
 
 let test_update_owned () =
   Alcotest.(check bool)
@@ -92,27 +159,23 @@ let article_cannot_update_other_article () =
     true *)
 
 let return =
-  let* () = Ocauth_store.grant_roles (snd aron) (Ocaml_authorize.Role_set.singleton "admin") in
-  let* () =
-    match
-      Ocauth_store.put_perms
-        [ `Role "user", `Read, `Role "article"
-        ; `Role "admin", `Create, `Role "article"
-        ; `Role "admin", `Read, `Role "article"
-        ; `Role "admin", `Update, `Role "article"
-        ; `Role "admin", `Delete, `Role "article"
-        ]
-    with
-    | Ok perms ->
-      let () = print_endline "Successfully put some perms: " in
-      let () = print_endline ([%show: Ocaml_authorize.Authorizer.auth_rule list] perms) in
-      Ok ()
-    | Error _ ->
-      Error "Failed to put some perms"
-  in
-  let _ =
+  let () =
     Alcotest.run "Authorization"
-      [ ( "Admins should be able to do everything."
+      [ ( "Managing entities."
+        , [ Alcotest.test_case "Create an entity." `Quick test_create_entity
+          ]
+        )
+      ; ( "Managing roles."
+        , [ Alcotest.test_case "Grant a role." `Quick test_grant_roles
+          ; Alcotest.test_case "Check roles." `Quick test_check_roles
+          ]
+        )
+      ; ( "Managing authorization rules."
+        , [ Alcotest.test_case "Push rules." `Quick test_push_perms
+          ; Alcotest.test_case "Read rules." `Quick test_read_perms
+          ]
+        )
+      ; ( "Admins should be able to do everything."
         , [ Alcotest.test_case "Update someone else's article." `Quick test_admin_update_others'
           ]
         )

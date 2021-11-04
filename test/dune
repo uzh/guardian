@@ -19,5 +19,4 @@
   (action
     (progn
       (run chmod u+w test_db.sqlite3)
-      (run %{test} -e)
-    )))
+      (run %{test} -e))))
