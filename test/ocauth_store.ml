@@ -121,6 +121,60 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
         stmt
     in
     return_rc (Sqlite3.step stmt)
+  let delete_perm ((actor, action, target): Ocaml_authorize.Authorizer.auth_rule) =
+    match actor, target with
+    | `Uniq aid, `Uniq tid ->
+      let stmt = "DELETE FROM rules WHERE actor_id=? AND act=? AND target_id=?" in
+      let stmt = Sqlite3.prepare db stmt in
+      let* () =
+        return_rc
+          Sqlite3.(bind_values
+            stmt
+            Data.[
+              TEXT (Uuidm.to_string aid)
+            ; TEXT (Ocaml_authorize.Action.to_string action)
+            ; TEXT (Uuidm.to_string tid)])
+      in
+      return_rc(Sqlite3.step stmt)
+    | `Uniq aid, `Role trole ->
+      let stmt = "DELETE FROM rules WHERE actor_id=? AND act=? AND target_role=?" in
+      let stmt = Sqlite3.prepare db stmt in
+      let* () =
+        return_rc
+          Sqlite3.(bind_values
+            stmt
+            Data.[
+              TEXT (Uuidm.to_string aid)
+            ; TEXT (Ocaml_authorize.Action.to_string action)
+            ; TEXT trole])
+      in
+      return_rc(Sqlite3.step stmt)
+    | `Role arole, `Uniq tid ->
+      let stmt = "DELETE FROM rules WHERE actor_role=? AND act=? AND target_id=?" in
+      let stmt = Sqlite3.prepare db stmt in
+      let* () =
+        return_rc
+          Sqlite3.(bind_values
+            stmt
+            Data.[
+              TEXT arole
+            ; TEXT (Ocaml_authorize.Action.to_string action)
+            ; TEXT (Uuidm.to_string tid)])
+      in
+      return_rc(Sqlite3.step stmt)
+    | `Role arole, `Role trole ->
+      let stmt = "DELETE FROM rules WHERE actor_role=? AND act=? AND target_role=?" in
+      let stmt = Sqlite3.prepare db stmt in
+      let* () =
+        return_rc
+          Sqlite3.(bind_values
+            stmt
+            Data.[
+              TEXT arole
+            ; TEXT (Ocaml_authorize.Action.to_string action)
+            ; TEXT trole])
+      in
+      return_rc(Sqlite3.step stmt)
 
   let get_perms spec =
     let* stmt =

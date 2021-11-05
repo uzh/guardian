@@ -5,6 +5,8 @@ module type Backend_store_s = sig
 
   val put_perm : Authorizer.auth_rule -> (unit, string) result
 
+  val delete_perm : Authorizer.auth_rule -> (unit, string) result
+
   val grant_roles : Uuidm.t -> Role_set.t -> (unit, string) result
 
   val create_entity : ?id:Uuidm.t -> Role_set.t -> (unit, string) result

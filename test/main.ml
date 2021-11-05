@@ -19,7 +19,9 @@ let aron_article =
     ~uuid:(Uuidm.create `V4)
     ~author:aron
 
-let global_perms =
+let bad_perm = `Uniq (snd chris), `Update, `Uniq (aron_article.uuid)
+
+let global_perms: Ocaml_authorize.Authorizer.auth_rule list =
   [ `Role "user", `Read, `Role "article"
   ; `Role "admin", `Create, `Role "article"
   ; `Role "admin", `Read, `Role "article"
@@ -40,6 +42,15 @@ let test_create_entity () =
       Ok()
     )
     (Ok())
+
+let test_get_entity () =
+  Alcotest.(check bool)
+    "Fetch an entity."
+    ( match Ocauth_store.get_entity ~typ:`User (snd aron) with
+      | Ok(_) -> true
+      | Error _ -> false
+    )
+    true
 
 let test_grant_roles () =
   Alcotest.(check (result unit string))
@@ -94,6 +105,27 @@ let test_read_perms () =
       if Ocaml_authorize.Authorizer.Auth_rule_set.compare global_set retrieved_set = 0
       then Ok ()
       else Error(Printf.sprintf "Permissions diff: %s." diff')
+    )
+    (Ok())
+let test_drop_perms () =
+  Alcotest.(check (result unit string))
+    "Read the global permissions we've just pushed."
+    ( let* () = Ocauth_store.put_perm bad_perm in
+      let* perms = Ocauth_store.get_perms (`Uniq aron_article.uuid) in
+      let* () =
+        match perms with
+        | [perm] ->
+          if perm = bad_perm
+          then Ok()
+          else Error "Failed to push bad permission to test perm dropping."
+        | _ ->
+          Error "Invalid permissions."
+      in
+      let* () = Ocauth_store.delete_perm bad_perm in
+      let* perms' = Ocauth_store.get_perms (`Uniq aron_article.uuid) in
+      match perms' with
+      | [] -> Ok()
+      | _ -> Error "Failed to remove bad perm."
     )
     (Ok())
 
@@ -163,6 +195,7 @@ let return =
     Alcotest.run "Authorization"
       [ ( "Managing entities."
         , [ Alcotest.test_case "Create an entity." `Quick test_create_entity
+          ; Alcotest.test_case "Retrieve an entity." `Quick test_get_entity
           ]
         )
       ; ( "Managing roles."
@@ -172,6 +205,7 @@ let return =
         )
       ; ( "Managing authorization rules."
         , [ Alcotest.test_case "Push rules." `Quick test_push_perms
+          ; Alcotest.test_case "Drop rules." `Quick test_drop_perms
           ; Alcotest.test_case "Read rules." `Quick test_read_perms
           ]
         )
