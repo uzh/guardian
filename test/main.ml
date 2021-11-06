@@ -1,3 +1,9 @@
+module Article = Article.Make(Ocaml_authorize_backends.Sqlite3_backend)
+
+module Hacker = Hacker.Make(Ocaml_authorize_backends.Sqlite3_backend)
+
+module User = User.Make(Ocaml_authorize_backends.Sqlite3_backend)
+
 (* ensure that the `User` module conforms to the `Authorizable_entity` module type. *)
 let _ = (module User : Ocaml_authorize.Authorizer.Authorizable_entity)
 
@@ -46,7 +52,7 @@ let test_create_entity () =
 let test_get_entity () =
   Alcotest.(check bool)
     "Fetch an entity."
-    ( match Ocauth_store.get_entity ~typ:`User (snd aron) with
+    ( match Ocaml_authorize_backends.Sqlite3_backend.get_entity ~typ:`User (snd aron) with
       | Ok(_) -> true
       | Error _ -> false
     )
@@ -55,13 +61,13 @@ let test_get_entity () =
 let test_grant_roles () =
   Alcotest.(check (result unit string))
     "Grant a role."
-    (Ocauth_store.grant_roles (snd aron) (Ocaml_authorize.Role_set.singleton "admin"))
+    (Ocaml_authorize_backends.Sqlite3_backend.grant_roles (snd aron) (Ocaml_authorize.Role_set.singleton "admin"))
     (Ok())
 
 let test_check_roles () =
   Alcotest.(check (result unit string))
     "Check a user's roles."
-    ( let* roles = Ocauth_store.get_roles (snd aron) in
+    ( let* roles = Ocaml_authorize_backends.Sqlite3_backend.get_roles (snd aron) in
       let expected = Ocaml_authorize.Role_set.of_list ["user"; "admin"] in
       let diff =
         Ocaml_authorize.Role_set.(
@@ -88,13 +94,13 @@ let test_push_perms () =
   Alcotest.(check bool)
     "Push global permissions."
     (Result.is_ok
-       (Ocauth_store.put_perms global_perms))
+       (Ocaml_authorize_backends.Sqlite3_backend.put_perms global_perms))
     true
 
 let test_read_perms () =
   Alcotest.(check (result unit string))
     "Read the global permissions we've just pushed."
-    ( let* perms = Ocauth_store.get_perms (`Role "article") in
+    ( let* perms = Ocaml_authorize_backends.Sqlite3_backend.get_perms (`Role "article") in
       let global_set = Ocaml_authorize.Authorizer.Auth_rule_set.of_list global_perms in
       let retrieved_set = Ocaml_authorize.Authorizer.Auth_rule_set.of_list perms in
       let diff = Ocaml_authorize.Authorizer.Auth_rule_set.diff global_set retrieved_set in
@@ -110,8 +116,8 @@ let test_read_perms () =
 let test_drop_perms () =
   Alcotest.(check (result unit string))
     "Read the global permissions we've just pushed."
-    ( let* () = Ocauth_store.put_perm bad_perm in
-      let* perms = Ocauth_store.get_perms (`Uniq aron_article.uuid) in
+    ( let* () = Ocaml_authorize_backends.Sqlite3_backend.put_perm bad_perm in
+      let* perms = Ocaml_authorize_backends.Sqlite3_backend.get_perms (`Uniq aron_article.uuid) in
       let* () =
         match perms with
         | [perm] ->
@@ -121,8 +127,8 @@ let test_drop_perms () =
         | _ ->
           Error "Invalid permissions."
       in
-      let* () = Ocauth_store.delete_perm bad_perm in
-      let* perms' = Ocauth_store.get_perms (`Uniq aron_article.uuid) in
+      let* () = Ocaml_authorize_backends.Sqlite3_backend.delete_perm bad_perm in
+      let* perms' = Ocaml_authorize_backends.Sqlite3_backend.get_perms (`Uniq aron_article.uuid) in
       match perms' with
       | [] -> Ok()
       | _ -> Error "Failed to remove bad perm."
@@ -232,7 +238,7 @@ let return =
   Ok ()
 
 let () =
-  if Sqlite3.db_close Ocauth_store.db
+  if Sqlite3.db_close Ocaml_authorize_backends.Sqlite3_backend.db
   then
     match return with
     | Ok _ -> print_endline "returned successfully"

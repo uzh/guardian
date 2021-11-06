@@ -1,37 +1,48 @@
 module type Backend_store_s = sig
-  val get_roles : Uuidm.t -> (Role_set.t, string) result
+  val get_roles : Uuidm.t -> (Role_set.t, string) Lwt_result.t
 
-  val get_perms : Authorizer.actor_spec -> (Authorizer.auth_rule list, string) result
+  val get_perms : Authorizer.actor_spec -> (Authorizer.auth_rule list, string) Lwt_result.t
 
-  val put_perm : Authorizer.auth_rule -> (unit, string) result
+  val put_perm : Authorizer.auth_rule -> (unit, string) Lwt_result.t
 
-  val delete_perm : Authorizer.auth_rule -> (unit, string) result
+  val delete_perm : Authorizer.auth_rule -> (unit, string) Lwt_result.t
 
-  val grant_roles : Uuidm.t -> Role_set.t -> (unit, string) result
+  val grant_roles : Uuidm.t -> Role_set.t -> (unit, string) Lwt_result.t
 
-  val create_entity : ?id:Uuidm.t -> Role_set.t -> (unit, string) result
+  val create_entity : id:Uuidm.t -> ?owner:Uuidm.t -> Role_set.t -> (unit, string) Lwt_result.t
 
-  val mem_entity : Uuidm.t -> bool
+  val mem_entity : Uuidm.t -> bool Lwt.t
 
-  val get_owner : Uuidm.t -> (Uuidm.t option, string) result
+  val get_owner : Uuidm.t -> (Uuidm.t option, string) Lwt_result.t
 
-  val set_owner : Uuidm.t -> owner:Uuidm.t -> (unit, string) result
+  val set_owner : Uuidm.t -> owner:Uuidm.t -> (unit, string) Lwt_result.t
 end
 
-module Make(BES : Backend_store_s) = struct
+module type S = sig
+  include Backend_store_s
+  val get_entity : typ:'kind -> Uuidm.t -> ('kind Entity.t, string) Lwt_result.t
+  val put_perms : Authorizer.auth_rule list -> (Authorizer.auth_rule list, Authorizer.auth_rule list) Lwt_result.t
+  val decorate_to_entity : ('a -> 'kind Entity.t) -> 'a -> ('kind Entity.t, string) Lwt_result.t
+  val get_checker :
+    'a Entity.t ->
+    ('b Entity.t -> Action.t -> bool, string) Lwt_result.t
+end
+
+let ( let* ) = Lwt_result.bind
+
+module Make(BES : Backend_store_s) : S = struct
   include BES
   let get_entity ~(typ : 'kind) id =
-    if BES.mem_entity id
+    if%lwt BES.mem_entity id
     then
-      let ( let* ) = Result.bind in
       let* roles = BES.get_roles id in
       (** TODO: owner *)
       (* let* owner_id = BES.get_owner id in
          let* owner_roles = BES.get_roles owner_id in
          let* owner = get_entity ~typ:() owner_id in *)
-      Ok(Entity.make ~roles ~typ id)
+      Lwt.return(Ok(Entity.make ~roles ~typ id))
     else
-      Error(Printf.sprintf "Entity %s doesn't exist." (Uuidm.to_string id))
+      Lwt.return(Error(Printf.sprintf "Entity %s doesn't exist." (Uuidm.to_string id)))
 
   (** [put_perms perms] adds all the permissions [perms] to the backend. If
       there is an error at any point, it returns a `result` containing all of
@@ -39,16 +50,16 @@ module Make(BES : Backend_store_s) = struct
   let put_perms perms =
     List.fold_left
       (fun acc x ->
-         match acc with
+         match%lwt acc with
          | Ok acc' ->
-           begin match BES.put_perm x with
-             | Ok() -> Ok(x :: acc')
-             | Error _ -> Error [x]
+           begin match%lwt BES.put_perm x with
+             | Ok() -> Lwt.return_ok(x :: acc')
+             | Error _ -> Lwt.return_error[x]
            end
          | Error xs ->
-           Error(x :: xs)
+           Lwt.return_error(x :: xs)
       )
-      (Ok [])
+      (Lwt.return_ok [])
       perms
 
   (** This convenience function should be used to decorate the [to_entity]
@@ -58,39 +69,42 @@ module Make(BES : Backend_store_s) = struct
   *)
   let decorate_to_entity
       (to_entity : 'a -> 'kind Entity.t)
-    : 'a -> ('kind Entity.t, string) result =
+    : 'a -> ('kind Entity.t, string) Lwt_result.t =
     fun x ->
     let (ent : 'kind Entity.t) = to_entity x in
     let uuid = ent.uuid in
-    let ( let* ) = Result.bind in
-    if BES.mem_entity ent.uuid
+    if%lwt BES.mem_entity ent.uuid
     then
       let* ent' = get_entity ~typ:ent.typ ent.uuid in
       let roles = Role_set.union ent.roles ent'.roles in
       let* () = BES.grant_roles uuid roles in
-      Result.Ok Entity.{uuid; roles; owner = ent.owner; typ = ent.typ}
+      Lwt.return_ok Entity.{uuid; roles; owner = ent.owner; typ = ent.typ}
     else
       let* () = BES.create_entity ~id:uuid ent.roles in
-      Ok ent
+      Lwt.return_ok ent
 
   let get_checker entity =
-    let ( let* ) = Result.bind in
-    let* auth_rules =
+    let auth_rules =
       Role_set.elements entity.Entity.roles
       |> List.map (fun r -> `Role r)
       |> List.cons (`Uniq entity.Entity.uuid)
       |> List.map BES.get_perms
-      |> List.fold_left
-          (fun acc x ->
-            match acc, x with
-            | Ok acc, Ok perms ->
-              Ok(perms @ acc)
-            | Error err, _
-            | _, Error err ->
-              Error err)
-          (Ok[])
     in
-    Result.ok @@
+    let* auth_rules =
+      List.fold_left
+        (fun acc x ->
+          let%lwt x = x in
+          let%lwt acc = acc in
+          match acc, x with
+          | Ok acc, Ok perms ->
+            Lwt.return_ok(perms @ acc)
+          | Error err, _
+          | _, Error err ->
+            Lwt.return_error err)
+        (Lwt.return_ok [])
+        auth_rules
+    in
+    Lwt.return_ok @@
     fun actor action ->
       let is_owner =
         match entity.Entity.owner with

@@ -1,20 +1,29 @@
+let ( let* ) = Lwt_result.bind
+
+(** TODO: generalize this. right now it's fine because this backend should
+    really only be used for testing purposes, but in the future it would be
+    nice to have actual sqlite3 support. *)
 let db = Sqlite3.db_open "test_db.sqlite3"
 
-let ( let* ) = Result.bind
-
 module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
-  let return_rc = function
-    | Sqlite3.Rc.OK | DONE | ROW -> Ok()
-    | rc -> Error(Sqlite3.Rc.to_string rc)
+  let lwt_return_rc = function
+    | Sqlite3.Rc.OK | DONE | ROW -> Lwt.return_ok()
+    | rc -> Lwt.return_error(Sqlite3.Rc.to_string rc)
 
-  let create_entity ?(id = Uuidm.create `V4) roles =
-    let stmt = Sqlite3.prepare db "INSERT INTO entities (id, roles) VALUES (?, ?)" in
+  let create_entity ~id ?(owner : Uuidm.t option) roles : (unit, string) Lwt_result.t =
+    let stmt = Sqlite3.prepare db "INSERT INTO entities (id, roles, parent) VALUES (?, ?, ?)" in
     let roles' = Ocaml_authorize.Role_set.to_yojson roles |> Yojson.Safe.to_string in
-    let _ =
+    let* () =
       let open Sqlite3 in
-      bind_values stmt [Data.TEXT (Uuidm.to_string id); Data.TEXT roles']
+      bind_values
+        stmt
+        [ Data.TEXT (Uuidm.to_string id)
+        ; Data.TEXT roles'
+        ; Data.opt_text (Option.map Uuidm.to_string owner)
+        ]
+      |> lwt_return_rc
     in
-    return_rc (Sqlite3.step stmt)
+    lwt_return_rc(Sqlite3.step stmt)
 
   let get_roles id =
     let id' = Uuidm.to_string id in
@@ -27,12 +36,13 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
       let open Sqlite3 in
       bind_values stmt [Data.TEXT id']
     in
-    let* () = return_rc(Sqlite3.step stmt) in
+    let* () = lwt_return_rc(Sqlite3.step stmt) in
     match String.trim(Sqlite3.column_text stmt 0) with
-    | "" -> Ok(Ocaml_authorize.Role_set.empty)
+    | "" -> Lwt.return_ok(Ocaml_authorize.Role_set.empty)
     | coltext ->
       Yojson.Safe.from_string coltext
       |> Ocaml_authorize.Role_set.of_yojson
+      |> Lwt.return
   let get_owner id =
     let id' = Uuidm.to_string id in
     let stmt =
@@ -40,17 +50,16 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
         db
         "SELECT owner FROM entities WHERE id = :id"
     in
-    let ( let* ) = Result.bind in
     let* () =
       let open Sqlite3 in
       let _ = bind_name stmt "id" (Data.TEXT id') in
-      return_rc(finalize stmt)
+      lwt_return_rc(finalize stmt)
     in
     match Sqlite3.column_text stmt 0 |> Uuidm.of_string with
-    | Some uuid -> Ok(Some uuid)
-    | None -> Error("Failed to parse UUID")
+    | Some uuid -> Lwt.return_ok(Some uuid)
+    | None -> Lwt.return_error("Failed to parse UUID")
 
-  let put_perm (actor, action, target) =
+  let put_perm ((actor, action, target): Ocaml_authorize.Authorizer.auth_rule) =
     let action' = Ocaml_authorize.Action.to_string action in
     let stmt =
       let open Sqlite3 in
@@ -120,14 +129,14 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
         in
         stmt
     in
-    return_rc (Sqlite3.step stmt)
+    lwt_return_rc (Sqlite3.step stmt)
   let delete_perm ((actor, action, target): Ocaml_authorize.Authorizer.auth_rule) =
     match actor, target with
     | `Uniq aid, `Uniq tid ->
       let stmt = "DELETE FROM rules WHERE actor_id=? AND act=? AND target_id=?" in
       let stmt = Sqlite3.prepare db stmt in
       let* () =
-        return_rc
+        lwt_return_rc
           Sqlite3.(bind_values
             stmt
             Data.[
@@ -135,12 +144,12 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
             ; TEXT (Ocaml_authorize.Action.to_string action)
             ; TEXT (Uuidm.to_string tid)])
       in
-      return_rc(Sqlite3.step stmt)
+      lwt_return_rc(Sqlite3.step stmt)
     | `Uniq aid, `Role trole ->
       let stmt = "DELETE FROM rules WHERE actor_id=? AND act=? AND target_role=?" in
       let stmt = Sqlite3.prepare db stmt in
       let* () =
-        return_rc
+        lwt_return_rc
           Sqlite3.(bind_values
             stmt
             Data.[
@@ -148,12 +157,12 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
             ; TEXT (Ocaml_authorize.Action.to_string action)
             ; TEXT trole])
       in
-      return_rc(Sqlite3.step stmt)
+      lwt_return_rc(Sqlite3.step stmt)
     | `Role arole, `Uniq tid ->
       let stmt = "DELETE FROM rules WHERE actor_role=? AND act=? AND target_id=?" in
       let stmt = Sqlite3.prepare db stmt in
       let* () =
-        return_rc
+        lwt_return_rc
           Sqlite3.(bind_values
             stmt
             Data.[
@@ -161,12 +170,12 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
             ; TEXT (Ocaml_authorize.Action.to_string action)
             ; TEXT (Uuidm.to_string tid)])
       in
-      return_rc(Sqlite3.step stmt)
+      lwt_return_rc(Sqlite3.step stmt)
     | `Role arole, `Role trole ->
       let stmt = "DELETE FROM rules WHERE actor_role=? AND act=? AND target_role=?" in
       let stmt = Sqlite3.prepare db stmt in
       let* () =
-        return_rc
+        lwt_return_rc
           Sqlite3.(bind_values
             stmt
             Data.[
@@ -174,7 +183,7 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
             ; TEXT (Ocaml_authorize.Action.to_string action)
             ; TEXT trole])
       in
-      return_rc(Sqlite3.step stmt)
+      lwt_return_rc(Sqlite3.step stmt)
 
   let get_perms spec =
     let* stmt =
@@ -185,16 +194,16 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
           "SELECT act, actor_id, actor_role FROM rules WHERE target_id = ?"
           |> prepare db
         in
-        let* () = return_rc(bind_values stmt [Data.TEXT(Uuidm.to_string uuidm)]) in
-        Ok stmt
+        let* () = lwt_return_rc(bind_values stmt [Data.TEXT(Uuidm.to_string uuidm)]) in
+        Lwt.return_ok stmt
       | `Role role ->
         let stmt =
           "SELECT act, actor_id, actor_role FROM rules WHERE target_role = ?"
           |> prepare db
         in
         let () = Printf.printf "Searching for role: %s\n" role in
-        let* () = return_rc(bind_values stmt [Data.TEXT role]) in
-        Ok stmt
+        let* () = lwt_return_rc(bind_values stmt [Data.TEXT role]) in
+        Lwt.return_ok stmt
     in
     let rc, rv =
       Sqlite3.fold
@@ -219,8 +228,8 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
           )
         ~init:[]
     in
-    let* () = return_rc rc in
-    Ok rv
+    let* () = lwt_return_rc rc in
+    Lwt.return_ok rv
 
   let mem_entity id =
     let stmt =
@@ -234,6 +243,7 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
     in
     let (_, rv) = Sqlite3.fold stmt ~f:(fun _acc _row -> Some true) ~init:None in
     Option.value rv ~default:false
+    |> Lwt.return
 
   let grant_roles id roles =
     let id' = Uuidm.to_string id in
@@ -242,18 +252,18 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
       Ocaml_authorize.Role_set.union pre_roles roles
       |> Ocaml_authorize.Role_set.to_yojson
       |> Yojson.Safe.to_string
-      |> Result.ok
+      |> Lwt.return_ok
     in
     let* stmt =
-      if mem_entity id
-      then Ok(Sqlite3.prepare db "UPDATE entities SET roles = ? WHERE id = ?")
-      else Error("Cannot grant a role to an entity which doesn't exist.")
+      if%lwt mem_entity id
+      then Lwt.return_ok(Sqlite3.prepare db "UPDATE entities SET roles = ? WHERE id = ?")
+      else Lwt.return_error "Cannot grant a role to an entity which doesn't exist."
     in
     let () =
       let open Sqlite3 in
       ignore(bind_values stmt Data.[TEXT roles'; TEXT id'])
     in
-    return_rc(Sqlite3.step stmt)
+    lwt_return_rc(Sqlite3.step stmt)
   let set_owner id ~owner =
     let id' = Uuidm.to_string id in
     let owner' = Uuidm.to_string owner in
@@ -263,7 +273,7 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
       let _ = bind_name stmt "id" (Data.TEXT id') in
       ignore(bind_name stmt "owner" (Data.TEXT owner'))
     in
-    return_rc(Sqlite3.finalize stmt)
+    lwt_return_rc(Sqlite3.finalize stmt)
 end
 
 include Ocaml_authorize.Persistence.Make(Backend)
