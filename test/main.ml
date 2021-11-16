@@ -36,13 +36,12 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
     ; `Role "admin", `Delete, `Role "article"
     ]
 
-  let ( let* ) = Result.bind
+  let ( let* ) = Lwt_result.bind
 
   let (>|=) = Lwt.Infix.(>|=)
 
   let test_create_entity _ () =
-    ( let ( let* ) = Lwt_result.bind in
-      let* _aron_ent = User.to_entity aron in
+    ( let* _aron_ent = User.to_entity aron in
       let* _chris_ent = User.to_entity chris in
       let* _ben_ent = Hacker.to_entity ben in
       let* _chris_art_ent = Article.to_entity chris_article in
@@ -57,7 +56,7 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
   let test_get_entity _ () =
     ( match%lwt Backend.get_entity ~typ:`User (snd aron) with
       | Ok(_) -> Lwt.return_true
-      | Error _ -> Lwt.return_false
+      | Error err -> raise(Failure err)
     )
     >|=
     Alcotest.(check bool)
@@ -72,8 +71,7 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       (Ok())
 
   let test_check_roles _ () =
-    ( let ( let* ) = Lwt_result.bind in
-      let* roles = Backend.get_roles (snd aron) in
+    ( let* roles = Backend.get_roles (snd aron) in
       let expected = Ocaml_authorize.Role_set.of_list ["user"; "admin"] in
       let diff =
         Ocaml_authorize.Role_set.(
@@ -109,8 +107,7 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       true
 
   let test_read_perms _ () =
-    ( let ( let* ) = Lwt_result.bind in
-      let* perms = Backend.get_perms (`Role "article") in
+    ( let* perms = Backend.get_perms (`Role "article") in
       let global_set = Ocaml_authorize.Authorizer.Auth_rule_set.of_list global_perms in
       let retrieved_set = Ocaml_authorize.Authorizer.Auth_rule_set.of_list perms in
       let diff = Ocaml_authorize.Authorizer.Auth_rule_set.diff global_set retrieved_set in
@@ -127,8 +124,7 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       "Read the global permissions we've just pushed."
       (Ok())
   let test_drop_perms _ () =
-    ( let ( let* ) = Lwt_result.bind in
-      let* () = Backend.put_perm bad_perm in
+    ( let* () = Backend.put_perm bad_perm in
       let* perms = Backend.get_perms (`Uniq aron_article.uuid) in
       let* () =
         match perms with
@@ -170,8 +166,8 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       | Ok aron_ent ->
         let%lwt res = Article.update_title aron_ent chris_article "Updated Title" in
         Lwt.return(Result.is_ok res)
-      | Error _ ->
-        Lwt.return false
+      | Error err ->
+        raise(Failure err)
     )
     >|=
     Alcotest.(check bool)
@@ -184,8 +180,8 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       | Ok chris_ent ->
         let%lwt res = Article.update_title chris_ent aron_article "Updated Title" in
         Lwt.return(Result.is_error res)
-      | Error _ ->
-        Lwt.return false
+      | Error err ->
+        raise(Failure err)
     )
     >|=
     Alcotest.(check bool)
@@ -198,8 +194,8 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       | Ok chris_article_entity ->
         let%lwt res = Article.update_title chris_article_entity chris_article "Updated Title" in
         Lwt.return(Result.is_ok res)
-      | Error _ ->
-        Lwt.return_false
+      | Error err ->
+        raise(Failure err)
     )
     >|=
     Alcotest.(check bool)
@@ -212,13 +208,34 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       | Ok chris_article_entity ->
         let%lwt res = Article.update_title chris_article_entity aron_article "Updated Title" in
         Lwt.return(Result.is_error res)
-      | Error _ ->
-        Lwt.return_false
+      | Error err ->
+        raise(Failure err)
     )
     >|=
     Alcotest.(check bool)
       "Article cannot update another article."
       true
+
+  let set_owner _ () =
+    ( let* aron_entity = User.to_entity aron in
+      let* chris_article' = Article.update_author aron_entity chris_article aron in
+      let* () =
+        if chris_article'.author <> chris
+          then Lwt.return_ok()
+          else Lwt_result.fail "Article didn't update"
+      in
+      let* chris_entity = User.to_entity chris in
+      let%lwt should_fail = Article.update_title chris_entity chris_article "Shouldn't work" in
+      match should_fail with
+      | Ok _ -> Lwt.return_error "Failed to set new owner"
+      | Error _ ->
+        let* _ = Article.update_author aron_entity chris_article chris in
+        Lwt_result.return true
+    )
+    >|=
+    Alcotest.(check (result bool string))
+      "Article cannot update another article."
+      (Ok true)
 
   (** IMPORTANT: the following tests should not compile! *)
   (* let hacker_cannot_update_article () =
@@ -272,6 +289,10 @@ let return =
       , [ Alcotest_lwt.test_case "Cannot update" `Quick T.cannot_update
         ; Alcotest_lwt.test_case "Cannot update" `Quick T.article_cannot_update_other_article
           (* ; Alcotest.test_case "Cannot update" `Quick hacker_cannot_update_article *)
+        ]
+      )
+    ; ( Printf.sprintf "(%s) Managing ownership." name
+      , [ Alcotest_lwt.test_case "Set owner" `Quick T.set_owner
         ]
       )
     ]

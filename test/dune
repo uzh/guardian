@@ -37,6 +37,8 @@
  (action
   (progn
    ; TODO: automate setting up the docker instance for the MariaDB.
+   ; for now, just use the default MariaDB docker image from the repo with this command:
+   ; docker run -p 127.0.0.1:3306:3306  --name mariadb-ocaml-authorize-test -e MARIADB_ROOT_PASSWORD=my-secret-pw -d mariadb:tag
    ; Set up the MariaDB
    (run
     docker

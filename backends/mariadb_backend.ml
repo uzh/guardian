@@ -144,8 +144,24 @@ include Ocaml_authorize.Persistence.Make(struct
     | Ok None -> Lwt.return_false
     | Error err -> raise(Failure(Caqti_error.show err))
 
-  let get_owner _id =
-    Lwt.return_error "unimplemented get_owner"
-  let set_owner _id ~owner:_ =
-    Lwt.return_error "unimplemented set_owner"
+  let get_owner id =
+    let caqti =
+      Caqti_request.find
+        Caqti_type.string
+        Caqti_type.(option string)
+        "SELECT parent FROM entities WHERE id = ?"
+    in
+    match%lwt Db.find caqti (Uuidm.to_string id) with
+    | Ok s -> Lwt.return_ok(Option.bind s Uuidm.of_string)
+    | Error err -> Lwt.return_error(Caqti_error.show err)
+
+  let set_owner id ~owner =
+    let caqti =
+      Caqti_request.exec
+        Caqti_type.(tup2 string string)
+        "UPDATE entities SET parent = ? WHERE id = ?"
+    in
+    match%lwt Db.exec caqti Uuidm.(to_string owner, to_string id) with
+    | Ok _ -> Lwt.return_ok()
+    | Error err -> Lwt_result.fail(Caqti_error.show err)
 end)

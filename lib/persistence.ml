@@ -32,15 +32,33 @@ let ( let* ) = Lwt_result.bind
 
 module Make(BES : Backend_store_s) : S = struct
   include BES
+  let rec get_typeless_entity id : (unit Entity.t, string) Lwt_result.t =
+    if%lwt BES.mem_entity id
+      then
+        let* roles = BES.get_roles id in
+        let* owner_id = BES.get_owner id in
+        let* owner =
+          match owner_id with
+          | Some owner_id' ->
+            let* x = get_typeless_entity owner_id' in
+            Lwt.return_ok(Some x)
+          | None ->
+            Lwt.return_ok(None)
+        in
+        Lwt.return_ok(Entity.make ~roles ~typ:() ?owner id)
+      else
+        Lwt.return(Error(Printf.sprintf "Entity %s doesn't exist." (Uuidm.to_string id)))
   let get_entity ~(typ : 'kind) id =
     if%lwt BES.mem_entity id
     then
       let* roles = BES.get_roles id in
-      (** TODO: owner *)
-      (* let* owner_id = BES.get_owner id in
-         let* owner_roles = BES.get_roles owner_id in
-         let* owner = get_entity ~typ:() owner_id in *)
-      Lwt.return(Ok(Entity.make ~roles ~typ id))
+      let* owner_id = BES.get_owner id in
+      let* owner =
+        match owner_id with
+        | Some owner_id' -> Lwt_result.map (Option.some) (get_typeless_entity owner_id')
+        | None -> Lwt_result.return(None)
+      in
+      Lwt.return(Ok(Entity.make ~roles ~typ ?owner id))
     else
       Lwt.return(Error(Printf.sprintf "Entity %s doesn't exist." (Uuidm.to_string id)))
 
@@ -78,7 +96,24 @@ module Make(BES : Backend_store_s) : S = struct
       let* ent' = get_entity ~typ:ent.typ ent.uuid in
       let roles = Role_set.union ent.roles ent'.roles in
       let* () = BES.grant_roles uuid roles in
-      Lwt.return_ok Entity.{uuid; roles; owner = ent.owner; typ = ent.typ}
+      let* owner =
+        match ent.owner, ent'.owner with
+        | Some owner, None ->
+          let* () = BES.set_owner ent.uuid ~owner:owner.uuid in
+          Lwt.return_ok(Some owner)
+        | None, Some owner ->
+          Lwt.return_ok(Some owner)
+        | None, None ->
+          Lwt.return_ok None
+        | Some x, Some y when x <> y ->
+          Lwt_result.fail(
+            "decorate_to_entity: both the database and the decorated function \
+              returned distinct values for the owner of entity "
+            ^ Uuidm.to_string ent.uuid)
+        | Some x, Some _ (* when x = y *) ->
+          Lwt.return_ok(Some x)
+      in
+      Lwt.return_ok Entity.{uuid; roles; owner; typ = ent.typ}
     else
       let* () = BES.create_entity ~id:uuid ent.roles in
       Lwt.return_ok ent

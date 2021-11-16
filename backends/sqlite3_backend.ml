@@ -43,21 +43,23 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
       Yojson.Safe.from_string coltext
       |> Ocaml_authorize.Role_set.of_yojson
       |> Lwt.return
+
   let get_owner id =
     let id' = Uuidm.to_string id in
     let stmt =
       Sqlite3.prepare
         db
-        "SELECT owner FROM entities WHERE id = :id"
+        "SELECT parent FROM entities WHERE id = ?"
     in
     let* () =
       let open Sqlite3 in
-      let _ = bind_name stmt "id" (Data.TEXT id') in
-      lwt_return_rc(finalize stmt)
+      let _ = bind_values stmt [Data.TEXT id'] in
+      lwt_return_rc(step stmt)
     in
-    match Sqlite3.column_text stmt 0 |> Uuidm.of_string with
+    let raw = Sqlite3.column_text stmt 0 in
+    match Uuidm.of_string raw with
     | Some uuid -> Lwt.return_ok(Some uuid)
-    | None -> Lwt.return_error("Failed to parse UUID")
+    | None -> Lwt.return_ok(None)
 
   let put_perm ((actor, action, target): Ocaml_authorize.Authorizer.auth_rule) =
     let action' = Ocaml_authorize.Action.to_string action in
@@ -267,13 +269,12 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
   let set_owner id ~owner =
     let id' = Uuidm.to_string id in
     let owner' = Uuidm.to_string owner in
-    let stmt = Sqlite3.prepare db "UPDATE entities SET owner = :owner WHERE id = :id" in
+    let stmt = Sqlite3.prepare db "UPDATE entities SET parent = ? WHERE id = ?" in
     let () =
       let open Sqlite3 in
-      let _ = bind_name stmt "id" (Data.TEXT id') in
-      ignore(bind_name stmt "owner" (Data.TEXT owner'))
+      ignore(bind_values stmt Data.[TEXT owner'; TEXT id'])
     in
-    lwt_return_rc(Sqlite3.finalize stmt)
+    lwt_return_rc(Sqlite3.step stmt)
 end
 
 include Ocaml_authorize.Persistence.Make(Backend)

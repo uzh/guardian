@@ -40,4 +40,16 @@ module Make(P : Ocaml_authorize.Persistence.S) = struct
     if can actor `Update
     then let _ = t.title <- new_title in Lwt.return_ok t
     else Lwt.return_error "Insufficient access"
-  end
+
+  let update_author (actor: [`User] Ocaml_authorize.Entity.t) t new_author =
+    let ( let* ) = Lwt_result.bind in
+    let* ent = to_entity t in
+    let* can = P.get_checker ent in
+    if can actor `Update
+    then
+      let _ = t.author <- new_author in
+      let* () = P.set_owner ent.uuid ~owner:(snd new_author) in
+      Lwt.return_ok t
+    else
+      Lwt.return_error "Insufficient access"
+end
