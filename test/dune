@@ -36,6 +36,8 @@
  (deps article.ml hacker.ml test_db.sqlite3 main.ml user.ml)
  (action
   (progn
+   ; TODO: automate setting up the docker instance for the MariaDB.
+   ; Set up the MariaDB
    (run
     docker
     exec
@@ -53,6 +55,8 @@
      "bash"
      "-c"
      "mysql --password=my-secret-pw authorization"))
+   ; Set up the SQLite3 database
+   (run chmod u+w test_db.sqlite3)
    (with-accepted-exit-codes ; because we still need to cleanup if the tests fail
     (or 0 1)
     (run %{test} -e))
