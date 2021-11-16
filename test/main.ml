@@ -298,7 +298,11 @@ let return =
     ]
   in
   let test_cases =
-    make_test_cases (module Ocaml_authorize_backends.Mariadb_backend) "MariadDB Backend"
+    let module Maria =
+      (val Ocaml_authorize_backends.Mariadb_backend.make
+        "mariadb://root:my-secret-pw@127.0.0.1:3306/authorization")
+    in
+    make_test_cases (module Maria) "MariadDB Backend"
     @ make_test_cases (module Ocaml_authorize_backends.Sqlite3_backend) "SQLite3 Backend"
   in
   let () = Lwt_main.run @@ Alcotest_lwt.run "Authorization" test_cases in
