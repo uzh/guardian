@@ -1,8 +1,10 @@
-module Article = Article.Make(Ocaml_authorize_backends.Sqlite3_backend)
+module Backend = Ocaml_authorize_backends.Mariadb_backend
 
-module Hacker = Hacker.Make(Ocaml_authorize_backends.Sqlite3_backend)
+module Article = Article.Make(Backend)
 
-module User = User.Make(Ocaml_authorize_backends.Sqlite3_backend)
+module Hacker = Hacker.Make(Backend)
+
+module User = User.Make(Backend)
 
 (* ensure that the `User` module conforms to the `Authorizable_entity` module type. *)
 let _ = (module User : Ocaml_authorize.Authorizer.Authorizable_entity)
@@ -37,147 +39,186 @@ let global_perms: Ocaml_authorize.Authorizer.auth_rule list =
 
 let ( let* ) = Result.bind
 
-let test_create_entity () =
+let (>|=) = Lwt.Infix.(>|=)
+
+let test_create_entity _ () =
+  ( let ( let* ) = Lwt_result.bind in
+    let* _aron_ent = User.to_entity aron in
+    let* _chris_ent = User.to_entity chris in
+    let* _ben_ent = Hacker.to_entity ben in
+    let* _chris_art_ent = Article.to_entity chris_article in
+    let* _aron_art_ent = Article.to_entity aron_article in
+    Lwt.return_ok()
+  )
+  >|=
   Alcotest.(check (result unit string))
     "Create an entity."
-    ( let* _aron_ent = User.to_entity aron in
-      let* _chris_ent = User.to_entity chris in
-      let* _ben_ent = Hacker.to_entity ben in
-      let* _chris_art_ent = Article.to_entity chris_article in
-      let* _aron_art_ent = Article.to_entity aron_article in
-      Ok()
-    )
     (Ok())
 
-let test_get_entity () =
+let test_get_entity _ () =
+  ( match%lwt Backend.get_entity ~typ:`User (snd aron) with
+    | Ok(_) -> Lwt.return_true
+    | Error _ -> Lwt.return_false
+  )
+  >|=
   Alcotest.(check bool)
     "Fetch an entity."
-    ( match Ocaml_authorize_backends.Sqlite3_backend.get_entity ~typ:`User (snd aron) with
-      | Ok(_) -> true
-      | Error _ -> false
-    )
     true
 
-let test_grant_roles () =
+let test_grant_roles _ () =
+  (Backend.grant_roles (snd aron) (Ocaml_authorize.Role_set.singleton "admin"))
+  >|=
   Alcotest.(check (result unit string))
     "Grant a role."
-    (Ocaml_authorize_backends.Sqlite3_backend.grant_roles (snd aron) (Ocaml_authorize.Role_set.singleton "admin"))
     (Ok())
 
-let test_check_roles () =
+let test_check_roles _ () =
+  ( let ( let* ) = Lwt_result.bind in
+    let* roles = Backend.get_roles (snd aron) in
+    let expected = Ocaml_authorize.Role_set.of_list ["user"; "admin"] in
+    let diff =
+      Ocaml_authorize.Role_set.(
+        union (diff expected roles) (diff roles expected)
+        |> elements
+      )
+    in
+    if diff = []
+    then Lwt.return_ok()
+    else
+      let open Ocaml_authorize.Role_set in
+      let received = [%show: string list] (elements roles) in
+      let expected = [%show: string list] (elements expected) in
+      Lwt.return_error(
+        Printf.sprintf
+          "Got %s for roles of entity %s, but expected %s."
+          received
+          (Uuidm.to_string (snd aron))
+          expected)
+  )
+  >|=
   Alcotest.(check (result unit string))
     "Check a user's roles."
-    ( let* roles = Ocaml_authorize_backends.Sqlite3_backend.get_roles (snd aron) in
-      let expected = Ocaml_authorize.Role_set.of_list ["user"; "admin"] in
-      let diff =
-        Ocaml_authorize.Role_set.(
-          union (diff expected roles) (diff roles expected)
-          |> elements
-        )
-      in
-      if diff = []
-      then Ok()
-      else
-        let open Ocaml_authorize.Role_set in
-        let received = [%show: string list] (elements roles) in
-        let expected = [%show: string list] (elements expected) in
-        Error(
-          Printf.sprintf
-            "Got %s for roles of entity %s, but expected %s."
-            received
-            (Uuidm.to_string (snd aron))
-            expected)
-    )
     (Ok())
 
-let test_push_perms () =
+let test_push_perms _ () =
+  ( let%lwt res = Backend.put_perms global_perms in
+    Lwt.return(Result.is_ok res)
+  )
+  >|=
   Alcotest.(check bool)
     "Push global permissions."
-    (Result.is_ok
-       (Ocaml_authorize_backends.Sqlite3_backend.put_perms global_perms))
     true
 
-let test_read_perms () =
+let test_read_perms _ () =
+  ( let ( let* ) = Lwt_result.bind in
+    let* perms = Backend.get_perms (`Role "article") in
+    let global_set = Ocaml_authorize.Authorizer.Auth_rule_set.of_list global_perms in
+    let retrieved_set = Ocaml_authorize.Authorizer.Auth_rule_set.of_list perms in
+    let diff = Ocaml_authorize.Authorizer.Auth_rule_set.diff global_set retrieved_set in
+    let diff' =
+      Ocaml_authorize.Authorizer.Auth_rule_set.elements diff
+      |> [%show: Ocaml_authorize.Authorizer.auth_rule list]
+    in
+    if Ocaml_authorize.Authorizer.Auth_rule_set.compare global_set retrieved_set = 0
+    then Lwt.return_ok()
+    else Lwt.return_error(Printf.sprintf "Permissions diff: %s." diff')
+  )
+  >|=
   Alcotest.(check (result unit string))
     "Read the global permissions we've just pushed."
-    ( let* perms = Ocaml_authorize_backends.Sqlite3_backend.get_perms (`Role "article") in
-      let global_set = Ocaml_authorize.Authorizer.Auth_rule_set.of_list global_perms in
-      let retrieved_set = Ocaml_authorize.Authorizer.Auth_rule_set.of_list perms in
-      let diff = Ocaml_authorize.Authorizer.Auth_rule_set.diff global_set retrieved_set in
-      let diff' =
-        Ocaml_authorize.Authorizer.Auth_rule_set.elements diff
-        |> [%show: Ocaml_authorize.Authorizer.auth_rule list]
-      in
-      if Ocaml_authorize.Authorizer.Auth_rule_set.compare global_set retrieved_set = 0
-      then Ok ()
-      else Error(Printf.sprintf "Permissions diff: %s." diff')
-    )
     (Ok())
-let test_drop_perms () =
+let test_drop_perms _ () =
+  ( let ( let* ) = Lwt_result.bind in
+    let* () = Backend.put_perm bad_perm in
+    let* perms = Backend.get_perms (`Uniq aron_article.uuid) in
+    let* () =
+      match perms with
+      | [perm] ->
+        if perm = bad_perm
+        then Lwt.return_ok()
+        else Lwt.return_error "Failed to push bad permission to test perm dropping."
+      | _ ->
+        Lwt.return_error "Invalid permissions."
+    in
+    let* () = Backend.delete_perm bad_perm in
+    let* perms' = Backend.get_perms (`Uniq aron_article.uuid) in
+    match perms' with
+    | [] -> Lwt.return_ok()
+    | _ -> Lwt.return_error "Failed to remove bad perm."
+  )
+  >|=
   Alcotest.(check (result unit string))
     "Read the global permissions we've just pushed."
-    ( let* () = Ocaml_authorize_backends.Sqlite3_backend.put_perm bad_perm in
-      let* perms = Ocaml_authorize_backends.Sqlite3_backend.get_perms (`Uniq aron_article.uuid) in
-      let* () =
-        match perms with
-        | [perm] ->
-          if perm = bad_perm
-          then Ok()
-          else Error "Failed to push bad permission to test perm dropping."
-        | _ ->
-          Error "Invalid permissions."
-      in
-      let* () = Ocaml_authorize_backends.Sqlite3_backend.delete_perm bad_perm in
-      let* perms' = Ocaml_authorize_backends.Sqlite3_backend.get_perms (`Uniq aron_article.uuid) in
-      match perms' with
-      | [] -> Ok()
-      | _ -> Error "Failed to remove bad perm."
-    )
     (Ok())
 
-let test_update_owned () =
+let test_update_owned _ () =
+  ( let%lwt chris_ent = User.to_entity chris in
+    match chris_ent with
+    | Ok chris_ent ->
+      let%lwt res = Article.update_title chris_ent chris_article "Updated Title" in
+      Lwt.return(Result.is_ok res)
+    | Error _ ->
+      Lwt.return false
+  )
+  >|=
   Alcotest.(check bool)
     "Chris can update an article owned by Chris."
-    (Result.is_ok
-       ( let* chris_ent = User.to_entity chris in
-         Article.update_title chris_ent chris_article "Updated Title"
-       )
-    )
     true
 
-let test_admin_update_others' () =
+let test_admin_update_others' _ () =
+  ( let%lwt aron_ent = User.to_entity aron in
+    match aron_ent with
+    | Ok aron_ent ->
+      let%lwt res = Article.update_title aron_ent chris_article "Updated Title" in
+      Lwt.return(Result.is_ok res)
+    | Error _ ->
+      Lwt.return false
+  )
+  >|=
   Alcotest.(check bool)
     "Aron (admin) can update an article Chris owns"
-    (Result.is_ok
-       ( let* aron_ent = User.to_entity aron in
-         Article.update_title aron_ent chris_article "Updated Title"
-       )
-    )
     true
 
-let cannot_update () =
+let cannot_update _ () =
+  ( let%lwt chris_ent = User.to_entity chris in
+    match chris_ent with
+    | Ok chris_ent ->
+      let%lwt res = Article.update_title chris_ent aron_article "Updated Title" in
+      Lwt.return(Result.is_error res)
+    | Error _ ->
+      Lwt.return false
+  )
+  >|=
   Alcotest.(check bool)
     "Chris cannot update an article Aron owns"
-    (Result.is_error
-       ( let* chris_ent = User.to_entity chris in
-         Article.update_title chris_ent aron_article "Updated Title"))
     true
 
-let can_update_self () =
+let can_update_self _ () =
+  ( let%lwt chris_article_entity = Article.to_entity chris_article in
+    match chris_article_entity with
+    | Ok chris_article_entity ->
+      let%lwt res = Article.update_title chris_article_entity chris_article "Updated Title" in
+      Lwt.return(Result.is_ok res)
+    | Error _ ->
+      Lwt.return_false
+  )
+  >|=
   Alcotest.(check bool)
     "Article can update itself."
-    (Result.is_ok
-       ( let* chris_article_entity = Article.to_entity chris_article in
-         Article.update_title chris_article_entity chris_article "Updated Title"))
     true
 
-let article_cannot_update_other_article () =
-  let () = print_endline "about to run a test" in
+let article_cannot_update_other_article _ () =
+  ( let%lwt chris_article_entity = Article.to_entity chris_article in
+    match chris_article_entity with
+    | Ok chris_article_entity ->
+      let%lwt res = Article.update_title chris_article_entity aron_article "Updated Title" in
+      Lwt.return(Result.is_error res)
+    | Error _ ->
+      Lwt.return_false
+  )
+  >|=
   Alcotest.(check bool)
     "Article cannot update another article."
-    (Result.is_error
-       ( let* chris_article_entity = Article.to_entity chris_article in
-         Article.update_title chris_article_entity aron_article "Updated Title"))
     true
 
 (** IMPORTANT: the following tests should not compile! *)
@@ -198,38 +239,38 @@ let article_cannot_update_other_article () =
 
 let return =
   let () =
-    Alcotest.run "Authorization"
+    Lwt_main.run @@ Alcotest_lwt.run "Authorization"
       [ ( "Managing entities."
-        , [ Alcotest.test_case "Create an entity." `Quick test_create_entity
-          ; Alcotest.test_case "Retrieve an entity." `Quick test_get_entity
+        , [ Alcotest_lwt.test_case "Create an entity." `Quick test_create_entity
+          ; Alcotest_lwt.test_case "Retrieve an entity." `Quick test_get_entity
           ]
         )
       ; ( "Managing roles."
-        , [ Alcotest.test_case "Grant a role." `Quick test_grant_roles
-          ; Alcotest.test_case "Check roles." `Quick test_check_roles
+        , [ Alcotest_lwt.test_case "Grant a role." `Quick test_grant_roles
+          ; Alcotest_lwt.test_case "Check roles." `Quick test_check_roles
           ]
         )
       ; ( "Managing authorization rules."
-        , [ Alcotest.test_case "Push rules." `Quick test_push_perms
-          ; Alcotest.test_case "Drop rules." `Quick test_drop_perms
-          ; Alcotest.test_case "Read rules." `Quick test_read_perms
+        , [ Alcotest_lwt.test_case "Push rules." `Quick test_push_perms
+          ; Alcotest_lwt.test_case "Drop rules." `Quick test_drop_perms
+          ; Alcotest_lwt.test_case "Read rules." `Quick test_read_perms
           ]
         )
       ; ( "Admins should be able to do everything."
-        , [ Alcotest.test_case "Update someone else's article." `Quick test_admin_update_others'
+        , [ Alcotest_lwt.test_case "Update someone else's article." `Quick test_admin_update_others'
           ]
         )
       ; ( "An entity should be able to do everything to entities it owns."
-        , [ Alcotest.test_case "Update own article." `Quick test_update_owned
+        , [ Alcotest_lwt.test_case "Update own article." `Quick test_update_owned
           ]
         )
       ; ( "An entity should be able to do everything to itself."
-        , [ Alcotest.test_case "Update" `Quick can_update_self
+        , [ Alcotest_lwt.test_case "Update" `Quick can_update_self
           ]
         )
       ; ( "Entities should be denied access to entities they shouldn't access."
-        , [ Alcotest.test_case "Cannot update" `Quick cannot_update
-          ; Alcotest.test_case "Cannot update" `Quick article_cannot_update_other_article
+        , [ Alcotest_lwt.test_case "Cannot update" `Quick cannot_update
+          ; Alcotest_lwt.test_case "Cannot update" `Quick article_cannot_update_other_article
             (* ; Alcotest.test_case "Cannot update" `Quick hacker_cannot_update_article *)
           ]
         )
@@ -237,11 +278,11 @@ let return =
   in
   Ok ()
 
-let () =
+(* let () =
   if Sqlite3.db_close Ocaml_authorize_backends.Sqlite3_backend.db
   then
     match return with
     | Ok _ -> print_endline "returned successfully"
     | Error s -> print_endline("Error: " ^ s)
   else
-    print_endline "Failed to close db"
+    print_endline "Failed to close db" *)

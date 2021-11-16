@@ -47,5 +47,5 @@ module type Authorizable_entity = sig
   (** [to_entity x] converts [x] to a uniquely identifiable entity, complete
     * with roles. The entity may not, however, be converted back into type [t].
    **)
-  val to_entity : t -> (kind Entity.t, string) result
+  val to_entity : t -> (kind Entity.t, string) Lwt_result.t
 end

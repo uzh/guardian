@@ -84,16 +84,15 @@ module Make(BES : Backend_store_s) : S = struct
       Lwt.return_ok ent
 
   let get_checker entity =
-    let auth_rules =
+    let%lwt auth_rules =
       Role_set.elements entity.Entity.roles
       |> List.map (fun r -> `Role r)
       |> List.cons (`Uniq entity.Entity.uuid)
-      |> List.map BES.get_perms
+      |> Lwt_list.map_s BES.get_perms
     in
     let* auth_rules =
       List.fold_left
         (fun acc x ->
-          let%lwt x = x in
           let%lwt acc = acc in
           match acc, x with
           | Ok acc, Ok perms ->
