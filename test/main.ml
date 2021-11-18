@@ -5,10 +5,10 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
 
   module User = User.Make(Backend)
 
-  (* ensure that the `User` module conforms to the `Authorizable_entity` module type. *)
-  let _ = (module User : Ocaml_authorize.Authorizer.Authorizable_entity)
+  (* ensure that the `User` module conforms to the `Authorizable_module` module type. *)
+  let _ = (module User : Ocaml_authorize.Authorizer.Authorizable_module)
 
-  let _ = (module Article : Ocaml_authorize.Authorizer.Authorizable_entity)
+  let _ = (module Article : Ocaml_authorize.Authorizer.Authorizable_module)
 
   let chris = "Chris", Uuidm.create `V4
   let aron = "Aron", Uuidm.create `V4
@@ -40,27 +40,27 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
 
   let (>|=) = Lwt.Infix.(>|=)
 
-  let test_create_entity _ () =
-    ( let* _aron_ent = User.to_entity aron in
-      let* _chris_ent = User.to_entity chris in
-      let* _ben_ent = Hacker.to_entity ben in
-      let* _chris_art_ent = Article.to_entity chris_article in
-      let* _aron_art_ent = Article.to_entity aron_article in
+  let test_create_authorizable _ () =
+    ( let* _aron_ent = User.to_authorizable aron in
+      let* _chris_ent = User.to_authorizable chris in
+      let* _ben_ent = Hacker.to_authorizable ben in
+      let* _chris_art_ent = Article.to_authorizable chris_article in
+      let* _aron_art_ent = Article.to_authorizable aron_article in
       Lwt.return_ok()
     )
     >|=
     Alcotest.(check (result unit string))
-      "Create an entity."
+      "Create an authorizable."
       (Ok())
 
-  let test_get_entity _ () =
-    ( match%lwt Backend.get_entity ~typ:`User (snd aron) with
+  let test_get_authorizable _ () =
+    ( match%lwt Backend.get_authorizable ~typ:`User (snd aron) with
       | Ok(_) -> Lwt.return_true
       | Error err -> raise(Failure err)
     )
     >|=
     Alcotest.(check bool)
-      "Fetch an entity."
+      "Fetch an authorizable."
       true
 
   let test_grant_roles _ () =
@@ -87,7 +87,7 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
         let expected = [%show: string list] (elements expected) in
         Lwt.return_error(
           Printf.sprintf
-            "Got %s for roles of entity %s, but expected %s."
+            "Got %s for roles of authorizable %s, but expected %s."
             received
             (Uuidm.to_string (snd aron))
             expected)
@@ -147,7 +147,7 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       (Ok())
 
   let test_update_owned _ () =
-    ( let%lwt chris_ent = User.to_entity chris in
+    ( let%lwt chris_ent = User.to_authorizable chris in
       match chris_ent with
       | Ok chris_ent ->
         let%lwt res = Article.update_title chris_ent chris_article "Updated Title" in
@@ -161,7 +161,7 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       true
 
   let test_admin_update_others' _ () =
-    ( let%lwt aron_ent = User.to_entity aron in
+    ( let%lwt aron_ent = User.to_authorizable aron in
       match aron_ent with
       | Ok aron_ent ->
         let%lwt res = Article.update_title aron_ent chris_article "Updated Title" in
@@ -175,7 +175,7 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       true
 
   let cannot_update _ () =
-    ( let%lwt chris_ent = User.to_entity chris in
+    ( let%lwt chris_ent = User.to_authorizable chris in
       match chris_ent with
       | Ok chris_ent ->
         let%lwt res = Article.update_title chris_ent aron_article "Updated Title" in
@@ -189,10 +189,10 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       true
 
   let can_update_self _ () =
-    ( let%lwt chris_article_entity = Article.to_entity chris_article in
-      match chris_article_entity with
-      | Ok chris_article_entity ->
-        let%lwt res = Article.update_title chris_article_entity chris_article "Updated Title" in
+    ( let%lwt chris_article' = Article.to_authorizable chris_article in
+      match chris_article' with
+      | Ok chris_article' ->
+        let%lwt res = Article.update_title chris_article' chris_article "Updated Title" in
         Lwt.return(Result.is_ok res)
       | Error err ->
         raise(Failure err)
@@ -203,10 +203,10 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       true
 
   let article_cannot_update_other_article _ () =
-    ( let%lwt chris_article_entity = Article.to_entity chris_article in
-      match chris_article_entity with
-      | Ok chris_article_entity ->
-        let%lwt res = Article.update_title chris_article_entity aron_article "Updated Title" in
+    ( let%lwt chris_article' = Article.to_authorizable chris_article in
+      match chris_article' with
+      | Ok chris_article' ->
+        let%lwt res = Article.update_title chris_article' aron_article "Updated Title" in
         Lwt.return(Result.is_error res)
       | Error err ->
         raise(Failure err)
@@ -217,19 +217,19 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       true
 
   let set_owner _ () =
-    ( let* aron_entity = User.to_entity aron in
-      let* chris_article' = Article.update_author aron_entity chris_article aron in
+    ( let* aron' = User.to_authorizable aron in
+      let* chris_article' = Article.update_author aron' chris_article aron in
       let* () =
         if chris_article'.author <> chris
           then Lwt.return_ok()
           else Lwt_result.fail "Article didn't update"
       in
-      let* chris_entity = User.to_entity chris in
-      let%lwt should_fail = Article.update_title chris_entity chris_article "Shouldn't work" in
+      let* chris' = User.to_authorizable chris in
+      let%lwt should_fail = Article.update_title chris' chris_article "Shouldn't work" in
       match should_fail with
       | Ok _ -> Lwt.return_error "Failed to set new owner"
       | Error _ ->
-        let* _ = Article.update_author aron_entity chris_article chris in
+        let* _ = Article.update_author aron' chris_article chris in
         Lwt_result.return true
     )
     >|=
@@ -243,23 +243,23 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
     Alcotest.(check bool)
       "Article cannot update another article."
       (Result.is_error
-        (Article.update_title (Hacker.to_entity ben) aron_article "Updated Title"))
+        (Article.update_title (Hacker.to_authorizable ben) aron_article "Updated Title"))
       true
 
     let owner_can_do_nothing () =
     Alcotest.(check bool)
-      "entity.owner shouldn't be allowed to do anything."
+      "authorizable.owner shouldn't be allowed to do anything."
       (Result.is_error
-        (Article.update_title (Article.to_entity aron_article).owner aron_article "Updated Title"))
+        (Article.update_title (Article.to_authorizable aron_article).owner aron_article "Updated Title"))
       true *)
 end
 
 let return =
   let make_test_cases (module Backend : Ocaml_authorize.Persistence.S) name =
     let module T = Tests(Backend) in
-    [ ( Printf.sprintf "(%s) Managing entities." name
-      , [ Alcotest_lwt.test_case "Create an entity." `Quick T.test_create_entity
-        ; Alcotest_lwt.test_case "Retrieve an entity." `Quick T.test_get_entity
+    [ ( Printf.sprintf "(%s) Managing authorizables." name
+      , [ Alcotest_lwt.test_case "Create an authorizable." `Quick T.test_create_authorizable
+        ; Alcotest_lwt.test_case "Retrieve an authorizable." `Quick T.test_get_authorizable
         ]
       )
     ; ( Printf.sprintf "(%s) Managing roles." name
@@ -277,11 +277,11 @@ let return =
       , [ Alcotest_lwt.test_case "Update someone else's article." `Quick T.test_admin_update_others'
         ]
       )
-    ; ( Printf.sprintf "(%s) An entity should be able to do everything to entities it owns." name
+    ; ( Printf.sprintf "(%s) An authorizable should be able to do everything to entities it owns." name
       , [ Alcotest_lwt.test_case "Update own article." `Quick T.test_update_owned
         ]
       )
-    ; ( Printf.sprintf "(%s) An entity should be able to do everything to itself." name
+    ; ( Printf.sprintf "(%s) An authorizable should be able to do everything to itself." name
       , [ Alcotest_lwt.test_case "Update" `Quick T.can_update_self
         ]
       )

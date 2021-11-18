@@ -9,9 +9,9 @@ module type Backend_store_s = sig
 
   val grant_roles : Uuidm.t -> Role_set.t -> (unit, string) Lwt_result.t
 
-  val create_entity : id:Uuidm.t -> ?owner:Uuidm.t -> Role_set.t -> (unit, string) Lwt_result.t
+  val create_authorizable : id:Uuidm.t -> ?owner:Uuidm.t -> Role_set.t -> (unit, string) Lwt_result.t
 
-  val mem_entity : Uuidm.t -> bool Lwt.t
+  val mem_authorizable : Uuidm.t -> bool Lwt.t
 
   val get_owner : Uuidm.t -> (Uuidm.t option, string) Lwt_result.t
 
@@ -20,47 +20,47 @@ end
 
 module type S = sig
   include Backend_store_s
-  val get_entity : typ:'kind -> Uuidm.t -> ('kind Entity.t, string) Lwt_result.t
+  val get_authorizable : typ:'kind -> Uuidm.t -> ('kind Authorizable.t, string) Lwt_result.t
   val put_perms : Authorizer.auth_rule list -> (Authorizer.auth_rule list, Authorizer.auth_rule list) Lwt_result.t
-  val decorate_to_entity : ('a -> 'kind Entity.t) -> 'a -> ('kind Entity.t, string) Lwt_result.t
+  val decorate_to_authorizable : ('a -> 'kind Authorizable.t) -> 'a -> ('kind Authorizable.t, string) Lwt_result.t
   val get_checker :
-    'a Entity.t ->
-    ('b Entity.t -> Action.t -> bool, string) Lwt_result.t
+    'a Authorizable.t ->
+    ('b Authorizable.t -> Action.t -> bool, string) Lwt_result.t
 end
 
 let ( let* ) = Lwt_result.bind
 
 module Make(BES : Backend_store_s) : S = struct
   include BES
-  let rec get_typeless_entity id : (unit Entity.t, string) Lwt_result.t =
-    if%lwt BES.mem_entity id
+  let rec get_typeless_authorizable id : (unit Authorizable.t, string) Lwt_result.t =
+    if%lwt BES.mem_authorizable id
       then
         let* roles = BES.get_roles id in
         let* owner_id = BES.get_owner id in
         let* owner =
           match owner_id with
           | Some owner_id' ->
-            let* x = get_typeless_entity owner_id' in
+            let* x = get_typeless_authorizable owner_id' in
             Lwt.return_ok(Some x)
           | None ->
             Lwt.return_ok(None)
         in
-        Lwt.return_ok(Entity.make ~roles ~typ:() ?owner id)
+        Lwt.return_ok(Authorizable.make ~roles ~typ:() ?owner id)
       else
-        Lwt.return(Error(Printf.sprintf "Entity %s doesn't exist." (Uuidm.to_string id)))
-  let get_entity ~(typ : 'kind) id =
-    if%lwt BES.mem_entity id
+        Lwt.return(Error(Printf.sprintf "Authorizable %s doesn't exist." (Uuidm.to_string id)))
+  let get_authorizable ~(typ : 'kind) id =
+    if%lwt BES.mem_authorizable id
     then
       let* roles = BES.get_roles id in
       let* owner_id = BES.get_owner id in
       let* owner =
         match owner_id with
-        | Some owner_id' -> Lwt_result.map (Option.some) (get_typeless_entity owner_id')
+        | Some owner_id' -> Lwt_result.map (Option.some) (get_typeless_authorizable owner_id')
         | None -> Lwt_result.return(None)
       in
-      Lwt.return(Ok(Entity.make ~roles ~typ ?owner id))
+      Lwt.return(Ok(Authorizable.make ~roles ~typ ?owner id))
     else
-      Lwt.return(Error(Printf.sprintf "Entity %s doesn't exist." (Uuidm.to_string id)))
+      Lwt.return(Error(Printf.sprintf "Authorizable %s doesn't exist." (Uuidm.to_string id)))
 
   (** [put_perms perms] adds all the permissions [perms] to the backend. If
       there is an error at any point, it returns a `result` containing all of
@@ -80,20 +80,20 @@ module Make(BES : Backend_store_s) : S = struct
       (Lwt.return_ok [])
       perms
 
-  (** This convenience function should be used to decorate the [to_entity]
+  (** This convenience function should be used to decorate the [to_authorizable]
     * functions of authorizable modules. The newly decorated function connects
-    * to the persistent backend to ensure that the entity's roles and ownership
+    * to the persistent backend to ensure that the authorizable's roles and ownership
     * are consistent in both spaces.
   *)
-  let decorate_to_entity
-      (to_entity : 'a -> 'kind Entity.t)
-    : 'a -> ('kind Entity.t, string) Lwt_result.t =
+  let decorate_to_authorizable
+      (to_authorizable : 'a -> 'kind Authorizable.t)
+    : 'a -> ('kind Authorizable.t, string) Lwt_result.t =
     fun x ->
-    let (ent : 'kind Entity.t) = to_entity x in
+    let (ent : 'kind Authorizable.t) = to_authorizable x in
     let uuid = ent.uuid in
-    if%lwt BES.mem_entity ent.uuid
+    if%lwt BES.mem_authorizable ent.uuid
     then
-      let* ent' = get_entity ~typ:ent.typ ent.uuid in
+      let* ent' = get_authorizable ~typ:ent.typ ent.uuid in
       let roles = Role_set.union ent.roles ent'.roles in
       let* () = BES.grant_roles uuid roles in
       let* owner =
@@ -107,22 +107,22 @@ module Make(BES : Backend_store_s) : S = struct
           Lwt.return_ok None
         | Some x, Some y when x <> y ->
           Lwt_result.fail(
-            "decorate_to_entity: both the database and the decorated function \
-              returned distinct values for the owner of entity "
+            "decorate_to_authorizable: both the database and the decorated function \
+              returned distinct values for the owner of authorizable "
             ^ Uuidm.to_string ent.uuid)
         | Some x, Some _ (* when x = y *) ->
           Lwt.return_ok(Some x)
       in
-      Lwt.return_ok Entity.{uuid; roles; owner; typ = ent.typ}
+      Lwt.return_ok Authorizable.{uuid; roles; owner; typ = ent.typ}
     else
-      let* () = BES.create_entity ~id:uuid ent.roles in
+      let* () = BES.create_authorizable ~id:uuid ent.roles in
       Lwt.return_ok ent
 
-  let get_checker entity =
+  let get_checker authorizable =
     let%lwt auth_rules =
-      Role_set.elements entity.Entity.roles
+      Role_set.elements authorizable.Authorizable.roles
       |> List.map (fun r -> `Role r)
-      |> List.cons (`Uniq entity.Entity.uuid)
+      |> List.cons (`Uniq authorizable.Authorizable.uuid)
       |> Lwt_list.map_s BES.get_perms
     in
     let* auth_rules =
@@ -141,15 +141,15 @@ module Make(BES : Backend_store_s) : S = struct
     Lwt.return_ok @@
     fun actor action ->
       let is_owner =
-        match entity.Entity.owner with
-        | Some x -> Entity.(actor.uuid = x.uuid)
+        match authorizable.Authorizable.owner with
+        | Some x -> Authorizable.(actor.uuid = x.uuid)
         | None -> false
       in
-      let is_self = Entity.(actor.uuid = entity.uuid) in
+      let is_self = Authorizable.(actor.uuid = authorizable.uuid) in
       if is_self || is_owner
       then true
       else
-        let actor_roles = actor.Entity.roles in
+        let actor_roles = actor.Authorizable.roles in
         List.exists
           (fun (actor', action', _) ->
              match actor' with

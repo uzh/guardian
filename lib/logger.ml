@@ -83,8 +83,8 @@ type event_status =
 [@@deriving show]
 
 type ('a, 'b) authorization_event =
-  { actor: 'a Entity.t
-  ; target: 'b Entity.t
+  { actor: 'a Authorizable.t
+  ; target: 'b Authorizable.t
   ; time: Ptime.t
   ; action: Action.t
   ; status: event_status

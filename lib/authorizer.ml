@@ -15,13 +15,13 @@ type role_rule = Role.t * Action.t list
   * certain role. *)
 let make_checker (rules: role_rule list) = fun actor (action: Action.t) target ->
   let rv =
-    Entity.(actor.uuid = target.uuid)
+    Authorizable.(actor.uuid = target.uuid)
     ||
-    Entity.(a_owns_b actor target)
+    Authorizable.(a_owns_b actor target)
     ||
     List.exists
       (fun (role, authorized_actions) ->
-         List.exists ((=) action) authorized_actions && Entity.has_role actor role)
+         List.exists ((=) action) authorized_actions && Authorizable.has_role actor role)
       rules
   in
   let () =
@@ -39,13 +39,13 @@ let make_checker (rules: role_rule list) = fun actor (action: Action.t) target -
   in
   rv
 
-module type Authorizable_entity = sig
+module type Authorizable_module = sig
   type t
 
   type kind
 
-  (** [to_entity x] converts [x] to a uniquely identifiable entity, complete
-    * with roles. The entity may not, however, be converted back into type [t].
+  (** [to_authorizable x] converts [x] to a uniquely identifiable object, complete
+    * with roles. The [authorizable] may not, however, be converted back into type [t].
    **)
-  val to_entity : t -> (kind Entity.t, string) Lwt_result.t
+  val to_authorizable : t -> (kind Authorizable.t, string) Lwt_result.t
 end

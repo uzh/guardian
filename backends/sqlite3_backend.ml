@@ -10,7 +10,7 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
     | Sqlite3.Rc.OK | DONE | ROW -> Lwt.return_ok()
     | rc -> Lwt.return_error(Sqlite3.Rc.to_string rc)
 
-  let create_entity ~id ?(owner : Uuidm.t option) roles : (unit, string) Lwt_result.t =
+  let create_authorizable ~id ?(owner : Uuidm.t option) roles : (unit, string) Lwt_result.t =
     let stmt = Sqlite3.prepare db "INSERT INTO entities (id, roles, parent) VALUES (?, ?, ?)" in
     let roles' = Ocaml_authorize.Role_set.to_yojson roles |> Yojson.Safe.to_string in
     let* () =
@@ -233,7 +233,7 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
     let* () = lwt_return_rc rc in
     Lwt.return_ok rv
 
-  let mem_entity id =
+  let mem_authorizable id =
     let stmt =
       Sqlite3.prepare
         db
@@ -257,9 +257,9 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
       |> Lwt.return_ok
     in
     let* stmt =
-      if%lwt mem_entity id
+      if%lwt mem_authorizable id
       then Lwt.return_ok(Sqlite3.prepare db "UPDATE entities SET roles = ? WHERE id = ?")
-      else Lwt.return_error "Cannot grant a role to an entity which doesn't exist."
+      else Lwt.return_error "Cannot grant a role to an authorizable which doesn't exist."
     in
     let () =
       let open Sqlite3 in

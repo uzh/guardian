@@ -10,22 +10,22 @@ module Make(P : Ocaml_authorize.Persistence.S) = struct
 
   type kind = [ `Article ]
 
-  let to_entity t =
+  let to_authorizable t =
     let open Ocaml_authorize in
     let roles =
       Ocaml_authorize.Role_set.empty
       |> Ocaml_authorize.Role_set.add "Article"
     in
-    Entity.make
+    Authorizable.make
       ~roles
       ~typ:`Article
       t.uuid
 
   (** This pattern may be instructive. *)
-  let to_entity t =
-    let%lwt ent = (P.decorate_to_entity to_entity) t in
+  let to_authorizable t =
+    let%lwt ent = (P.decorate_to_authorizable to_authorizable) t in
     let%lwt owner =
-      match%lwt User.to_entity t.author with
+      match%lwt User.to_authorizable t.author with
       | Ok own -> Lwt.return_some {own with typ = ()}
       | Error _ -> Lwt.return_none
     in
@@ -33,17 +33,17 @@ module Make(P : Ocaml_authorize.Persistence.S) = struct
     | Ok ent' -> Lwt.return_ok {ent' with owner = owner}
     | err -> Lwt.return err
 
-  let update_title (actor: [`User | `Article] Ocaml_authorize.Entity.t) t new_title =
+  let update_title (actor: [`User | `Article] Ocaml_authorize.Authorizable.t) t new_title =
     let ( let* ) = Lwt_result.bind in
-    let* ent = to_entity t in
+    let* ent = to_authorizable t in
     let* can = P.get_checker ent in
     if can actor `Update
     then let _ = t.title <- new_title in Lwt.return_ok t
     else Lwt.return_error "Insufficient access"
 
-  let update_author (actor: [`User] Ocaml_authorize.Entity.t) t new_author =
+  let update_author (actor: [`User] Ocaml_authorize.Authorizable.t) t new_author =
     let ( let* ) = Lwt_result.bind in
-    let* ent = to_entity t in
+    let* ent = to_authorizable t in
     let* can = P.get_checker ent in
     if can actor `Update
     then

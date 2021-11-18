@@ -121,7 +121,7 @@ module Make(CONFIG : sig val connection_string : string end) () : Ocaml_authoriz
       else
         Lwt.return_ok()
 
-    let create_entity ~id ?owner roles =
+    let create_authorizable ~id ?owner roles =
       let caqti =
         Caqti_request.exec
           Caqti_type.(tup3 string string (option string))
@@ -133,7 +133,7 @@ module Make(CONFIG : sig val connection_string : string end) () : Ocaml_authoriz
       | Ok _ -> Lwt.return_ok()
       | Error err -> Lwt.return_error(Caqti_error.show err)
 
-    let mem_entity id =
+    let mem_authorizable id =
       let caqti =
         Caqti_request.find_opt
           Caqti_type.string
