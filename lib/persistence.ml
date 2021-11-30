@@ -156,7 +156,7 @@ module Make(BES : Backend_store_s) : S = struct
              | `Uniq id ->
                actor.uuid = id && action = action'
              | `Role role ->
-               Role_set.mem role actor_roles && action = action'
+               Role_set.mem role actor_roles && (action = action' || action' = `Manage)
           )
           auth_rules
 end

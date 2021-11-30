@@ -30,10 +30,7 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
 
   let global_perms: Ocaml_authorize.Authorizer.auth_rule list =
     [ `Role "user", `Read, `Role "article"
-    ; `Role "admin", `Create, `Role "article"
-    ; `Role "admin", `Read, `Role "article"
-    ; `Role "admin", `Update, `Role "article"
-    ; `Role "admin", `Delete, `Role "article"
+    ; `Role "admin", `Manage, `Role "article"
     ]
 
   let ( let* ) = Lwt_result.bind
