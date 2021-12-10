@@ -21,4 +21,5 @@ depends: [
   "containers"
   "yojson"
   "alcotest"
+  "sqlite3"
 ]
