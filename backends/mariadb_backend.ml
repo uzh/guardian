@@ -10,6 +10,8 @@ module Make(CONFIG : sig val connection_string : string end) () : Ocaml_authoriz
   let ( let* ) = Lwt_result.bind
 
   include Ocaml_authorize.Persistence.Make(struct
+    type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
+
     let get_roles id : (Ocaml_authorize.Role_set.t, string) Lwt_result.t =
       let caqti =
         Caqti_request.find
@@ -141,9 +143,9 @@ module Make(CONFIG : sig val connection_string : string end) () : Ocaml_authoriz
           "SELECT roles FROM entities WHERE id = ?"
       in
       match%lwt Db.find_opt caqti (Uuidm.to_string id) with
-      | Ok(Some _) -> Lwt.return_true
-      | Ok None -> Lwt.return_false
-      | Error err -> raise(Failure(Caqti_error.show err))
+      | Ok(Some _) -> Lwt.return_ok(true)
+      | Ok None -> Lwt.return_ok(false)
+      | Error err -> Lwt.return_error(Caqti_error.show err)
 
     let get_owner id =
       let caqti =

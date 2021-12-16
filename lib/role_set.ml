@@ -19,9 +19,9 @@ let of_yojson = function
          Result.bind
            acc
            (fun acc' ->
-              match x with
-              | `String s -> Ok (add s acc')
-              | _ -> Error "Invalid role."
+              match Role.of_yojson x with
+              | Ok role -> Ok(add role acc')
+              | Error _ as err -> err
            )
       )
       (Ok empty)

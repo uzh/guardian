@@ -1,21 +1,23 @@
 module type Backend_store_s = sig
-  val get_roles : Uuidm.t -> (Role_set.t, string) Lwt_result.t
+  type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
 
-  val get_perms : Authorizer.actor_spec -> (Authorizer.auth_rule list, string) Lwt_result.t
+  val get_roles : Uuidm.t -> (Role_set.t, string) monad
 
-  val put_perm : Authorizer.auth_rule -> (unit, string) Lwt_result.t
+  val get_perms : Authorizer.actor_spec -> (Authorizer.auth_rule list, string) monad
 
-  val delete_perm : Authorizer.auth_rule -> (unit, string) Lwt_result.t
+  val put_perm : Authorizer.auth_rule -> (unit, string) monad
 
-  val grant_roles : Uuidm.t -> Role_set.t -> (unit, string) Lwt_result.t
+  val delete_perm : Authorizer.auth_rule -> (unit, string) monad
 
-  val create_authorizable : id:Uuidm.t -> ?owner:Uuidm.t -> Role_set.t -> (unit, string) Lwt_result.t
+  val grant_roles : Uuidm.t -> Role_set.t -> (unit, string) monad
 
-  val mem_authorizable : Uuidm.t -> bool Lwt.t
+  val create_authorizable : id:Uuidm.t -> ?owner:Uuidm.t -> Role_set.t -> (unit, string) monad
 
-  val get_owner : Uuidm.t -> (Uuidm.t option, string) Lwt_result.t
+  val mem_authorizable : Uuidm.t -> (bool, string) monad
 
-  val set_owner : Uuidm.t -> owner:Uuidm.t -> (unit, string) Lwt_result.t
+  val get_owner : Uuidm.t -> (Uuidm.t option, string) monad
+
+  val set_owner : Uuidm.t -> owner:Uuidm.t -> (unit, string) monad
 end
 
 module type S = sig
@@ -26,6 +28,11 @@ module type S = sig
   val get_checker :
     'a Authorizable.t ->
     ('b Authorizable.t -> Action.t -> bool, string) Lwt_result.t
+  (** _exn variants of all functions *)
+  val get_roles_exn : Uuidm.t -> Role_set.t Lwt.t
+  val get_perms_exn : Authorizer.actor_spec -> Authorizer.auth_rule list Lwt.t
+  val put_perm_exn : Authorizer.auth_rule -> unit Lwt.t
+  val delete_perm_exn : Authorizer.auth_rule -> unit Lwt.t
 end
 
 let ( let* ) = Lwt_result.bind
@@ -33,7 +40,8 @@ let ( let* ) = Lwt_result.bind
 module Make(BES : Backend_store_s) : S = struct
   include BES
   let rec get_typeless_authorizable id : (unit Authorizable.t, string) Lwt_result.t =
-    if%lwt BES.mem_authorizable id
+    let* mem = BES.mem_authorizable id in
+    if mem
       then
         let* roles = BES.get_roles id in
         let* owner_id = BES.get_owner id in
@@ -49,7 +57,8 @@ module Make(BES : Backend_store_s) : S = struct
       else
         Lwt.return(Error(Printf.sprintf "Authorizable %s doesn't exist." (Uuidm.to_string id)))
   let get_authorizable ~(typ : 'kind) id =
-    if%lwt BES.mem_authorizable id
+    let* mem = BES.mem_authorizable id in
+    if mem
     then
       let* roles = BES.get_roles id in
       let* owner_id = BES.get_owner id in
@@ -91,7 +100,8 @@ module Make(BES : Backend_store_s) : S = struct
     fun x ->
     let (ent : 'kind Authorizable.t) = to_authorizable x in
     let uuid = ent.uuid in
-    if%lwt BES.mem_authorizable ent.uuid
+    let* mem = BES.mem_authorizable ent.uuid in
+    if mem
     then
       let* ent' = get_authorizable ~typ:ent.typ ent.uuid in
       let roles = Role_set.union ent.roles ent'.roles in
@@ -159,4 +169,19 @@ module Make(BES : Backend_store_s) : S = struct
                Role_set.mem role actor_roles && (action = action' || action' = `Manage)
           )
           auth_rules
+
+  let exceptionalize1 f name =
+    fun arg ->
+      let%lwt res = f arg in
+      match res with
+      | Ok x -> Lwt.return x
+      | Error s -> raise(Failure(name ^ " failed: " ^ s))
+  let get_roles_exn =
+    exceptionalize1 BES.get_roles "get_roles_exn"
+  let get_perms_exn =
+    exceptionalize1 BES.get_perms "get_perms_exn"
+  let put_perm_exn =
+    exceptionalize1 BES.put_perm "put_perm_exn"
+  let delete_perm_exn =
+    exceptionalize1 BES.delete_perm "delete_perm_exn"
 end

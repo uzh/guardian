@@ -6,6 +6,7 @@ let ( let* ) = Lwt_result.bind
 let db = Sqlite3.db_open "test_db.sqlite3"
 
 module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
+  type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
   let lwt_return_rc = function
     | Sqlite3.Rc.OK | DONE | ROW -> Lwt.return_ok()
     | rc -> Lwt.return_error(Sqlite3.Rc.to_string rc)
@@ -245,7 +246,7 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
     in
     let (_, rv) = Sqlite3.fold stmt ~f:(fun _acc _row -> Some true) ~init:None in
     Option.value rv ~default:false
-    |> Lwt.return
+    |> Lwt.return_ok
 
   let grant_roles id roles =
     let id' = Uuidm.to_string id in
@@ -257,7 +258,8 @@ module Backend: Ocaml_authorize.Persistence.Backend_store_s = struct
       |> Lwt.return_ok
     in
     let* stmt =
-      if%lwt mem_authorizable id
+      let* mem = mem_authorizable id in
+      if mem
       then Lwt.return_ok(Sqlite3.prepare db "UPDATE entities SET roles = ? WHERE id = ?")
       else Lwt.return_error "Cannot grant a role to an authorizable which doesn't exist."
     in
