@@ -1,17 +1,23 @@
 module type Backend_store_s = sig
+  type role_set
+  type role
+  type actor_spec
+  type auth_rule
+  type 'a authorizable
+
   type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
 
-  val get_roles : Uuidm.t -> (Role_set.t, string) monad
+  val get_roles : Uuidm.t -> (role_set, string) monad
 
-  val get_perms : Authorizer.actor_spec -> (Authorizer.auth_rule list, string) monad
+  val get_perms : actor_spec -> (auth_rule list, string) monad
 
-  val put_perm : Authorizer.auth_rule -> (unit, string) monad
+  val put_perm : auth_rule -> (unit, string) monad
 
-  val delete_perm : Authorizer.auth_rule -> (unit, string) monad
+  val delete_perm : auth_rule -> (unit, string) monad
 
-  val grant_roles : Uuidm.t -> Role_set.t -> (unit, string) monad
+  val grant_roles : Uuidm.t -> role_set -> (unit, string) monad
 
-  val create_authorizable : id:Uuidm.t -> ?owner:Uuidm.t -> Role_set.t -> (unit, string) monad
+  val create_authorizable : id:Uuidm.t -> ?owner:Uuidm.t -> role_set -> (unit, string) monad
 
   val mem_authorizable : Uuidm.t -> (bool, string) monad
 
@@ -22,23 +28,42 @@ end
 
 module type S = sig
   include Backend_store_s
-  val get_authorizable : typ:'kind -> Uuidm.t -> ('kind Authorizable.t, string) Lwt_result.t
-  val put_perms : Authorizer.auth_rule list -> (Authorizer.auth_rule list, Authorizer.auth_rule list) Lwt_result.t
-  val decorate_to_authorizable : ('a -> 'kind Authorizable.t) -> 'a -> ('kind Authorizable.t, string) Lwt_result.t
+
+  val get_authorizable : typ:'kind -> Uuidm.t -> ('kind authorizable, string) Lwt_result.t
+  val put_perms : auth_rule list -> (auth_rule list, auth_rule list) Lwt_result.t
+  val decorate_to_authorizable : ('a -> 'kind authorizable) -> 'a -> ('kind authorizable, string) Lwt_result.t
   val get_checker :
-    'a Authorizable.t ->
-    ('b Authorizable.t -> Action.t -> bool, string) Lwt_result.t
+    'a authorizable ->
+    ('b authorizable -> Action.t -> bool, string) Lwt_result.t
   (** _exn variants of all functions *)
-  val get_roles_exn : Uuidm.t -> Role_set.t Lwt.t
-  val get_perms_exn : Authorizer.actor_spec -> Authorizer.auth_rule list Lwt.t
-  val put_perm_exn : Authorizer.auth_rule -> unit Lwt.t
-  val delete_perm_exn : Authorizer.auth_rule -> unit Lwt.t
+  val get_roles_exn : Uuidm.t -> role_set Lwt.t
+  val get_perms_exn : actor_spec -> auth_rule list Lwt.t
+  val put_perm_exn : auth_rule -> unit Lwt.t
+  val delete_perm_exn : auth_rule -> unit Lwt.t
 end
 
 let ( let* ) = Lwt_result.bind
 
-module Make(BES : Backend_store_s) : S = struct
+module Make
+  (Authorizable : Authorizable.S)
+  (Role : Role.S)
+  (Role_set : Role_set.S with type t := Authorizable.role_set and type elt := Role.t)
+  (Authorizer : Authorizer.S with type role := Role.t)
+  (BES : Backend_store_s
+    with type 'a authorizable := 'a Authorizable.t
+    and type role := Role.t
+    and type role_set := Authorizable.role_set
+    and type actor_spec := Authorizer.actor_spec
+    and type auth_rule := Authorizer.auth_rule)
+  : (S
+      with type 'a authorizable := 'a Authorizable.t
+      and type role_set := Authorizable.role_set
+      and type role := Role.t
+      and type actor_spec := Authorizer.actor_spec
+      and type auth_rule := Authorizer.auth_rule)
+= struct
   include BES
+  
   let rec get_typeless_authorizable id : (unit Authorizable.t, string) Lwt_result.t =
     let* mem = BES.mem_authorizable id in
     if mem
@@ -77,14 +102,14 @@ module Make(BES : Backend_store_s) : S = struct
   let put_perms perms =
     List.fold_left
       (fun acc x ->
-         match%lwt acc with
-         | Ok acc' ->
-           begin match%lwt BES.put_perm x with
-             | Ok() -> Lwt.return_ok(x :: acc')
-             | Error _ -> Lwt.return_error[x]
-           end
-         | Error xs ->
-           Lwt.return_error(x :: xs)
+          match%lwt acc with
+          | Ok acc' ->
+            begin match%lwt BES.put_perm x with
+              | Ok() -> Lwt.return_ok(x :: acc')
+              | Error _ -> Lwt.return_error[x]
+            end
+          | Error xs ->
+            Lwt.return_error(x :: xs)
       )
       (Lwt.return_ok [])
       perms
@@ -162,11 +187,11 @@ module Make(BES : Backend_store_s) : S = struct
         let actor_roles = actor.Authorizable.roles in
         List.exists
           (fun (actor', action', _) ->
-             match actor' with
-             | `Uniq id ->
-               actor.uuid = id && action = action'
-             | `Role role ->
-               Role_set.mem role actor_roles && (action = action' || action' = `Manage)
+              match actor' with
+              | `Uniq id ->
+                actor.uuid = id && action = action'
+              | `Role role ->
+                Role_set.mem role actor_roles && (action = action' || action' = `Manage)
           )
           auth_rules
 

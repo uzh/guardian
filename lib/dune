@@ -2,6 +2,7 @@
  (public_name ocaml_authorize)
  (inline_tests)
  (name ocaml_authorize)
+ (wrapped true)
  (libraries
   lwt
   lwt.unix
