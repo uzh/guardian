@@ -1,4 +1,6 @@
-module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
+module Ocaml_authorize = Ocaml_authorize.Make(Role)
+
+module Tests(Backend : Ocauth.Persistence_s) = struct
   module Article = Article.Make(Backend)
 
   module Hacker = Hacker.Make(Backend)
@@ -29,8 +31,8 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
   let bad_perm = `Uniq (snd chris), `Update, `Uniq (aron_article.uuid)
 
   let global_perms: Ocaml_authorize.Authorizer.auth_rule list =
-    [ `Role "user", `Read, `Role "article"
-    ; `Role "admin", `Manage, `Role "article"
+    [ `Role `User, `Read, `Role `Article
+    ; `Role `Admin, `Manage, `Role `Article
     ]
 
   let ( let* ) = Lwt_result.bind
@@ -61,7 +63,7 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       true
 
   let test_grant_roles _ () =
-    (Backend.grant_roles (snd aron) (Ocaml_authorize.Role_set.singleton "admin"))
+    (Backend.grant_roles (snd aron) (Ocaml_authorize.Role_set.singleton `Admin))
     >|=
     Alcotest.(check (result unit string))
       "Grant a role."
@@ -69,7 +71,7 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
 
   let test_check_roles _ () =
     ( let* roles = Backend.get_roles (snd aron) in
-      let expected = Ocaml_authorize.Role_set.of_list ["user"; "admin"] in
+      let expected = Ocaml_authorize.Role_set.of_list [`User; `Admin] in
       let diff =
         Ocaml_authorize.Role_set.(
           union (diff expected roles) (diff roles expected)
@@ -79,9 +81,9 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       if diff = []
       then Lwt.return_ok()
       else
-        let open Ocaml_authorize.Role_set in
-        let received = [%show: string list] (elements roles) in
-        let expected = [%show: string list] (elements expected) in
+        let open Ocauth.Role_set in
+        let received = [%show: Role.t list] (elements roles) in
+        let expected = [%show: Role.t list] (elements expected) in
         Lwt.return_error(
           Printf.sprintf
             "Got %s for roles of authorizable %s, but expected %s."
@@ -104,7 +106,7 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
       true
 
   let test_read_perms _ () =
-    ( let* perms = Backend.get_perms (`Role "article") in
+    ( let* perms = Backend.get_perms (`Role `Article) in
       let global_set = Ocaml_authorize.Authorizer.Auth_rule_set.of_list global_perms in
       let retrieved_set = Ocaml_authorize.Authorizer.Auth_rule_set.of_list perms in
       let diff = Ocaml_authorize.Authorizer.Auth_rule_set.diff global_set retrieved_set in
@@ -252,7 +254,7 @@ module Tests(Backend : Ocaml_authorize.Persistence.S) = struct
 end
 
 let return =
-  let make_test_cases (module Backend : Ocaml_authorize.Persistence.S) name =
+  let make_test_cases (module Backend : Ocauth.Persistence_s) name =
     let module T = Tests(Backend) in
     [ ( Printf.sprintf "(%s) Managing authorizables." name
       , [ Alcotest_lwt.test_case "Create an authorizable." `Quick T.test_create_authorizable
@@ -295,9 +297,13 @@ let return =
     ]
   in
   let test_cases =
-    let module Maria =
-      (val Ocaml_authorize_backends.Mariadb_backend.make
-        "mariadb://root:my-secret-pw@127.0.0.1:3306/authorization")
+    let module MariaConfig =
+      struct
+        let connection_string = "mariadb://root:my-secret-pw@127.0.0.1:3306/authorization"
+      end
+    in
+    let module Maria : Ocaml_authorize.Persistence_s =
+      (module Ocaml_authorize_backends.Mariadb_backend.Make(Role)(MariaConfig)())
     in
     make_test_cases (module Maria) "MariadDB Backend"
     @ make_test_cases (module Ocaml_authorize_backends.Sqlite3_backend) "SQLite3 Backend"

@@ -32,7 +32,13 @@
   sqlite3
   ocaml_authorize.backends)
  (preprocess
-  (pps ppx_deriving.make ppx_deriving.show lwt_ppx))
+  (pps
+   ppx_deriving.make
+   ppx_deriving.show
+   ppx_deriving.ord
+   lwt_ppx
+   ppx_deriving_yojson
+   ppx_deriving.eq))
  (deps article.ml hacker.ml test_db.sqlite3 main.ml user.ml)
  (action
   (progn

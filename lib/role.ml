@@ -7,6 +7,8 @@ let of_yojson: Yojson.Safe.t -> (t, string) Result.t = function
   
 module type S = sig
   type t [@@deriving show,eq,ord,yojson]
+  
+  val of_string : string -> t
 
   val all : t list
 end

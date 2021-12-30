@@ -1,4 +1,4 @@
-module Make(P : Ocaml_authorize.Persistence.S) = struct
+module Make(P : Ocauth.Persistence_s) = struct
   module User = User.Make(P)
   (** pretend that all these fields aren't publically visible *)
   type t =
@@ -11,10 +11,10 @@ module Make(P : Ocaml_authorize.Persistence.S) = struct
   type kind = [ `Article ]
 
   let to_authorizable t =
-    let open Ocaml_authorize in
+    let open Ocauth in
     let roles =
-      Ocaml_authorize.Role_set.empty
-      |> Ocaml_authorize.Role_set.add "Article"
+      Ocauth.Role_set.empty
+      |> Ocauth.Role_set.add `Article
     in
     Authorizable.make
       ~roles
@@ -33,7 +33,7 @@ module Make(P : Ocaml_authorize.Persistence.S) = struct
     | Ok ent' -> Lwt.return_ok {ent' with owner = owner}
     | err -> Lwt.return err
 
-  let update_title (actor: [`User | `Article] Ocaml_authorize.Authorizable.t) t new_title =
+  let update_title (actor: [`User | `Article] Ocauth.Authorizable.t) t new_title =
     let ( let* ) = Lwt_result.bind in
     let* ent = to_authorizable t in
     let* can = P.get_checker ent in
@@ -41,7 +41,7 @@ module Make(P : Ocaml_authorize.Persistence.S) = struct
     then let _ = t.title <- new_title in Lwt.return_ok t
     else Lwt.return_error "Insufficient access"
 
-  let update_author (actor: [`User] Ocaml_authorize.Authorizable.t) t new_author =
+  let update_author (actor: [`User] Ocauth.Authorizable.t) t new_author =
     let ( let* ) = Lwt_result.bind in
     let* ent = to_authorizable t in
     let* can = P.get_checker ent in

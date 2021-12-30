@@ -1,6 +1,8 @@
 open Lwt.Infix
 
-module Make(CONFIG : sig val connection_string : string end) () : Ocaml_authorize.Persistence.S = struct
+module Make(R : Ocaml_authorize.Role_s)(CONFIG : sig val connection_string : string end) () = struct
+  module Ocaml_authorize = Ocaml_authorize.Make(R)
+
   module Db =
     (val Caqti_lwt.connect
       (Uri.of_string CONFIG.connection_string)
@@ -9,7 +11,13 @@ module Make(CONFIG : sig val connection_string : string end) () : Ocaml_authoriz
 
   let ( let* ) = Lwt_result.bind
 
-  include Ocaml_authorize.Persistence.Make(struct
+  include Ocaml_authorize.Make_persistence(struct
+    type role = R.t
+    type role_set = Ocaml_authorize.Role_set.t
+    type 'a authorizable = 'a Ocaml_authorize.Authorizable.t
+    type auth_rule = Ocaml_authorize.Authorizer.auth_rule
+    type actor_spec = Ocaml_authorize.Authorizer.actor_spec
+
     type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
 
     let get_roles id : (Ocaml_authorize.Role_set.t, string) Lwt_result.t =
@@ -41,14 +49,14 @@ module Make(CONFIG : sig val connection_string : string end) () : Ocaml_authoriz
               Caqti_type.(tup3 string (option string) (option string))
               "SELECT act, actor_id, actor_role FROM rules WHERE target_role = ?"
           in
-          Db.collect_list caqti role
+          Db.collect_list caqti (R.show role)
       in
       match res with
       | Ok s ->
         List.map
           (fun (act, actor_id, actor_role): Ocaml_authorize.Authorizer.auth_rule ->
             let act = Ocaml_authorize.Action.of_string act in
-            match actor_id, actor_role with
+            match actor_id, Option.map R.of_string actor_role with
             | Some id, None ->
               begin match Uuidm.of_string id with
               | Some id' -> (`Uniq id'), act, target_spec
@@ -67,7 +75,7 @@ module Make(CONFIG : sig val connection_string : string end) () : Ocaml_authoriz
     let act_on_perm query (actor, act, target) =
       let spec_to_str = function
         | `Uniq s -> Uuidm.to_string s
-        | `Role s -> s
+        | `Role s -> R.show s
       in
       let actor' = spec_to_str actor in
       let act' = Ocaml_authorize.Action.to_string act in
@@ -77,7 +85,7 @@ module Make(CONFIG : sig val connection_string : string end) () : Ocaml_authoriz
       | Ok() -> Lwt.return_ok()
       | Error err -> Lwt.return_error(Caqti_error.show err)
 
-    let put_perm auth_rule : (unit, string) Lwt_result.t =
+    let put_perm (auth_rule : auth_rule) : (unit, string) Lwt_result.t =
       let query =
         match auth_rule with
         | `Uniq _, _, `Uniq _ ->
@@ -169,8 +177,3 @@ module Make(CONFIG : sig val connection_string : string end) () : Ocaml_authoriz
       | Error err -> Lwt_result.fail(Caqti_error.show err)
     end)
 end
-
-let make (connection_string : string) =
-  let module RV = Make(struct let connection_string = connection_string end)() in
-  let rv = (module RV : Ocaml_authorize.Persistence.S) in
-  rv
