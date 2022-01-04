@@ -302,11 +302,11 @@ let return =
         let connection_string = "mariadb://root:my-secret-pw@127.0.0.1:3306/authorization"
       end
     in
-    let module Maria : Ocaml_authorize.Persistence_s =
-      (module Ocaml_authorize_backends.Mariadb_backend.Make(Role)(MariaConfig)())
+    let module Maria =
+      (Ocaml_authorize_backends.Mariadb_backend.Make(Role)(MariaConfig)())
     in
     make_test_cases (module Maria) "MariadDB Backend"
-    @ make_test_cases (module Ocaml_authorize_backends.Sqlite3_backend) "SQLite3 Backend"
+    @ make_test_cases (module Ocaml_authorize_backends.Sqlite3_backend.Make(Role)) "SQLite3 Backend"
   in
   let () = Lwt_main.run @@ Alcotest_lwt.run "Authorization" test_cases in
   Ok ()
