@@ -16,6 +16,8 @@ end
 
 module type Role_s = Role.S
 
+module Uuid = Uuid
+
 module Make(R : Role.S) = struct
   module Action = Action
 
