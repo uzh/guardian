@@ -16,9 +16,9 @@ end
 
 module type Role_s = Role.S
 
-module Uuid = Uuid
-
 module Make(R : Role.S) = struct
+  module Uuid = Uuid
+  
   module Action = Action
 
   module Role_set : Role_set.S with type elt = R.t = Role_set.Make(R)
