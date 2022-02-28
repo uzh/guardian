@@ -3,7 +3,7 @@ module Make(P : Ocauth.Persistence_s) = struct
 
   type kind = [ `User ]
 
-  let make s : t = s, Uuidm.create `V4
+  let make s : t = s, Uuidm.v `V4
 
   let to_authorizable (t: t) =
     let open Ocauth in

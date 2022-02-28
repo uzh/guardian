@@ -1,7 +1,7 @@
 module Make(P : Ocauth.Persistence_s) = struct
   type t = string * Uuidm.t
 
-  let make s : t = s, Uuidm.create `V4
+  let make s : t = s, Uuidm.v `V4
 
   let to_authorizable (t : t): [ `Hacker ] Ocauth.Authorizable.t =
     Ocauth.Authorizable.make

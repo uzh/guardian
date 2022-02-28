@@ -18,7 +18,7 @@ module type Role_s = Role.S
 
 module Make(R : Role.S) = struct
   module Uuid = Uuid
-  
+
   module Action = Action
 
   module Role_set : Role_set.S with type elt = R.t = Role_set.Make(R)
@@ -103,6 +103,8 @@ module Make(R : Role.S) = struct
     
     let ( let* ) = Lwt_result.bind
 
+    (** utility function for getting an [authorizable] from the database without a
+    phantom type. *)
     let rec get_typeless_authorizable id : (unit Authorizable.t, string) Lwt_result.t =
       let* mem = BES.mem_authorizable id in
       if mem
@@ -233,7 +235,41 @@ module Make(R : Role.S) = struct
                   Role_set.mem role actor_roles && (action = action' || action' = `Manage)
             )
             auth_rules
+    
+    let get_role_checker role_set =
+      let%lwt auth_rules =
+        Role_set.elements role_set
+        |> List.map (fun r -> `Role r)
+        |> Lwt_list.map_s BES.get_perms
+      in
+      let* auth_rules =
+        List.fold_left
+          (fun acc x ->
+            let%lwt acc = acc in
+            match acc, x with
+            | Ok acc, Ok perms ->
+              Lwt.return_ok(perms @ acc)
+            | Error err, _
+            | _, Error err ->
+              Lwt.return_error err)
+          (Lwt.return_ok [])
+          auth_rules
+      in
+      Lwt.return_ok @@
+      fun actor action ->
+        let actor_roles = actor.Authorizable.roles in
+        List.exists
+          (fun (actor', action', _) ->
+              match actor' with
+              | `Uniq id ->
+                actor.uuid = id && action = action'
+              | `Role role ->
+                Role_set.mem role actor_roles && (action = action' || action' = `Manage)
+          )
+          auth_rules
 
+    (** turn a single argument function returning a [result] into one that raises
+    a [Failure] instead *)
     let exceptionalize1 f name =
       fun arg ->
         let%lwt res = f arg in

@@ -12,20 +12,20 @@ module Tests(Backend : Ocauth.Persistence_s) = struct
 
   let _ = (module Article : Ocaml_authorize.Authorizer.Authorizable_module)
 
-  let chris = "Chris", Uuidm.create `V4
-  let aron = "Aron", Uuidm.create `V4
-  let ben : Hacker.t = "Ben Hackerman", Uuidm.create `V4
+  let chris = "Chris", Uuidm.v `V4
+  let aron = "Aron", Uuidm.v `V4
+  let ben : Hacker.t = "Ben Hackerman", Uuidm.v `V4
   let chris_article =
     Article.make
       ~title:"Foo"
       ~content:"Bar"
-      ~uuid:(Uuidm.create `V4)
+      ~uuid:(Uuidm.v `V4)
       ~author:chris
   let aron_article =
     Article.make
       ~title:"Fizz"
       ~content:"Buzz"
-      ~uuid:(Uuidm.create `V4)
+      ~uuid:(Uuidm.v `V4)
       ~author:aron
 
   let bad_perm = `Uniq (snd chris), `Update, `Uniq (aron_article.uuid)
