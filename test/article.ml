@@ -29,6 +29,7 @@ module Make(P : Ocauth.Persistence_s) = struct
     let ( let* ) = Lwt_result.bind in
     let* wrapped =
       P.wrap_function
+        ~error:(fun x -> x)
         ~effects:[`Update, `Uniq t.uuid]
         f
     in
@@ -44,6 +45,7 @@ module Make(P : Ocauth.Persistence_s) = struct
     in
     let* wrapped =
       P.wrap_function
+        ~error:(fun x -> x)
         ~effects:[`Manage, `Uniq t.uuid]
         f
     in

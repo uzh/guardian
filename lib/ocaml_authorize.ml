@@ -238,9 +238,9 @@ module Make(R : Role.S) = struct
     (** [wrap_function ?error ~effects f] produces a wrapped version of [f] which
         checks permissions and gracefully reports authorization errors. *)
     let wrap_function
-        ?(error: string -> 'etype = fun x -> x)
+        ~(error: string -> 'etyp)
         ~effects
-        (f: 'param -> ('rval, 'etype) Lwt_result.t) =
+        (f: 'param -> ('rval, 'etyp) Lwt_result.t) =
       let* cans =
         List.map
           (fun (action, target) ->
@@ -271,7 +271,6 @@ module Make(R : Role.S) = struct
               let* acc' = acc in
               Lwt.return_ok(x' :: acc'))
             (Lwt.return_ok[])
-        |> Lwt_result.map_err error
       in
       Lwt.return_ok(
         fun ~actor param ->

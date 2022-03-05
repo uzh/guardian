@@ -42,10 +42,10 @@ module type S = sig
     ('b authorizable -> Action.t -> bool, string) Lwt_result.t
 
   val wrap_function :
-    ?error:(string -> string) ->
+    error:(string -> 'etyp) ->
     effects:(Action.t * actor_spec) list ->
-    ('param -> ('rval, string) monad) ->
-    (actor:'a authorizable -> 'param -> ('rval, string) monad, string) monad
+    ('param -> ('rval, 'etyp) monad) ->
+    (actor:'a authorizable -> 'param -> ('rval, 'etyp) monad, string) monad
 
   (** _exn variants of all functions *)
   val get_roles_exn : Uuidm.t -> role_set Lwt.t
