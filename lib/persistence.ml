@@ -33,16 +33,20 @@ module type S = sig
   val put_perms : auth_rule list -> (auth_rule list, auth_rule list) Lwt_result.t
   val decorate_to_authorizable : ('a -> 'kind authorizable) -> 'a -> ('kind authorizable, string) Lwt_result.t
 
-  (** [get_checker auth] Query the database for relevant authorization rules pertaining
-      to the [authorizable] [auth] and produce a function to check other [authorizable]s
-      for access rights to [auth]. *)
   val get_checker :
     'a authorizable ->
     ('b authorizable -> Action.t -> bool, string) Lwt_result.t
 
-  (** Just like [get_checker], but takes a [role_set] instead of an [authorizable]. *)
   val get_role_checker :
-    role_set -> ('a authorizable -> Action.t -> bool, string) Lwt_result.t
+    role_set ->
+    ('b authorizable -> Action.t -> bool, string) Lwt_result.t
+
+  val wrap_function :
+    ?error:(string -> string) ->
+    effects:(Action.t * actor_spec) list ->
+    ('param -> ('rval, string) monad) ->
+    (actor:'a authorizable -> 'param -> ('rval, string) monad, string) monad
+
   (** _exn variants of all functions *)
   val get_roles_exn : Uuidm.t -> role_set Lwt.t
   val get_perms_exn : actor_spec -> auth_rule list Lwt.t

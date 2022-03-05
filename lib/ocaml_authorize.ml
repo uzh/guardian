@@ -26,10 +26,13 @@ module Make(R : Role.S) = struct
   module Authorizable = struct
     type 'a t =
       { roles: Role_set.t
-      ; owner: unit t option
+      ; owner: Uuid.t option
       ; uuid: Uuid.t
       ; typ: 'a
       } [@@deriving eq,ord,show,yojson]
+    
+    let to_string t =
+      show (fun f _x -> Format.pp_print_string f "") t
   
     let make ~roles ~typ ?owner uuid =
       { roles
@@ -39,7 +42,7 @@ module Make(R : Role.S) = struct
       }
   
     let a_owns_b a b =
-      Option.map (fun b' -> a.uuid = b'.uuid) b.owner = Some true
+      Option.map (fun b' -> a.uuid = b') b.owner = Some true
   
     let has_role t role =
       Role_set.mem role t.roles
@@ -49,30 +52,15 @@ module Make(R : Role.S) = struct
     type actor_spec = [ `Role of R.t | `Uniq of Uuidm.t ] [@@deriving show,ord]
   
     type auth_rule = actor_spec * Action.t * actor_spec [@@deriving show,ord]
+
+    (** [action, target] Denotes an effect a function may have on and therefore
+        which permissions an actor needs to invoke it. *)
+    type effect = Action.t * actor_spec [@@deriving show,ord]
   
     module Auth_rule_set = Set.Make(struct
         type t = auth_rule
         let compare = compare_auth_rule
       end)
-  
-    (** actor * actions * target *)
-    type role_rule = R.t * Action.t list
-  
-    (** Produces a function [can : actor -> action -> target -> bool] based on a list
-      * of rules defining which roles may perform which actions upon entities of a
-      * certain role. *)
-    let make_checker (rules: role_rule list) = fun actor (action: Action.t) target ->
-      let rv =
-        Authorizable.(actor.uuid = target.uuid)
-        ||
-        Authorizable.(a_owns_b actor target)
-        ||
-        List.exists
-          (fun (role, authorized_actions) ->
-            List.exists ((=) action) authorized_actions && Authorizable.has_role actor role)
-          rules
-      in
-      rv
   
     module type Authorizable_module = sig
       type t
@@ -103,36 +91,12 @@ module Make(R : Role.S) = struct
     
     let ( let* ) = Lwt_result.bind
 
-    (** utility function for getting an [authorizable] from the database without a
-    phantom type. *)
-    let rec get_typeless_authorizable id : (unit Authorizable.t, string) Lwt_result.t =
-      let* mem = BES.mem_authorizable id in
-      if mem
-        then
-          let* roles = BES.get_roles id in
-          let* owner_id = BES.get_owner id in
-          let* owner =
-            match owner_id with
-            | Some owner_id' ->
-              let* x = get_typeless_authorizable owner_id' in
-              Lwt.return_ok(Some x)
-            | None ->
-              Lwt.return_ok(None)
-          in
-          Lwt.return_ok(Authorizable.make ~roles ~typ:() ?owner id)
-        else
-          Lwt.return(Error(Printf.sprintf "Authorizable %s doesn't exist." (Uuidm.to_string id)))
     let get_authorizable ~(typ : 'kind) id =
       let* mem = BES.mem_authorizable id in
       if mem
       then
         let* roles = BES.get_roles id in
-        let* owner_id = BES.get_owner id in
-        let* owner =
-          match owner_id with
-          | Some owner_id' -> Lwt_result.map (Option.some) (get_typeless_authorizable owner_id')
-          | None -> Lwt_result.return(None)
-        in
+        let* owner = BES.get_owner id in
         Lwt.return(Ok(Authorizable.make ~roles ~typ ?owner id))
       else
         Lwt.return(Error(Printf.sprintf "Authorizable %s doesn't exist." (Uuidm.to_string id)))
@@ -175,23 +139,26 @@ module Make(R : Role.S) = struct
         let* owner =
           match ent.owner, ent'.owner with
           | Some owner, None ->
-            let* () = BES.set_owner ent.uuid ~owner:owner.uuid in
+            let* () = BES.set_owner ent.uuid ~owner in
             Lwt.return_ok(Some owner)
           | None, Some owner ->
             Lwt.return_ok(Some owner)
           | None, None ->
             Lwt.return_ok None
           | Some x, Some y when x <> y ->
-            Lwt_result.fail(
+            (** Still unclear what the desirable behaviour is in this case. *)
+            (* Lwt_result.fail(
               "decorate_to_authorizable: both the database and the decorated function \
                 returned distinct values for the owner of authorizable "
-              ^ Uuidm.to_string ent.uuid)
+              ^ Uuidm.to_string ent.uuid) *)
+            let* () = BES.set_owner ent.uuid ~owner:x in
+            Lwt.return_ok(Some x)
           | Some x, Some _ (* when x = y *) ->
             Lwt.return_ok(Some x)
         in
         Lwt.return_ok Authorizable.{uuid; roles; owner; typ = ent.typ}
       else
-        let* () = BES.create_authorizable ~id:uuid ent.roles in
+        let* () = BES.create_authorizable ~id:uuid ?owner:ent.owner ent.roles in
         Lwt.return_ok ent
 
     let get_checker authorizable =
@@ -218,7 +185,7 @@ module Make(R : Role.S) = struct
       fun actor action ->
         let is_owner =
           match authorizable.Authorizable.owner with
-          | Some x -> Authorizable.(actor.uuid = x.uuid)
+          | Some x -> Authorizable.(actor.uuid = x)
           | None -> false
         in
         let is_self = Authorizable.(actor.uuid = authorizable.uuid) in
@@ -267,6 +234,58 @@ module Make(R : Role.S) = struct
                 Role_set.mem role actor_roles && (action = action' || action' = `Manage)
           )
           auth_rules
+
+    (** [wrap_function ?error ~effects f] produces a wrapped version of [f] which
+        checks permissions and gracefully reports authorization errors. *)
+    let wrap_function
+        ?(error: string -> 'etype = fun x -> x)
+        ~effects
+        (f: 'param -> ('rval, 'etype) Lwt_result.t) =
+      let* cans =
+        List.map
+          (fun (action, target) ->
+            let* can =
+              match target with
+              | `Uniq uuid ->
+                let* authorizable = get_authorizable ~typ:() uuid in
+                get_checker authorizable
+              | `Role role ->
+                get_role_checker (Role_set.singleton role)
+            in
+            let can actor =
+              if can actor action
+              then Ok()
+              else Error(
+                Format.asprintf
+                  "Entity %s does not have permission to %s target %s."
+                  (Authorizable.to_string actor)
+                  (Action.to_string action)
+                  (Authorizer.show_actor_spec target)
+                |> error)
+            in
+            Lwt.return_ok can)
+          effects
+        |> List.fold_left
+            (fun acc x ->
+              let* x' = x in
+              let* acc' = acc in
+              Lwt.return_ok(x' :: acc'))
+            (Lwt.return_ok[])
+        |> Lwt_result.map_err error
+      in
+      Lwt.return_ok(
+        fun ~actor param ->
+          let* _can =
+            List.fold_left
+              (fun acc can ->
+                match acc with
+                | Ok _ -> can actor
+                | Error _ -> acc)
+              (Ok())
+              cans
+            |> Lwt.return
+          in
+          f param)
 
     (** turn a single argument function returning a [result] into one that raises
     a [Failure] instead *)

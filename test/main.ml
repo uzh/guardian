@@ -45,12 +45,20 @@ module Tests(Backend : Ocauth.Persistence_s) = struct
       let* _ben_ent = Hacker.to_authorizable ben in
       let* _chris_art_ent = Article.to_authorizable chris_article in
       let* _aron_art_ent = Article.to_authorizable aron_article in
-      Lwt.return_ok()
+      (* now we check to see that the authorizables have had ownership set *)
+      let get_owner_id article =
+        let* x = Backend.get_owner article.Article.uuid in
+        Option.to_result ~none:("Couldn't get owner for article " ^ Article.show article) x
+        |> Lwt.return
+      in
+      let* chris_art_owner = get_owner_id chris_article in
+      let* aron_art_owner = get_owner_id aron_article in
+      Lwt.return_ok(Uuidm.to_string chris_art_owner, Uuidm.to_string aron_art_owner)
     )
     >|=
-    Alcotest.(check (result unit string))
+    Alcotest.(check (result (pair string string) string))
       "Create an authorizable."
-      (Ok())
+      (Ok(Uuidm.to_string(snd chris), Uuidm.to_string(snd aron)))
 
   let test_get_authorizable _ () =
     ( match%lwt Backend.get_authorizable ~typ:`User (snd aron) with
@@ -146,18 +154,14 @@ module Tests(Backend : Ocauth.Persistence_s) = struct
       (Ok())
 
   let test_update_owned _ () =
-    ( let%lwt chris_ent = User.to_authorizable chris in
-      match chris_ent with
-      | Ok chris_ent ->
-        let%lwt res = Article.update_title chris_ent chris_article "Updated Title" in
-        Lwt.return(Result.is_ok res)
-      | Error _ ->
-        Lwt.return false
+    ( let* chris_ent = User.to_authorizable chris in
+      let* _art = Article.update_title chris_ent chris_article "Updated Title" in
+      Lwt.return_ok true
     )
     >|=
-    Alcotest.(check bool)
+    Alcotest.(check (result bool string))
       "Chris can update an article owned by Chris."
-      true
+      (Ok true)
 
   let test_admin_update_others' _ () =
     ( let%lwt aron_ent = User.to_authorizable aron in
@@ -287,6 +291,7 @@ let return =
     ; ( Printf.sprintf "(%s) Entities should be denied access to entities they shouldn't access." name
       , [ Alcotest_lwt.test_case "Cannot update" `Quick T.cannot_update
         ; Alcotest_lwt.test_case "Cannot update" `Quick T.article_cannot_update_other_article
+          (* uncomment the next line to make sure compile-time invariants work *)
           (* ; Alcotest.test_case "Cannot update" `Quick hacker_cannot_update_article *)
         ]
       )
