@@ -3,15 +3,33 @@ type t =
   | `Admin
   | `Article
   | `Hacker
+  | `Editor of Ocaml_authorize.Uuidm.t
   ]
   [@@deriving show,eq,ord,yojson]
 
-let all = [ `User; `Admin; `Article; `Hacker ]
+let get_name = function
+  | `User -> "user"
+  | `Admin -> "admin"
+  | `Article -> "article"
+  | `Hacker -> "hacker"
+  | `Editor _ -> "editor"
+
+let get_target = function
+  | `User
+  | `Admin
+  | `Article
+  | `Hacker -> failwith "No target"
+  | `Editor x -> x
+
+let all = [ `User; `Admin; `Article; `Hacker; `Editor (Uuidm.nil) ]
 
 let of_string s =
-  match String.(trim (lowercase_ascii s)) with
-  | "user" | "`user" -> `User
-  | "admin" | "`admin" -> `Admin
-  | "article" | "`article" -> `Article
-  | "hacker" | "`hacker" -> `Hacker
+  match Ocaml_authorize.Util.decompose_variant_string s with
+  | "user", [] -> `User
+  | "admin", [] -> `Admin
+  | "article", [] -> `Article
+  | "hacker", [] -> `Hacker
+  | "editor", [id] -> 
+    let () = Printf.printf "Parsing role string: %s\n" s in
+    `Editor(Ocaml_authorize.Uuidm.of_string_exn id)
   | _ -> failwith("Invalid role: " ^ s)

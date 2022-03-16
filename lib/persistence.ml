@@ -9,6 +9,7 @@ module type Backend_store_s = sig
 
   val get_roles : Uuidm.t -> (role_set, string) monad
 
+  (** [get_perms target_spec] *)
   val get_perms : actor_spec -> (auth_rule list, string) monad
 
   val put_perm : auth_rule -> (unit, string) monad

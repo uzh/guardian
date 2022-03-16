@@ -15,6 +15,7 @@ module Tests(Backend : Ocauth.Persistence_s) = struct
   let chris = "Chris", Uuidm.v `V4
   let aron = "Aron", Uuidm.v `V4
   let ben : Hacker.t = "Ben Hackerman", Uuidm.v `V4
+  let thomas = "Thomas", Uuidm.v `V4
   let chris_article =
     Article.make
       ~title:"Foo"
@@ -33,6 +34,7 @@ module Tests(Backend : Ocauth.Persistence_s) = struct
   let global_perms: Ocaml_authorize.Authorizer.auth_rule list =
     [ `Role `User, `Read, `Role `Article
     ; `Role `Admin, `Manage, `Role `Article
+    ; `Role (`Editor chris_article.uuid), `Update, `Uniq chris_article.uuid
     ]
 
   let ( let* ) = Lwt_result.bind
@@ -43,6 +45,7 @@ module Tests(Backend : Ocauth.Persistence_s) = struct
     ( let* _aron_ent = User.to_authorizable aron in
       let* _chris_ent = User.to_authorizable chris in
       let* _ben_ent = Hacker.to_authorizable ben in
+      let* _tomas_ent = User.to_authorizable thomas in
       let* _chris_art_ent = Article.to_authorizable chris_article in
       let* _aron_art_ent = Article.to_authorizable aron_article in
       (* now we check to see that the authorizables have had ownership set *)
@@ -105,16 +108,21 @@ module Tests(Backend : Ocauth.Persistence_s) = struct
       (Ok())
 
   let test_push_perms _ () =
-    ( let%lwt res = Backend.put_perms global_perms in
-      Lwt.return(Result.is_ok res)
+    ( let* put =
+        Backend.put_perms global_perms
+        |> Lwt_result.map_err [%show: Ocauth.Authorizer.auth_rule list]
+      in
+      Lwt.return_ok (List.map Ocauth.Authorizer.show_auth_rule put)
     )
     >|=
-    Alcotest.(check bool)
+    Alcotest.(check (result (slist string String.compare) string))
       "Push global permissions."
-      true
+      (Ok(List.map Ocauth.Authorizer.show_auth_rule global_perms))
 
   let test_read_perms _ () =
-    ( let* perms = Backend.get_perms (`Role `Article) in
+    ( let* article_perms = Backend.get_perms (`Role `Article) in
+      let* editor_perms = Backend.get_perms (`Uniq chris_article.uuid) in
+      let perms = article_perms @ editor_perms in
       let global_set = Ocaml_authorize.Authorizer.Auth_rule_set.of_list global_perms in
       let retrieved_set = Ocaml_authorize.Authorizer.Auth_rule_set.of_list perms in
       let diff = Ocaml_authorize.Authorizer.Auth_rule_set.diff global_set retrieved_set in
@@ -219,6 +227,17 @@ module Tests(Backend : Ocauth.Persistence_s) = struct
       "Article cannot update another article."
       true
 
+  let editor_can_edit _ () =
+    ( let* () = Backend.grant_roles (snd thomas) (Ocauth.Role_set.singleton (`Editor chris_article.uuid)) in
+      let* thomas_authorizable = User.to_authorizable thomas in
+      let* _chris_article' = Article.update_title thomas_authorizable chris_article "Thomas set this one" in
+      Lwt.return_ok true
+    )
+    >|=
+    Alcotest.(check (result bool string))
+      "Editor can edit an article he's assigned as the editor of."
+      (Ok true)
+
   let set_owner _ () =
     ( let* aron' = User.to_authorizable aron in
       let* chris_article' = Article.update_author aron' chris_article aron in
@@ -293,6 +312,10 @@ let return =
         ; Alcotest_lwt.test_case "Cannot update" `Quick T.article_cannot_update_other_article
           (* uncomment the next line to make sure compile-time invariants work *)
           (* ; Alcotest.test_case "Cannot update" `Quick hacker_cannot_update_article *)
+        ]
+      )
+    ; ( Printf.sprintf "(%s) Check access for targeted roles." name
+      , [ Alcotest_lwt.test_case "Editor can edit" `Quick T.editor_can_edit
         ]
       )
     ; ( Printf.sprintf "(%s) Managing ownership." name

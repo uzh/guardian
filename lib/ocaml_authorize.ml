@@ -1,17 +1,20 @@
 module Uuidm = struct
-  include Uuidm
+  include Uuid
+end
 
-  let to_yojson t =
-    `String (to_string t)
-
-  let of_yojson = function
-    | `String s ->
-      of_string s
-      |> begin function
-        | Some x -> Ok x
-        | None -> Error("Invalid UUID: " ^ s)
-      end
-    | _ -> raise (Invalid_argument "")
+module Util = struct
+  let decompose_variant_string s =
+    let s = String.trim s in
+    let fmt = format_of_string "`%s (%s@)" in
+    try
+      Scanf.sscanf
+        s
+        fmt
+        (fun name params -> String.(lowercase_ascii name, List.map trim (split_on_char ',' params)))
+    with
+      | End_of_file ->
+        let fmt = format_of_string "`%s" in
+        Scanf.sscanf s fmt (fun name -> String.lowercase_ascii name, [])
 end
 
 module type Role_s = Role.S

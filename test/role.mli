@@ -4,4 +4,5 @@ include Ocaml_authorize.Role_s
     | `Admin
     | `Article
     | `Hacker
+    | `Editor of Uuidm.t
     ]
