@@ -107,6 +107,23 @@ module Tests(Backend : Ocauth.Persistence_s) = struct
       "Check a user's roles."
       (Ok())
 
+  let test_revoke_roles _ () =
+    ( let* () = Backend.grant_roles (snd aron) (Ocauth.Role_set.singleton (`Editor Uuidm.nil)) in
+      let* () =
+        let* roles = Backend.get_roles (snd aron) in
+        if Ocauth.Role_set.mem (`Editor Uuidm.nil) roles
+          then Lwt.return_ok()
+          else Lwt.return_error "Didn't successfully add the role we intended to remove."
+      in
+      let* () = Backend.revoke_roles (snd aron) (Ocauth.Role_set.singleton (`Editor Uuidm.nil)) in
+      let* roles = Backend.get_roles (snd aron) in
+      Lwt.return_ok(Ocauth.Role_set.mem (`Editor Uuidm.nil) roles)
+    )
+    >|=
+    Alcotest.(check (result bool string))
+      "Check a user's roles."
+      (Ok(false))
+
   let test_push_perms _ () =
     ( let* put =
         Backend.put_perms global_perms
@@ -287,6 +304,7 @@ let return =
     ; ( Printf.sprintf "(%s) Managing roles." name
       , [ Alcotest_lwt.test_case "Grant a role." `Quick T.test_grant_roles
         ; Alcotest_lwt.test_case "Check roles." `Quick T.test_check_roles
+        ; Alcotest_lwt.test_case "Revoke a role." `Quick T.test_revoke_roles
         ]
       )
     ; ( Printf.sprintf "(%s) Managing authorization rules." name

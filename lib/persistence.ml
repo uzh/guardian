@@ -18,6 +18,8 @@ module type Backend_store_s = sig
 
   val grant_roles : Uuidm.t -> role_set -> (unit, string) monad
 
+  val revoke_roles : Uuidm.t -> role_set -> (unit, string) monad
+
   val create_authorizable : id:Uuidm.t -> ?owner:Uuidm.t -> role_set -> (unit, string) monad
 
   val mem_authorizable : Uuidm.t -> (bool, string) monad

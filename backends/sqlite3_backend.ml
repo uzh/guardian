@@ -277,6 +277,26 @@ module Make(R : Ocaml_authorize.Role_s) = struct
         ignore(bind_values stmt Data.[TEXT roles'; TEXT id'])
       in
       lwt_return_rc(Sqlite3.step stmt)
+    let revoke_roles id roles =
+      let id' = Uuidm.to_string id in
+      let* roles' =
+        let* pre_roles = get_roles id in
+        Ocaml_authorize.Role_set.diff pre_roles roles
+        |> Ocaml_authorize.Role_set.to_yojson
+        |> Yojson.Safe.to_string
+        |> Lwt.return_ok
+      in
+      let* stmt =
+        let* mem = mem_authorizable id in
+        if mem
+        then Lwt.return_ok(Sqlite3.prepare db "UPDATE entities SET roles = ? WHERE id = ?")
+        else Lwt.return_error "Cannot grant a role to an authorizable which doesn't exist."
+      in
+      let () =
+        let open Sqlite3 in
+        ignore(bind_values stmt Data.[TEXT roles'; TEXT id'])
+      in
+      lwt_return_rc(Sqlite3.step stmt)
     let set_owner id ~owner =
       let id' = Uuidm.to_string id in
       let owner' = Uuidm.to_string owner in

@@ -131,6 +131,20 @@ module Make(R : Ocaml_authorize.Role_s)(CONFIG : sig val connection_string : str
       else
         Lwt.return_ok()
 
+    let revoke_roles uuid roles =
+      let open Ocaml_authorize in
+      let* pre_roles = get_roles uuid in
+      let roles' = Role_set.diff pre_roles roles in
+      let caqti =
+        Caqti_request.exec
+          Caqti_type.(tup2 string string)
+          "UPDATE entities SET roles = ? WHERE id = ?"
+      in
+      let roles'' = Yojson.Safe.to_string(Role_set.to_yojson roles') in
+      match%lwt Db.exec caqti (roles'', Uuidm.to_string uuid) with
+      | Ok () -> Lwt.return_ok()
+      | Error err -> Lwt.return_error(Caqti_error.show err)
+
     let create_authorizable ~id ?owner roles =
       let caqti =
         Caqti_request.exec
