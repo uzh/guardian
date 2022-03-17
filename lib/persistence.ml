@@ -50,6 +50,8 @@ module type S = sig
     ('param -> ('rval, 'etyp) monad) ->
     (actor:'a authorizable -> 'param -> ('rval, 'etyp) monad, string) monad
 
+  val revoke_role : Uuidm.t -> role -> (unit, string) monad
+
   (** _exn variants of all functions *)
   val get_roles_exn : Uuidm.t -> role_set Lwt.t
   val get_perms_exn : actor_spec -> auth_rule list Lwt.t

@@ -87,12 +87,16 @@ module Make(R : Role.S) = struct
         with type 'a authorizable = 'a Authorizable.t
         and type role_set = Role_set.t
         and type actor_spec = Authorizer.actor_spec
-        and type auth_rule = Authorizer.auth_rule)
+        and type auth_rule = Authorizer.auth_rule
+        and type role = Role_set.elt)
     : Persistence_s
   = struct
     include BES
     
     let ( let* ) = Lwt_result.bind
+
+    let revoke_role id role =
+      revoke_roles id (Role_set.singleton role)
 
     let get_authorizable ~(typ : 'kind) id =
       let* mem = BES.mem_authorizable id in
