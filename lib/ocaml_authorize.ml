@@ -88,7 +88,7 @@ module Make(R : Role.S) = struct
         and type role_set = Role_set.t
         and type actor_spec = Authorizer.actor_spec
         and type auth_rule = Authorizer.auth_rule
-        and type role = Role_set.elt)
+        and type role = R.t)
     : Persistence_s
   = struct
     include BES
