@@ -293,7 +293,7 @@ module Tests(Backend : Ocauth.Persistence_s) = struct
       true *)
 end
 
-let return =
+let _return =
   let make_test_cases (module Backend : Ocauth.Persistence_s) name =
     let module T = Tests(Backend) in
     [ ( Printf.sprintf "(%s) Managing authorizables." name

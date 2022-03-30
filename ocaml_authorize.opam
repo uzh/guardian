@@ -27,4 +27,8 @@ depends: [
   "sqlite3"
   "ppx_inline_test"
   "caqti-driver-mariadb"
+  "ppx_deriving_yojson"
+  "caqti-lwt"
+  "lwt_ppx"
+  "ppx_derivers"
 ]

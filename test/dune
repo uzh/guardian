@@ -1,30 +1,15 @@
 (rule
  (target test_db.sqlite3)
  (deps init_db.sql)
+ (enabled_if %{bin-available:sqlite3})
  (action
   (with-stdin-from
    init_db.sql
    (run sqlite3 -batch %{target}))))
 
-; SQLite3 test
-; (test
-;  (name main)
-;  (libraries
-;   alcotest
-;   alcotest-lwt
-;   ocaml_authorize
-;   sqlite3
-;   ocaml_authorize.backends)
-;  (preprocess
-;   (pps ppx_deriving.make ppx_deriving.show lwt_ppx))
-;  (deps article.ml hacker.ml test_db.sqlite3 main.ml user.ml)
-;  (action
-;   (progn
-;    (run chmod u+w test_db.sqlite3)
-;    (run %{test} -e))))
-
 (test
  (name main)
+ (enabled_if %{bin-available:sqlite3})
  (libraries
   alcotest
   alcotest-lwt
