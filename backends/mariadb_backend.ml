@@ -1,5 +1,9 @@
 open Lwt.Infix
-open Caqti_request.Infix
+(* just replace the following lines with [open Caqti_request.Infix] when we're ready for caqti 1.8.0 *)
+let (->!) = Caqti_request.find
+let (->*) = Caqti_request.collect
+let (->.) arg _unit q = Caqti_request.exec arg q
+let (->?) = Caqti_request.find_opt
 
 module Make(R : Ocaml_authorize.Role_s)(CONFIG : sig val connection_string : string end) () = struct
   module Ocaml_authorize = Ocaml_authorize.Make(R)

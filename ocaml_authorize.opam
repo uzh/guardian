@@ -28,6 +28,7 @@ depends: [
   "ppx_inline_test"
   "caqti-driver-mariadb"
   "ppx_deriving_yojson"
+  "caqti" {= "1.7.0"}
   "caqti-lwt"
   "lwt_ppx"
   "ppx_derivers"
