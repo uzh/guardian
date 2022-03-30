@@ -1,4 +1,5 @@
 open Lwt.Infix
+open Caqti_request.Infix
 
 module Make(R : Ocaml_authorize.Role_s)(CONFIG : sig val connection_string : string end) () = struct
   module Ocaml_authorize = Ocaml_authorize.Make(R)
@@ -22,10 +23,9 @@ module Make(R : Ocaml_authorize.Role_s)(CONFIG : sig val connection_string : str
 
     let get_roles id : (Ocaml_authorize.Role_set.t, string) Lwt_result.t =
       let caqti =
-        Caqti_request.find
-          Caqti_type.string
-          Caqti_type.string
-          "SELECT roles FROM entities WHERE id = ?"
+        Caqti_type.string ->! Caqti_type.string
+        @@
+        "SELECT roles FROM entities WHERE id = ?"
       in
       match%lwt Db.find caqti (Uuidm.to_string id) with
       | Ok s -> Lwt.return(Ocaml_authorize.Role_set.of_yojson(Yojson.Safe.from_string s))
@@ -36,18 +36,20 @@ module Make(R : Ocaml_authorize.Role_s)(CONFIG : sig val connection_string : str
         match target_spec with
         | `Uniq uuid ->
           let caqti =
-            Caqti_request.collect
-              Caqti_type.string
-              Caqti_type.(tup3 string (option string) (option string))
-              "SELECT act, actor_id, actor_role FROM rules WHERE target_id = ?"
+            Caqti_type.string
+            ->*
+            Caqti_type.(tup3 string (option string) (option string))
+            @@
+            "SELECT act, actor_id, actor_role FROM rules WHERE target_id = ?"
           in
           Db.collect_list caqti (Uuidm.to_string uuid)
         | `Role role ->
           let caqti =
-            Caqti_request.collect
-              Caqti_type.string
-              Caqti_type.(tup3 string (option string) (option string))
-              "SELECT act, actor_id, actor_role FROM rules WHERE target_role = ?"
+            Caqti_type.string
+            ->*
+            Caqti_type.(tup3 string (option string) (option string))
+            @@
+            "SELECT act, actor_id, actor_role FROM rules WHERE target_role = ?"
           in
           Db.collect_list caqti (R.show role)
       in
@@ -80,7 +82,7 @@ module Make(R : Ocaml_authorize.Role_s)(CONFIG : sig val connection_string : str
       let actor' = spec_to_str actor in
       let act' = Ocaml_authorize.Action.to_string act in
       let target' = spec_to_str target in
-      let caqti = Caqti_request.exec Caqti_type.(tup3 string string string) query in
+      let caqti = Caqti_type.(tup3 string string string) ->. Caqti_type.unit @@ query in
       match%lwt Db.exec caqti (actor', act', target') with
       | Ok() -> Lwt.return_ok()
       | Error err -> Lwt.return_error(Caqti_error.show err)
@@ -120,9 +122,9 @@ module Make(R : Ocaml_authorize.Role_s)(CONFIG : sig val connection_string : str
       if Role_set.(cardinal roles' > cardinal pre_roles)
       then
         let caqti =
-          Caqti_request.exec
-            Caqti_type.(tup2 string string)
-            "UPDATE entities SET roles = ? WHERE id = ?"
+          Caqti_type.(tup2 string string) ->. Caqti_type.unit
+          @@
+          "UPDATE entities SET roles = ? WHERE id = ?"
         in
         let roles'' = Yojson.Safe.to_string(Role_set.to_yojson roles') in
         match%lwt Db.exec caqti (roles'', Uuidm.to_string uuid) with
@@ -136,9 +138,9 @@ module Make(R : Ocaml_authorize.Role_s)(CONFIG : sig val connection_string : str
       let* pre_roles = get_roles uuid in
       let roles' = Role_set.diff pre_roles roles in
       let caqti =
-        Caqti_request.exec
-          Caqti_type.(tup2 string string)
-          "UPDATE entities SET roles = ? WHERE id = ?"
+        Caqti_type.(tup2 string string) ->. Caqti_type.unit
+        @@
+        "UPDATE entities SET roles = ? WHERE id = ?"
       in
       let roles'' = Yojson.Safe.to_string(Role_set.to_yojson roles') in
       match%lwt Db.exec caqti (roles'', Uuidm.to_string uuid) with
@@ -147,9 +149,9 @@ module Make(R : Ocaml_authorize.Role_s)(CONFIG : sig val connection_string : str
 
     let create_authorizable ~id ?owner roles =
       let caqti =
-        Caqti_request.exec
-          Caqti_type.(tup3 string string (option string))
-          "INSERT INTO entities (id, roles, parent) VALUES (?, ?, ?)"
+        Caqti_type.(tup3 string string (option string)) ->. Caqti_type.unit
+        @@
+        "INSERT INTO entities (id, roles, parent) VALUES (?, ?, ?)"
       in
       let roles' = Ocaml_authorize.Role_set.to_yojson roles |> Yojson.Safe.to_string in
       let owner' = Option.map Uuidm.to_string owner in
@@ -159,10 +161,9 @@ module Make(R : Ocaml_authorize.Role_s)(CONFIG : sig val connection_string : str
 
     let mem_authorizable id =
       let caqti =
-        Caqti_request.find_opt
-          Caqti_type.string
-          Caqti_type.string
-          "SELECT roles FROM entities WHERE id = ?"
+        Caqti_type.string ->? Caqti_type.string
+        @@
+        "SELECT roles FROM entities WHERE id = ?"
       in
       match%lwt Db.find_opt caqti (Uuidm.to_string id) with
       | Ok(Some _) -> Lwt.return_ok(true)
@@ -171,10 +172,9 @@ module Make(R : Ocaml_authorize.Role_s)(CONFIG : sig val connection_string : str
 
     let get_owner id =
       let caqti =
-        Caqti_request.find
-          Caqti_type.string
-          Caqti_type.(option string)
-          "SELECT parent FROM entities WHERE id = ?"
+        Caqti_type.string ->! Caqti_type.(option string)
+        @@
+        "SELECT parent FROM entities WHERE id = ?"
       in
       match%lwt Db.find caqti (Uuidm.to_string id) with
       | Ok s -> Lwt.return_ok(Option.bind s Uuidm.of_string)
@@ -182,9 +182,9 @@ module Make(R : Ocaml_authorize.Role_s)(CONFIG : sig val connection_string : str
 
     let set_owner id ~owner =
       let caqti =
-        Caqti_request.exec
-          Caqti_type.(tup2 string string)
-          "UPDATE entities SET parent = ? WHERE id = ?"
+        Caqti_type.(tup2 string string) ->. Caqti_type.unit
+        @@
+        "UPDATE entities SET parent = ? WHERE id = ?"
       in
       match%lwt Db.exec caqti Uuidm.(to_string owner, to_string id) with
       | Ok _ -> Lwt.return_ok()
