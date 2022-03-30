@@ -3,6 +3,7 @@ build: [
   ["dune" "build"]
   ["dune" "build" "-p" name "-j" jobs]
 ]
+version: "0.0.1"
 install: [
   ["dune" "install"]
 ]
