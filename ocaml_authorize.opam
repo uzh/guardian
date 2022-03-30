@@ -3,21 +3,22 @@ build: [
   ["dune" "build"]
   ["dune" "build" "-p" name "-j" jobs]
 ]
+maintainer: "John Christopher McAlpine <christophermcalpine@gmail.com>"
+authors: ["John Christopher McAlpine"]
+homepage: "internal to UZH"
+bug-reports: "internal to UZH"
+synopsis: "Role-based access control for OCaml"
 version: "0.0.1"
 install: [
   ["dune" "install"]
 ]
 depends: [
   "lwt"
-  "lwt.unix"
   "base64"
   "uuidm"
   "fmt"
-  "fmt.tty"
   "logs"
-  "logs.fmt"
   "ptime"
-  "ptime.clock"
   "conformist"
   "containers"
   "yojson"
