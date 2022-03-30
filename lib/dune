@@ -12,8 +12,6 @@
   fmt.tty
   logs
   logs.fmt
-  ptime
-  ptime.clock
   conformist
   containers
   yojson)

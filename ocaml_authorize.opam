@@ -18,7 +18,6 @@ depends: [
   "uuidm"
   "fmt"
   "logs"
-  "ptime"
   "conformist"
   "containers"
   "yojson"
