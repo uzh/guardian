@@ -59,6 +59,37 @@ module Make(R : Role.S) = struct
     (** [action, target] Denotes an effect a function may have on and therefore
         which permissions an actor needs to invoke it. *)
     type effect = Action.t * actor_spec [@@deriving show,ord]
+
+    (** Convenience function to return a [can] function. Takes an optional target
+      specification (for error reporting purposes) and a list of [ocaml_authorize]
+      rules of the form [actor, action, target] and returns a function that looks
+      like:
+      [val can : actor:\[ whatever \] Ocauth.Authorizable.t -> (unit, string) result] *)
+    let checker_of_rules rules =
+      let ( let* ) = CCResult.( let* ) in
+      fun ~actor ->
+        CCList.fold_left
+          (fun acc (actor', action, target) ->
+            let* _rv = acc in
+            let is_matched =
+              match actor' with
+              | `Uniq uuid ->
+                uuid = actor.Authorizable.uuid
+                && (action = action || action = `Manage)
+              | `Role role ->
+                Role_set.mem role actor.Authorizable.roles
+                && (action = action || action = `Manage)
+            in
+            if is_matched
+            then CCResult.return ()
+            else
+              Error
+                (Format.asprintf
+                    "Actor %s does not have permission to %s"
+                    (Authorizable.to_string actor)
+                    (show_effect (action, target))))
+          (Ok ())
+          rules
   
     module Auth_rule_set = Set.Make(struct
         type t = auth_rule
