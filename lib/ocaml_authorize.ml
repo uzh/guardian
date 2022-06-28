@@ -65,7 +65,7 @@ module Make(R : Role.S) = struct
       rules of the form [actor, action, target] and returns a function that looks
       like:
       [val can : actor:\[ whatever \] Ocauth.Authorizable.t -> (unit, string) result] *)
-    let checker_of_rules rules =
+    let checker_of_rules (rules : auth_rule list) =
       let ( let* ) = CCResult.( let* ) in
       fun ~actor ->
         CCList.fold_left
@@ -81,7 +81,7 @@ module Make(R : Role.S) = struct
                 && (action = action || action = `Manage)
             in
             if is_matched
-            then CCResult.return ()
+            then Ok ()
             else
               Error
                 (Format.asprintf
@@ -338,7 +338,7 @@ module Make(R : Role.S) = struct
 
       Then this function invoked as [collect_rules \[`Update, `Uniq id1\]] will
       only return row 2. *)
-    let collect_rules effects =
+    let collect_rules (effects : Authorizer.effect list) =
       let open Lwt_result.Syntax in
       let results =
         CCList.map
