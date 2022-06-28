@@ -292,6 +292,39 @@ module Make(R : Role.S) = struct
             |> Lwt.return
           in
           f param)
+    (** [collect_rules e] Query the database for a list of rules pertaining to the
+      effects [e]. Note that due to the implemented behaviour of
+      [Ocauth.Persistence.get_perms], this function may not behave as expected for
+      effects targeting a [`Uniq] entity. It will only collect rules that
+      explicitly target that particular entity, NOT rules pertaining to that
+      entity's roles. E.g if you have some [subject s] with the [`Subject] role
+      and UUID [id1], and a rules list that looks like this:
+
+      {[
+        1: `Role `Operator, `Update, `Role `Subject
+        2: `Uniq id2, `Update, `Uniq id1
+      ]}
+
+      Then this function invoked as [collect_rules \[`Update, `Uniq id1\]] will
+      only return row 2. *)
+    let collect_rules effects =
+      let open Lwt_result.Syntax in
+      let results =
+        CCList.map
+          (fun (action, target) ->
+            let* rules = get_perms target in
+            CCList.filter (fun (_actor, action', _target) -> action = action') rules
+            |> Lwt_result.return)
+          effects
+      in
+      CCList.fold_left
+        (fun acc x ->
+          let* acc = acc in
+          let* x = x in
+          Lwt_result.return (CCList.append acc x))
+        (Lwt_result.return [])
+        results
+    ;;
 
     (** turn a single argument function returning a [result] into one that raises
     a [Failure] instead *)
