@@ -60,6 +60,8 @@ module Make(R : Role.S) = struct
         which permissions an actor needs to invoke it. *)
     type effect = Action.t * actor_spec [@@deriving show,ord]
 
+    module Effect_set = Set.Make(struct type t = effect [@@deriving ord] end)
+
     (** Convenience function to return a [can] function. Takes an optional target
       specification (for error reporting purposes) and a list of [ocaml_authorize]
       rules of the form [actor, action, target] and returns a function that looks
@@ -323,6 +325,45 @@ module Make(R : Role.S) = struct
             |> Lwt.return
           in
           f param)
+
+    (* Because of effects that look like [`Action A, `Uniq X] we need to make an extra pass
+       to get all of entity X's roles, because if you have permission to do A to one of
+        X's roles, then you should be able to do A to X. *)
+    let rec expand_effects (effects : Authorizer.effect list): (Authorizer.effect list, string) result Lwt.t =
+      let open Lwt_result.Syntax in
+      let lsls: (Authorizer.effect list, string) result Lwt.t list =
+        List.map
+          (fun effect ->
+            match effect with
+            | action, `Uniq x ->
+              let* roles = get_roles x in
+              let* set =
+                List.map
+                  (fun role ->
+                    expand_effects [action, `Role role])
+                  (Role_set.elements roles)
+                |> List.fold_left
+                    (fun rv effect ->
+                      let* rv = rv in
+                      let* effect = effect in
+                      let set' = List.fold_left (fun acc x -> Authorizer.Effect_set.add x acc) rv effect in
+                      Lwt.return_ok set')
+                    (Lwt.return_ok(Authorizer.Effect_set.singleton effect))
+              in
+              Lwt_result.return(Authorizer.Effect_set.elements set)
+            | x ->
+              Lwt.return_ok[x]
+            )
+          effects
+      in
+      List.fold_left
+        (fun x acc ->
+          let* x' = x in
+          let* acc' = acc in
+          Lwt.return_ok(x' @ acc'))
+        (Lwt.return_ok [])
+        lsls
+
     (** [collect_rules e] Query the database for a list of rules pertaining to the
       effects [e]. Note that due to the implemented behaviour of
       [Ocauth.Persistence.get_perms], this function may not behave as expected for
@@ -340,21 +381,30 @@ module Make(R : Role.S) = struct
       only return row 2. *)
     let collect_rules (effects : Authorizer.effect list) =
       let open Lwt_result.Syntax in
+      let* effects = expand_effects effects in
       let results =
         CCList.map
           (fun (action, target) ->
             let* rules = get_perms target in
-            CCList.filter (fun (_actor, action', _target) -> action = action') rules
+            CCList.filter (fun (_actor, action', _target) -> action = action' || action' = `Manage) rules
             |> Lwt_result.return)
           effects
       in
-      CCList.fold_left
-        (fun acc x ->
-          let* acc = acc in
-          let* x = x in
-          Lwt_result.return (CCList.append acc x))
-        (Lwt_result.return [])
-        results
+      let* rules =
+        CCList.fold_left
+          (fun acc x ->
+            let* acc = acc in
+            let* x = x in
+            Lwt_result.return (CCList.append acc x))
+          (Lwt_result.return [])
+          results
+      in
+      CCList.fold_right
+        Authorizer.Auth_rule_set.add
+        rules
+        Authorizer.Auth_rule_set.empty
+      |> Authorizer.Auth_rule_set.elements
+      |> Lwt_result.return
     ;;
 
     (** turn a single argument function returning a [result] into one that raises
