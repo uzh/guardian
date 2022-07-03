@@ -382,8 +382,8 @@ module Make(R : Role.S) = struct
     let collect_rules (effects : Authorizer.effect list) =
       let open Lwt_result.Syntax in
       let* effects = expand_effects effects in
-      let results =
-        CCList.map
+      let%lwt results =
+        Lwt_list.map_s
           (fun (action, target) ->
             let* rules = get_perms target in
             CCList.filter (fun (_actor, action', _target) -> action = action' || action' = `Manage) rules
@@ -391,12 +391,12 @@ module Make(R : Role.S) = struct
           effects
       in
       let* rules =
-        CCList.fold_left
-          (fun acc x ->
-            let* acc = acc in
-            let* x = x in
+        Lwt_list.fold_left_s
+          (fun acc (x : (auth_rule list, string) result) ->
+            let* acc = Lwt_result.lift acc in
+            let* x = Lwt_result.lift x in
             Lwt_result.return (CCList.append acc x))
-          (Lwt_result.return [])
+          (Ok [])
           results
       in
       CCList.fold_right
