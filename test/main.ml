@@ -127,7 +127,7 @@ module Tests(Backend : Ocauth.Persistence_s) = struct
   let test_push_perms _ () =
     ( let* put =
         Backend.put_perms global_perms
-        |> Lwt_result.map_err [%show: Ocauth.Authorizer.auth_rule list]
+        |> Lwt_result.map_error [%show: Ocauth.Authorizer.auth_rule list]
       in
       Lwt.return_ok (List.map Ocauth.Authorizer.show_auth_rule put)
     )
