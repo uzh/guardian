@@ -331,8 +331,8 @@ module Make(R : Role.S) = struct
         X's roles, then you should be able to do A to X. *)
     let rec expand_effects (effects : Authorizer.effect list): (Authorizer.effect list, string) result Lwt.t =
       let open Lwt_result.Syntax in
-      let lsls: (Authorizer.effect list, string) result Lwt.t list =
-        List.map
+      let%lwt lsls =
+        Lwt_list.map_s
           (fun effect ->
             match effect with
             | action, `Uniq x ->
@@ -358,11 +358,14 @@ module Make(R : Role.S) = struct
       in
       List.fold_left
         (fun x acc ->
-          let* x' = x in
-          let* acc' = acc in
-          Lwt.return_ok(x' @ acc'))
-        (Lwt.return_ok [])
+          match acc, x with
+          | Error _, _ -> acc
+          | Ok _, Error _ -> x
+          | Ok acc', Ok x' ->
+            Ok(x' @ acc'))
+        (Ok [])
         lsls
+      |> Lwt.return
 
     (** [collect_rules e] Query the database for a list of rules pertaining to the
       effects [e]. Note that due to the implemented behaviour of
