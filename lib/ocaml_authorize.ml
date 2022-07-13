@@ -368,21 +368,13 @@ module Make(R : Role.S) = struct
       |> Lwt.return
 
     (** [collect_rules e] Query the database for a list of rules pertaining to the
-      effects [e]. Note that due to the implemented behaviour of
-      [Ocauth.Persistence.get_perms], this function may not behave as expected for
-      effects targeting a [`Uniq] entity. It will only collect rules that
-      explicitly target that particular entity, NOT rules pertaining to that
-      entity's roles. E.g if you have some [subject s] with the [`Subject] role
-      and UUID [id1], and a rules list that looks like this:
-
-      {[
-        1: `Role `Operator, `Update, `Role `Subject
-        2: `Uniq id2, `Update, `Uniq id1
-      ]}
-
-      Then this function invoked as [collect_rules \[`Update, `Uniq id1\]] will
-      only return row 2. *)
+      effects [e]. *)
     let collect_rules (effects : Authorizer.effect list) =
+      Lwt_result.map_error
+        (Format.asprintf
+          "Failed to collect rules for effects list %s. Error message: %s"
+          ([%show: Authorizer.effect list] effects))
+      @@
       let open Lwt_result.Syntax in
       let* effects = expand_effects effects in
       let%lwt results =
