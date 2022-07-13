@@ -417,7 +417,7 @@ module Make(R : Role.S) = struct
         (fun acc effect ->
           let* () = Lwt_result.lift acc in
           let* rules = collect_rules [effect] in
-          Authorizer.checker_of_rules rules ~actor
+          Authorizer.checker_of_rules ~any_of:true rules ~actor
           |> CCResult.map_err
               (fun _ -> Format.asprintf
                 "Actor %s does not have permission to %s target %s."
