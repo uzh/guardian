@@ -3,7 +3,8 @@ type t =
   | `Admin
   | `Article
   | `Hacker
-  | `Editor of Ocaml_authorize.Uuidm.t
+  | `Editor of Ocaml_authorize.Uuidm.t [@equal fun a b ->
+       Uuidm.equal a nil || Uuidm.equal b nil ]
   ]
   [@@deriving show,eq,ord,yojson]
 

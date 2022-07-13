@@ -402,6 +402,23 @@ module Make(R : Role.S) = struct
       |> Lwt_result.return
     ;;
 
+    let checker_of_effects effects ~actor =
+      Lwt_list.fold_left_s
+        (fun acc effect ->
+          let* () = Lwt_result.lift acc in
+          let* rules = collect_rules [effect] in
+          Authorizer.checker_of_rules rules ~actor
+          |> CCResult.map_err
+              (fun _ -> Format.asprintf
+                "Actor %s does not have permission to %s target %s."
+                (Authorizable.to_string actor)
+                (Action.show (fst effect))
+                ([%show: Authorizer.actor_spec] (snd effect)))
+          |> Lwt_result.lift)
+        (Ok ())
+        effects
+    ;;
+
     (** turn a single argument function returning a [result] into one that raises
     a [Failure] instead *)
     let exceptionalize1 f name =

@@ -54,6 +54,9 @@ module type S = sig
 
   val collect_rules : (Action.t * actor_spec) list -> (auth_rule list, string) monad
 
+  val checker_of_effects : (Action.t * actor_spec) list ->
+    actor:'a authorizable -> (unit, string) monad
+
   (** _exn variants of all functions *)
   val get_roles_exn : Uuidm.t -> role_set Lwt.t
   val get_perms_exn : actor_spec -> auth_rule list Lwt.t
