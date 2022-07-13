@@ -75,25 +75,25 @@ module Make(R : Role.S) = struct
       fun ~actor ->
         let results =
           CCList.map
-          (fun (actor', action, target) ->
-            let is_matched =
-              match actor' with
-              | `Uniq uuid ->
-                uuid = actor.Authorizable.uuid
-                && (action = action || action = `Manage)
-              | `Role role ->
-                Role_set.mem role actor.Authorizable.roles
-                && (action = action || action = `Manage)
-            in
-            if is_matched
-            then Ok ()
-            else
-              Error
-                (Format.asprintf
-                    "Actor %s does not have permission to %s"
-                    (Authorizable.to_string actor)
-                    (show_effect (action, target))))
-                  rules
+            (fun (actor', action, target) ->
+              let is_matched =
+                match actor' with
+                | `Uniq uuid ->
+                  uuid = actor.Authorizable.uuid
+                  && (action = action || action = `Manage)
+                | `Role role ->
+                  Role_set.mem role actor.Authorizable.roles
+                  && (action = action || action = `Manage)
+              in
+              if is_matched
+              then Ok ()
+              else
+                Error
+                  (Format.asprintf
+                      "Actor %s does not have permission to %s"
+                      (Authorizable.to_string actor)
+                      (show_effect (action, target))))
+            rules
           in
           if any_of
           then begin
@@ -101,7 +101,14 @@ module Make(R : Role.S) = struct
               then Ok()
               else CCList.hd results
           end
-          else CCList.fold_left (fun acc x -> let* _acc = acc in let* _x = x in Ok()) (Ok()) results
+          else
+            CCList.fold_left
+              (fun acc x ->
+                let* _acc = acc in
+                let* _x = x in
+                Ok())
+              (Ok())
+              results
   
     module Auth_rule_set = Set.Make(struct
         type t = auth_rule
@@ -419,11 +426,12 @@ module Make(R : Role.S) = struct
           let* rules = collect_rules [effect] in
           Authorizer.checker_of_rules ~any_of:true rules ~actor
           |> CCResult.map_err
-              (fun _ -> Format.asprintf
-                "Actor %s does not have permission to %s target %s."
+              (fun err -> Format.asprintf
+                "Actor %s does not have permission to %s target %s. Error message: %s"
                 (Authorizable.to_string actor)
                 (Action.show (fst effect))
-                ([%show: Authorizer.actor_spec] (snd effect)))
+                ([%show: Authorizer.actor_spec] (snd effect))
+                err)
           |> Lwt_result.lift)
         (Ok ())
         effects
