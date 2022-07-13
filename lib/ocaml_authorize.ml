@@ -66,13 +66,16 @@ module Make(R : Role.S) = struct
       specification (for error reporting purposes) and a list of [ocaml_authorize]
       rules of the form [actor, action, target] and returns a function that looks
       like:
+
+      [any_of]: indicates that the checker should pass if any of the rules in the
+        list is satisfied. The default behaviour is to only pass if all rules are.
       [val can : actor:\[ whatever \] Ocauth.Authorizable.t -> (unit, string) result] *)
-    let checker_of_rules (rules : auth_rule list) =
+    let checker_of_rules ?(any_of = false) (rules : auth_rule list) =
       let ( let* ) = CCResult.( let* ) in
       fun ~actor ->
-        CCList.fold_left
-          (fun acc (actor', action, target) ->
-            let* _rv = acc in
+        let results =
+          CCList.map
+          (fun (actor', action, target) ->
             let is_matched =
               match actor' with
               | `Uniq uuid ->
@@ -90,8 +93,15 @@ module Make(R : Role.S) = struct
                     "Actor %s does not have permission to %s"
                     (Authorizable.to_string actor)
                     (show_effect (action, target))))
-          (Ok ())
-          rules
+                  rules
+          in
+          if any_of
+          then begin
+            if CCList.exists ((=) (Ok ())) results
+              then Ok()
+              else CCList.hd results
+          end
+          else CCList.fold_left (fun acc x -> let* _acc = acc in let* _x = x in Ok()) (Ok()) results
   
     module Auth_rule_set = Set.Make(struct
         type t = auth_rule
