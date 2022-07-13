@@ -99,7 +99,11 @@ module Make(R : Role.S) = struct
           then begin
             if CCList.exists ((=) (Ok ())) results
               then Ok()
-              else CCList.hd results
+              else Error(
+                Format.asprintf
+                  "Actor %s does not satisfy any of the following rules: %s"
+                  (Authorizable.to_string actor)
+                  ([%show: auth_rule list] rules))
           end
           else
             CCList.fold_left
