@@ -60,6 +60,6 @@
    (>= 0.9.8))
   (yojson
    (>= 2.0.2))
+  ppx_inline_test
   ;; Test/Dev dependencies
-  (alcotest-lwt :with-test)
-  (ppx_inline_test :with-test)))
+  (alcotest-lwt :with-test)))
