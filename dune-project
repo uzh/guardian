@@ -51,7 +51,7 @@
   (ppx_deriving
    (>= 5.2.1))
   (ppx_deriving_yojson
-   (>= 3.7.0))
+   (>= 3.6.1))
   (sqlite3
    (>= 5.1.0))
   (uri
