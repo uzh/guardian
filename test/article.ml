@@ -1,4 +1,4 @@
-module Make(P : Ocaml_authorize.Persistence.S) = struct
+module Make(P : Ocauth.Persistence_s) = struct
   module User = User.Make(P)
   (** pretend that all these fields aren't publically visible *)
   type t =
@@ -11,45 +11,43 @@ module Make(P : Ocaml_authorize.Persistence.S) = struct
   type kind = [ `Article ]
 
   let to_authorizable t =
-    let open Ocaml_authorize in
-    let roles =
-      Ocaml_authorize.Role_set.empty
-      |> Ocaml_authorize.Role_set.add "Article"
-    in
+    let open Ocauth in
+    let roles = Ocauth.Role_set.singleton `Article in
     Authorizable.make
       ~roles
       ~typ:`Article
+      ~owner:(snd t.author)
       t.uuid
 
-  (** This pattern may be instructive. *)
-  let to_authorizable t =
-    let%lwt ent = (P.decorate_to_authorizable to_authorizable) t in
-    let%lwt owner =
-      match%lwt User.to_authorizable t.author with
-      | Ok own -> Lwt.return_some {own with typ = ()}
-      | Error _ -> Lwt.return_none
+  let to_authorizable =
+    P.decorate_to_authorizable to_authorizable
+
+  let update_title (actor: [`User | `Article] Ocauth.Authorizable.t) t new_title =
+    let f new_title =
+      let _ = t.title <- new_title in Lwt.return_ok t
     in
-    match ent with
-    | Ok ent' -> Lwt.return_ok {ent' with owner = owner}
-    | err -> Lwt.return err
-
-  let update_title (actor: [`User | `Article] Ocaml_authorize.Authorizable.t) t new_title =
     let ( let* ) = Lwt_result.bind in
-    let* ent = to_authorizable t in
-    let* can = P.get_checker ent in
-    if can actor `Update
-    then let _ = t.title <- new_title in Lwt.return_ok t
-    else Lwt.return_error "Insufficient access"
+    let* wrapped =
+      P.wrap_function
+        ~error:(fun x -> x)
+        ~effects:[`Update, `Uniq t.uuid]
+        f
+    in
+    wrapped ~actor new_title
 
-  let update_author (actor: [`User] Ocaml_authorize.Authorizable.t) t new_author =
+  let update_author (actor: [`User] Ocauth.Authorizable.t) t new_author =
     let ( let* ) = Lwt_result.bind in
-    let* ent = to_authorizable t in
-    let* can = P.get_checker ent in
-    if can actor `Update
-    then
+    let f new_author =
       let _ = t.author <- new_author in
+      let* ent = to_authorizable t in
       let* () = P.set_owner ent.uuid ~owner:(snd new_author) in
       Lwt.return_ok t
-    else
-      Lwt.return_error "Insufficient access"
+    in
+    let* wrapped =
+      P.wrap_function
+        ~error:(fun x -> x)
+        ~effects:[`Manage, `Uniq t.uuid]
+        f
+    in
+    wrapped ~actor new_author
 end

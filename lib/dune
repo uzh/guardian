@@ -1,7 +1,8 @@
 (library
- (public_name ocaml_authorize)
+ (public_name guardian)
  (inline_tests)
- (name ocaml_authorize)
+ (name guardian)
+ (wrapped true)
  (libraries
   lwt
   lwt.unix
@@ -11,8 +12,6 @@
   fmt.tty
   logs
   logs.fmt
-  ptime
-  ptime.clock
   conformist
   containers
   yojson)

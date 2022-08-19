@@ -14,7 +14,7 @@ CREATE TABLE rules (
     -- represented within OCaml.
     CONSTRAINT only_one_actor
         CHECK(
-            (actor_id IS NULL OR actor_role IS NULL) 
+            (actor_id IS NULL OR actor_role IS NULL)
             and (actor_id IS NOT NULL OR actor_role IS NOT NULL)
         ),
     CONSTRAINT only_one_target

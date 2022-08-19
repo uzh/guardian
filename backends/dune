@@ -1,7 +1,7 @@
 (library
- (public_name ocaml_authorize.backends)
+ (public_name guardian.backends)
  (inline_tests)
- (name ocaml_authorize_backends)
+ (name guardian_backends)
  (libraries
   caqti
   caqti-lwt
@@ -15,13 +15,11 @@
   fmt.tty
   logs
   logs.fmt
-  ptime
-  ptime.clock
   conformist
   containers
   yojson
   sqlite3
-  ocaml_authorize)
+  guardian)
  (preprocess
   (pps
    lwt_ppx
