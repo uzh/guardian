@@ -52,6 +52,7 @@
    (>= 5.2.1))
   (ppx_deriving_yojson
    (>= 3.6.1))
+  ppx_inline_test
   (sqlite3
    (>= 5.1.0))
   (uri
@@ -60,6 +61,5 @@
    (>= 0.9.8))
   (yojson
    (>= 2.0.2))
-  ppx_inline_test
   ;; Test/Dev dependencies
   (alcotest-lwt :with-test)))
