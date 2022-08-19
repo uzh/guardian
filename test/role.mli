@@ -1,4 +1,4 @@
-include Ocaml_authorize.Role_s
+include Guardian.Role_s
   with type t =
     [ `User
     | `Admin

@@ -10,12 +10,7 @@
 (test
  (name main)
  (enabled_if %{bin-available:sqlite3})
- (libraries
-  alcotest
-  alcotest-lwt
-  ocaml_authorize
-  sqlite3
-  ocaml_authorize.backends)
+ (libraries alcotest alcotest-lwt guardian sqlite3 guardian.backends)
  (preprocess
   (pps
    ppx_deriving.make

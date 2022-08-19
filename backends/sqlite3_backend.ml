@@ -1,5 +1,5 @@
-module Make(R : Ocaml_authorize.Role_s) = struct
-  module Ocaml_authorize = Ocaml_authorize.Make(R)
+module Make(R : Guardian.Role_s) = struct
+  module Guardian = Guardian.Make(R)
 
   let ( let* ) = Lwt_result.bind
 
@@ -10,10 +10,10 @@ module Make(R : Ocaml_authorize.Role_s) = struct
 
   module Backend = struct
     type role = R.t
-    type role_set = Ocaml_authorize.Role_set.t
-    type 'a authorizable = 'a Ocaml_authorize.Authorizable.t
-    type auth_rule = Ocaml_authorize.Authorizer.auth_rule
-    type actor_spec = Ocaml_authorize.Authorizer.actor_spec
+    type role_set = Guardian.Role_set.t
+    type 'a authorizable = 'a Guardian.Authorizable.t
+    type auth_rule = Guardian.Authorizer.auth_rule
+    type actor_spec = Guardian.Authorizer.actor_spec
 
     type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
     let lwt_return_rc = function
@@ -22,7 +22,7 @@ module Make(R : Ocaml_authorize.Role_s) = struct
 
     let create_authorizable ~id ?(owner : Uuidm.t option) roles : (unit, string) Lwt_result.t =
       let stmt = Sqlite3.prepare db "INSERT INTO entities (id, roles, parent) VALUES (?, ?, ?)" in
-      let roles' = Ocaml_authorize.Role_set.to_yojson roles |> Yojson.Safe.to_string in
+      let roles' = Guardian.Role_set.to_yojson roles |> Yojson.Safe.to_string in
       let* () =
         let open Sqlite3 in
         bind_values
@@ -48,10 +48,10 @@ module Make(R : Ocaml_authorize.Role_s) = struct
       in
       let* () = lwt_return_rc(Sqlite3.step stmt) in
       match String.trim(Sqlite3.column_text stmt 0) with
-      | "" -> Lwt.return_ok(Ocaml_authorize.Role_set.empty)
+      | "" -> Lwt.return_ok(Guardian.Role_set.empty)
       | coltext ->
         Yojson.Safe.from_string coltext
-        |> Ocaml_authorize.Role_set.of_yojson
+        |> Guardian.Role_set.of_yojson
         |> Lwt.return
 
     let get_owner id =
@@ -72,7 +72,7 @@ module Make(R : Ocaml_authorize.Role_s) = struct
       | None -> Lwt.return_ok(None)
 
     let put_perm ((actor, action, target): auth_rule) =
-      let action' = Ocaml_authorize.Action.to_string action in
+      let action' = Guardian.Action.to_string action in
       let stmt =
         let open Sqlite3 in
         match actor, target with
@@ -142,7 +142,7 @@ module Make(R : Ocaml_authorize.Role_s) = struct
           stmt
       in
       lwt_return_rc (Sqlite3.step stmt)
-    let delete_perm ((actor, action, target): Ocaml_authorize.Authorizer.auth_rule) =
+    let delete_perm ((actor, action, target): Guardian.Authorizer.auth_rule) =
       match actor, target with
       | `Uniq aid, `Uniq tid ->
         let stmt = "DELETE FROM rules WHERE actor_id=? AND act=? AND target_id=?" in
@@ -153,7 +153,7 @@ module Make(R : Ocaml_authorize.Role_s) = struct
               stmt
               Data.[
                 TEXT (Uuidm.to_string aid)
-              ; TEXT (Ocaml_authorize.Action.to_string action)
+              ; TEXT (Guardian.Action.to_string action)
               ; TEXT (Uuidm.to_string tid)])
         in
         lwt_return_rc(Sqlite3.step stmt)
@@ -166,7 +166,7 @@ module Make(R : Ocaml_authorize.Role_s) = struct
               stmt
               Data.[
                 TEXT (Uuidm.to_string aid)
-              ; TEXT (Ocaml_authorize.Action.to_string action)
+              ; TEXT (Guardian.Action.to_string action)
               ; TEXT(R.show trole)])
         in
         lwt_return_rc(Sqlite3.step stmt)
@@ -179,7 +179,7 @@ module Make(R : Ocaml_authorize.Role_s) = struct
               stmt
               Data.[
                 TEXT(R.show arole)
-              ; TEXT (Ocaml_authorize.Action.to_string action)
+              ; TEXT (Guardian.Action.to_string action)
               ; TEXT (Uuidm.to_string tid)])
         in
         lwt_return_rc(Sqlite3.step stmt)
@@ -192,7 +192,7 @@ module Make(R : Ocaml_authorize.Role_s) = struct
               stmt
               Data.[
                 TEXT(R.show arole)
-              ; TEXT (Ocaml_authorize.Action.to_string action)
+              ; TEXT (Guardian.Action.to_string action)
               ; TEXT(R.show trole)])
         in
         lwt_return_rc(Sqlite3.step stmt)
@@ -224,9 +224,9 @@ module Make(R : Ocaml_authorize.Role_s) = struct
               let action =
                 row.(0)
                 |> Sqlite3.Data.to_string_exn
-                |> Ocaml_authorize.Action.of_string
+                |> Guardian.Action.of_string
               in
-              let (actor_spec : Ocaml_authorize.Authorizer.actor_spec) =
+              let (actor_spec : Guardian.Authorizer.actor_spec) =
                 match Sqlite3.Data.(to_string row.(1), to_string row.(2)) with
                 | Some actor_id, None ->
                   `Uniq(Uuidm.of_string actor_id |> Option.get)
@@ -235,7 +235,7 @@ module Make(R : Ocaml_authorize.Role_s) = struct
                 | _ ->
                   raise(Invalid_argument "Invalid actor spec")
               in
-              let x: Ocaml_authorize.Authorizer.auth_rule = actor_spec, action, spec in
+              let x: Guardian.Authorizer.auth_rule = actor_spec, action, spec in
               x :: acc
             )
           ~init:[]
@@ -261,8 +261,8 @@ module Make(R : Ocaml_authorize.Role_s) = struct
       let id' = Uuidm.to_string id in
       let* roles' =
         let* pre_roles = get_roles id in
-        Ocaml_authorize.Role_set.union pre_roles roles
-        |> Ocaml_authorize.Role_set.to_yojson
+        Guardian.Role_set.union pre_roles roles
+        |> Guardian.Role_set.to_yojson
         |> Yojson.Safe.to_string
         |> Lwt.return_ok
       in
@@ -281,8 +281,8 @@ module Make(R : Ocaml_authorize.Role_s) = struct
       let id' = Uuidm.to_string id in
       let* roles' =
         let* pre_roles = get_roles id in
-        Ocaml_authorize.Role_set.diff pre_roles roles
-        |> Ocaml_authorize.Role_set.to_yojson
+        Guardian.Role_set.diff pre_roles roles
+        |> Guardian.Role_set.to_yojson
         |> Yojson.Safe.to_string
         |> Lwt.return_ok
       in
@@ -308,5 +308,5 @@ module Make(R : Ocaml_authorize.Role_s) = struct
       lwt_return_rc(Sqlite3.step stmt)
   end
 
-  include Ocaml_authorize.Make_persistence(Backend)
+  include Guardian.Make_persistence(Backend)
 end

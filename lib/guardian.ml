@@ -33,27 +33,27 @@ module Make(R : Role.S) = struct
       ; uuid: Uuid.t
       ; typ: 'a
       } [@@deriving eq,ord,show,yojson]
-    
+
     let to_string t =
       show (fun f _x -> Format.pp_print_string f "") t
-  
+
     let make ~roles ~typ ?owner uuid =
       { roles
       ; owner
       ; uuid
       ; typ
       }
-  
+
     let a_owns_b a b =
       Option.map (fun b' -> a.uuid = b') b.owner = Some true
-  
+
     let has_role t role =
       Role_set.mem role t.roles
   end
 
   module Authorizer = struct
     type actor_spec = [ `Role of R.t | `Uniq of Uuidm.t ] [@@deriving show,ord]
-  
+
     type auth_rule = actor_spec * Action.t * actor_spec [@@deriving show,ord]
 
     (** [action, target] Denotes an effect a function may have on and therefore
@@ -63,7 +63,7 @@ module Make(R : Role.S) = struct
     module Effect_set = Set.Make(struct type t = effect [@@deriving ord] end)
 
     (** Convenience function to return a [can] function. Takes an optional target
-      specification (for error reporting purposes) and a list of [ocaml_authorize]
+      specification (for error reporting purposes) and a list of [guardian]
       rules of the form [actor, action, target] and returns a function that looks
       like:
 
@@ -113,17 +113,17 @@ module Make(R : Role.S) = struct
                 Ok())
               (Ok())
               results
-  
+
     module Auth_rule_set = Set.Make(struct
         type t = auth_rule
         let compare = compare_auth_rule
       end)
-  
+
     module type Authorizable_module = sig
       type t
-  
+
       type kind
-  
+
       (** [to_authorizable x] converts [x] to a uniquely identifiable object, complete
         * with roles. The [authorizable] may not, however, be converted back into type [t].
       **)
@@ -146,7 +146,7 @@ module Make(R : Role.S) = struct
     : Persistence_s
   = struct
     include BES
-    
+
     let ( let* ) = Lwt_result.bind
 
     let revoke_role id role =
@@ -263,7 +263,7 @@ module Make(R : Role.S) = struct
                   Role_set.mem role actor_roles && (action = action' || action' = `Manage)
             )
             auth_rules
-    
+
     let get_role_checker role_set =
       let%lwt auth_rules =
         Role_set.elements role_set

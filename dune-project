@@ -1,7 +1,65 @@
 (lang dune 3.0)
 
-(name ocaml_authorize)
+(generate_opam_files true)
+
+(name guardian)
 
 (version 0.0.1)
 
 (license GPL-2.0-or-later)
+
+(authors
+ "Department of Economics, University of Zurich"
+ "John Christopher McAlpine")
+
+(maintainers "engineering@econ.uzh.ch")
+
+(homepage "https://gitlab.uzh.ch/econ/it/framework/ocaml/permissions")
+
+(bug_reports
+ "https://gitlab.uzh.ch/econ/it/framework/ocaml/permissions/-/issues")
+
+(documentation "https://gitlab.uzh.ch/econ/it/framework/ocaml/permissions")
+
+(package
+ (name guardian)
+ (synopsis "Role-based access control for OCaml")
+ (description "\nTODO\n")
+ (depends
+  (base64
+   (>= 3.5.0))
+  (caqti-driver-mariadb
+   (>= 1.8.0))
+  (caqti-lwt
+   (>= 1.8.0))
+  (conformist
+   (>= 0.8.1))
+  (containers
+   (>= 3.6))
+  (dune
+   (>= 3.4.1))
+  (logs
+   (>= 0.7.0))
+  (lwt
+   (>= 5.6.1))
+  (lwt-ppx
+   (>= 2.1.0))
+  (mariadb
+   (= 1.1.4))
+  (ocaml
+   (>= 4.12.0))
+  (ppx_deriving
+   (>= 5.2.1))
+  (ppx_deriving_yojson
+   (>= 3.7.0))
+  (sqlite3
+   (>= 5.1.0))
+  (uri
+   (>= 4.2.0))
+  (uuidm
+   (>= 0.9.8))
+  (yojson
+   (>= 2.0.2))
+  ;; Test/Dev dependencies
+  (alcotest-lwt :with-test)
+  (ppx_inline_test :with-test)))

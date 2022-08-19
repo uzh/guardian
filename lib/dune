@@ -1,7 +1,7 @@
 (library
- (public_name ocaml_authorize)
+ (public_name guardian)
  (inline_tests)
- (name ocaml_authorize)
+ (name guardian)
  (wrapped true)
  (libraries
   lwt
