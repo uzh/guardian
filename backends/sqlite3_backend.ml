@@ -68,8 +68,9 @@ module Make (R : Guardian.Role_s) = struct
       | Some uuid -> Lwt.return_ok (Some uuid)
       | None -> Lwt.return_ok None
 
-    let put_perm ((actor, action, target) : auth_rule) =
+    let put_perm ((actor, action) : auth_rule) =
       let action' = Guardian.Action.to_string action in
+      let target = Guardian.Authorizer.to_target_actor_spec action in
       let stmt =
         let open Sqlite3 in
         match (actor, target) with
@@ -135,7 +136,9 @@ module Make (R : Guardian.Role_s) = struct
       in
       lwt_return_rc (Sqlite3.step stmt)
 
-    let delete_perm ((actor, action, target) : Guardian.Authorizer.auth_rule) =
+    let delete_perm ((actor, action) : Guardian.Authorizer.auth_rule) =
+      let target = Guardian.Authorizer.to_target_actor_spec action in
+
       match (actor, target) with
       | `One aid, `One tid ->
           let stmt =
@@ -220,14 +223,14 @@ module Make (R : Guardian.Role_s) = struct
                 (bind_values stmt [ Data.TEXT (Uuidm.to_string uuidm) ])
             in
             Lwt.return_ok stmt
-        | `Entity role ->
+        | `Entity entity ->
             let stmt =
               "SELECT act, actor_id, actor_role FROM rules WHERE target_role = \
                ?" |> prepare db
             in
-            let () = Printf.printf "Searching for role: %s\n" (R.show role) in
+            let () = Printf.printf "Searching for role: %s\n" (R.show entity) in
             let* () =
-              lwt_return_rc (bind_values stmt [ Data.TEXT (R.show role) ])
+              lwt_return_rc (bind_values stmt [ Data.TEXT (R.show entity) ])
             in
             Lwt.return_ok stmt
       in
@@ -235,7 +238,8 @@ module Make (R : Guardian.Role_s) = struct
         Sqlite3.fold stmt
           ~f:(fun acc row ->
             let action =
-              row.(0) |> Sqlite3.Data.to_string_exn |> Guardian.Action.of_string
+              row.(0) |> Sqlite3.Data.to_string_exn
+              |> Guardian.Action.of_string spec
             in
             let (actor_spec : Guardian.Authorizer.actor_spec) =
               match Sqlite3.Data.(to_string row.(1), to_string row.(2)) with
@@ -244,9 +248,7 @@ module Make (R : Guardian.Role_s) = struct
               | None, Some actor_role -> `Entity (R.of_string actor_role)
               | _ -> raise (Invalid_argument "Invalid actor spec")
             in
-            let x : Guardian.Authorizer.auth_rule =
-              (actor_spec, action, spec)
-            in
+            let x : Guardian.Authorizer.auth_rule = (actor_spec, action) in
             x :: acc)
           ~init:[]
       in

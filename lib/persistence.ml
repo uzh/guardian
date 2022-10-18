@@ -1,6 +1,7 @@
 module type Backend_store_s = sig
   type role_set
   type role
+  type entity_spec
   type actor_spec
   type auth_rule
   type 'a authorizable
@@ -40,24 +41,29 @@ module type S = sig
 
   val get_checker :
     'a authorizable ->
-    ('b authorizable -> Action.t -> bool, string) Lwt_result.t
+    ( 'b authorizable -> (entity_spec, actor_spec) Action.t -> bool,
+      string )
+    Lwt_result.t
 
   val get_role_checker :
-    role_set -> ('b authorizable -> Action.t -> bool, string) Lwt_result.t
+    role_set ->
+    ( 'b authorizable -> (entity_spec, actor_spec) Action.t -> bool,
+      string )
+    Lwt_result.t
 
   val wrap_function :
     error:(string -> 'etyp) ->
-    effects:(Action.t * actor_spec) list ->
+    effects:(entity_spec, actor_spec) Action.t list ->
     ('param -> ('rval, 'etyp) monad) ->
     (actor:'a authorizable -> 'param -> ('rval, 'etyp) monad, string) monad
 
   val revoke_role : Uuidm.t -> role -> (unit, string) monad
 
   val collect_rules :
-    (Action.t * actor_spec) list -> (auth_rule list, string) monad
+    (entity_spec, actor_spec) Action.t list -> (auth_rule list, string) monad
 
   val checker_of_effects :
-    (Action.t * actor_spec) list ->
+    (entity_spec, actor_spec) Action.t list ->
     actor:'a authorizable ->
     (unit, string) monad
 

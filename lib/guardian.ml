@@ -37,14 +37,23 @@ module Make (R : Role.S) = struct
   end
 
   module Authorizer = struct
-    type actor_spec = [ `Entity of R.t | `One of Uuidm.t ]
+    type entity_spec = [ `Entity of R.t ] [@@deriving show, ord]
+    type one_spec = [ `One of Uuidm.t ] [@@deriving show, ord]
+    type actor_spec = [ entity_spec | one_spec ] [@@deriving show, ord]
+
+    type auth_rule = actor_spec * (entity_spec, actor_spec) Action.t
     [@@deriving show, ord]
 
-    type auth_rule = actor_spec * Action.t * actor_spec [@@deriving show, ord]
-
-    type effect = Action.t * actor_spec [@@deriving show, ord]
+    type effect = (entity_spec, actor_spec) Action.t [@@deriving show, ord]
     (** [action, target] Denotes an effect a function may have on and therefore
         which permissions an actor needs to invoke it. *)
+
+    let to_target_actor_spec =
+      let cast entity = (entity :> actor_spec) in
+      function
+      | `Create entity -> entity |> cast
+      | `Read target | `Update target | `Delete target | `Manage target ->
+          target
 
     module Effect_set = Set.Make (struct
       type t = effect [@@deriving ord]
@@ -63,22 +72,23 @@ module Make (R : Role.S) = struct
       fun ~actor ->
         let results =
           CCList.map
-            (fun (actor', action, target) ->
+            (fun (actor', (action : (entity_spec, actor_spec) Action.t)) ->
               let is_matched =
+                (* TODO: Why is the check required? action = action *)
                 match actor' with
                 | `One uuid ->
                     uuid = actor.Authorizable.uuid
-                    && (action = action || action = `Manage)
-                | `Entity role ->
-                    Role_set.mem role actor.Authorizable.roles
-                    && (action = action || action = `Manage)
+                    && (action = action || action = `Manage (`One uuid))
+                | `Entity entity ->
+                    Role_set.mem entity actor.Authorizable.roles
+                    && (action = action || action = `Manage (`Entity entity))
               in
               if is_matched then Ok ()
               else
                 Error
                   (Format.asprintf "Actor %s does not have permission to %s"
                      (Authorizable.to_string actor)
-                     (show_effect (action, target))))
+                     (show_effect action)))
             rules
         in
         if any_of then
@@ -125,6 +135,7 @@ module Make (R : Role.S) = struct
       (BES : Persistence.Backend_store_s
                with type 'a authorizable = 'a Authorizable.t
                 and type role_set = Role_set.t
+                and type entity_spec = Authorizer.entity_spec
                 and type actor_spec = Authorizer.actor_spec
                 and type auth_rule = Authorizer.auth_rule
                 and type role = R.t) : Persistence_s = struct
@@ -223,12 +234,12 @@ module Make (R : Role.S) = struct
       else
         let actor_roles = actor.Authorizable.roles in
         List.exists
-          (fun (actor', action', _) ->
+          (fun (actor', action') ->
             match actor' with
             | `One id -> actor.uuid = id && action = action'
             | `Entity role ->
                 Role_set.mem role actor_roles
-                && (action = action' || action' = `Manage))
+                && (action = action' || action' = `Manage (`Entity role)))
           auth_rules
 
     let get_role_checker role_set =
@@ -249,27 +260,36 @@ module Make (R : Role.S) = struct
       Lwt.return_ok @@ fun actor action ->
       let actor_roles = actor.Authorizable.roles in
       List.exists
-        (fun (actor', action', _) ->
+        (fun (actor', action') ->
           match actor' with
           | `One id -> actor.uuid = id && action = action'
           | `Entity role ->
               Role_set.mem role actor_roles
-              && (action = action' || action' = `Manage))
+              && (action = action' || action' = `Manage (`Entity role)))
         auth_rules
 
     (** [wrap_function ?error ~effects f] produces a wrapped version of [f] which
         checks permissions and gracefully reports authorization errors. *)
-    let wrap_function ~(error : string -> 'etyp) ~effects
+    let wrap_function ~(error : string -> 'etyp)
+        ~(effects : (entity_spec, actor_spec) Action.t list)
         (f : 'param -> ('rval, 'etyp) Lwt_result.t) =
       let* cans =
         List.map
-          (fun (action, target) ->
+          (fun action ->
             let* can =
-              match target with
-              | `One uuid ->
+              match action with
+              | `Create (`Entity entity)
+              | `Read (`Entity entity)
+              | `Update (`Entity entity)
+              | `Delete (`Entity entity)
+              | `Manage (`Entity entity) ->
+                  get_role_checker (Role_set.singleton entity)
+              | `Read (`One uuid)
+              | `Update (`One uuid)
+              | `Delete (`One uuid)
+              | `Manage (`One uuid) ->
                   let* authorizable = get_authorizable ~typ:() uuid in
                   get_checker authorizable
-              | `Entity role -> get_role_checker (Role_set.singleton role)
             in
             let can actor =
               if can actor action then Ok ()
@@ -279,7 +299,7 @@ module Make (R : Role.S) = struct
                      "Entity %s does not have permission to %s target %s."
                      (Authorizable.to_string actor)
                      (Action.to_string action)
-                     (Authorizer.show_actor_spec target)
+                     Authorizer.(show_actor_spec (to_target_actor_spec action))
                   |> error)
             in
             Lwt.return_ok can)
@@ -301,6 +321,13 @@ module Make (R : Role.S) = struct
           in
           f param)
 
+    let replace_target action target =
+      match action with
+      | `Read _ -> `Read target
+      | `Update _ -> `Update target
+      | `Delete _ -> `Delete target
+      | `Manage _ -> `Manage target
+
     (* Because of effects that look like [`Action A, `One X] we need to make an extra pass
        to get all of entity X's roles, because if you have permission to do A to one of
         X's roles, then you should be able to do A to X. *)
@@ -311,11 +338,15 @@ module Make (R : Role.S) = struct
         Lwt_list.map_s
           (fun effect ->
             match effect with
-            | action, `One x ->
+            | (`Read (`One x) as action)
+            | (`Update (`One x) as action)
+            | (`Delete (`One x) as action)
+            | (`Manage (`One x) as action) ->
                 let* roles = get_roles x in
                 let* set =
                   List.map
-                    (fun role -> expand_effects [ (action, `Entity role) ])
+                    (fun role ->
+                      expand_effects [ replace_target action (`Entity role) ])
                     (Role_set.elements roles)
                   |> List.fold_left
                        (fun rv effect ->
@@ -352,15 +383,27 @@ module Make (R : Role.S) = struct
       @@
       let open Lwt_result.Syntax in
       let* effects = expand_effects effects in
+      let cast entity = (entity :> actor_spec) in
+      (* TODO: Cleanup *)
       let%lwt results =
         Lwt_list.map_s
-          (fun (action, target) ->
-            let* rules = get_perms target in
-            CCList.filter
-              (fun (_actor, action', _target) ->
-                action = action' || action' = `Manage)
-              rules
-            |> Lwt_result.return)
+          (fun action ->
+            match action with
+            | `Create entity ->
+                let target = entity |> cast in
+                let* rules = get_perms target in
+                CCList.filter
+                  (fun (_actor, action') ->
+                    action = action' || action' = `Manage target)
+                  rules
+                |> Lwt_result.return
+            | `Read target | `Update target | `Delete target | `Manage target ->
+                let* rules = get_perms target in
+                CCList.filter
+                  (fun (_actor, action') ->
+                    action = action' || action' = `Manage target)
+                  rules
+                |> Lwt_result.return)
           effects
       in
       let* rules =
@@ -386,8 +429,9 @@ module Make (R : Role.S) = struct
                    "Actor %s does not have permission to %s target %s. Error \
                     message: %s"
                    (Authorizable.to_string actor)
-                   (Action.show (fst effect))
-                   ([%show: Authorizer.actor_spec] (snd effect))
+                   (Authorizer.show_effect effect)
+                   ([%show: Authorizer.actor_spec]
+                      (Authorizer.to_target_actor_spec effect))
                    err)
           |> Lwt_result.lift)
         (Ok ()) effects
