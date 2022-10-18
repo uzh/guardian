@@ -48,6 +48,8 @@
    (= 1.1.4))
   (ocaml
    (>= 4.12.0))
+  (ocamlformat
+   (>= 0.24.1))
   (ppx_deriving
    (>= 5.2.1))
   (ppx_deriving_yojson
