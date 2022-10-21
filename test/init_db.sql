@@ -1,10 +1,10 @@
-CREATE TABLE entities (
+CREATE TABLE IF NOT EXISTS guardian_entities (
     id TEXT UNIQUE NOT NULL,
     roles TEXT NOT NULL,
     parent TEXT
 );
 
-CREATE TABLE rules (
+CREATE TABLE IF NOT EXISTS guardian_rules (
     actor_id TEXT,
     actor_role TEXT,
     act TEXT NOT NULL,
@@ -19,7 +19,7 @@ CREATE TABLE rules (
         ),
     CONSTRAINT only_one_target
         CHECK(
-            (target_id IS NULL OR target_role IS NULL) 
+            (target_id IS NULL OR target_role IS NULL)
             and (target_id IS NOT NULL OR target_role IS NOT NULL)
         ),
     UNIQUE(actor_role, act, target_role),

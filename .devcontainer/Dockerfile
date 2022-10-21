@@ -35,9 +35,11 @@ RUN apt-get update --allow-releaseinfo-change -q \
   libssl-dev \
   lsof \
   m4 \
+  default-mysql-client \
   pdftk-java \
   perl \
   pkg-config \
+  sqlite3 \
   utop \
   wget \
   wkhtmltopdf \
