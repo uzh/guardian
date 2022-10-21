@@ -4,7 +4,8 @@ type t =
   | `Article
   | `Hacker
   | `Editor of Guardian.Uuidm.t
-    [@equal fun a b -> Uuidm.equal a nil || Uuidm.equal b nil] ]
+    [@equal fun a b -> Uuidm.equal a nil || Uuidm.equal b nil]
+  ]
 [@@deriving show, eq, ord, yojson]
 
 let get_name = function
@@ -13,10 +14,12 @@ let get_name = function
   | `Article -> "article"
   | `Hacker -> "hacker"
   | `Editor _ -> "editor"
+;;
 
 let get_target = function
   | `User | `Admin | `Article | `Hacker -> failwith "No target"
   | `Editor x -> x
+;;
 
 let all = [ `User; `Admin; `Article; `Hacker; `Editor Uuidm.nil ]
 
@@ -27,6 +30,7 @@ let of_string s =
   | "article", [] -> `Article
   | "hacker", [] -> `Hacker
   | "editor", [ id ] ->
-      let () = Printf.printf "Parsing role string: %s\n" s in
-      `Editor (Guardian.Uuidm.of_string_exn id)
+    let () = Printf.printf "Parsing role string: %s\n" s in
+    `Editor (Guardian.Uuidm.of_string_exn id)
   | _ -> failwith ("Invalid role: " ^ s)
+;;
