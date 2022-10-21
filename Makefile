@@ -6,7 +6,7 @@ all:
 
 .PHONY: deps
 deps: ## Install development dependencies
-	opam install -y dune-release ocaml-lsp-server
+	opam install -y dune-release ocamlformat ocaml-lsp-server
 	opam install --deps-only --with-test --with-doc -y .
 
 .PHONY: lock

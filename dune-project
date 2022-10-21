@@ -1,4 +1,4 @@
-(lang dune 3.0)
+(lang dune 2.9)
 
 (generate_opam_files true)
 
@@ -37,7 +37,9 @@
   (containers
    (>= 3.6))
   (dune
-   (>= 3.4.1))
+   (and
+    (> 2.9.0)
+    (< 3.0.0)))
   (logs
    (>= 0.7.0))
   (lwt
