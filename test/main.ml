@@ -22,9 +22,9 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
     Article.make ~title:"Fizz" ~content:"Buzz" ~uuid:(Uuidm.v `V4) ~author:aron
   ;;
 
-  let bad_perm = `One (snd chris), `Update, `One aron_article.uuid
+  let bad_rule = `One (snd chris), `Update, `One aron_article.uuid
 
-  let global_perms : Guardian.Authorizer.auth_rule list =
+  let global_rules : Guardian.Authorizer.auth_rule list =
     [ `Entity `User, `Read, `Entity `Article
     ; `Entity `Admin, `Manage, `Entity `Article
     ; `Entity (`Editor chris_article.uuid), `Update, `One chris_article.uuid
@@ -42,15 +42,15 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
      let* _chris_art_ent = Article.to_authorizable chris_article in
      let* _aron_art_ent = Article.to_authorizable aron_article in
      (* now we check to see that the authorizables have had ownership set *)
-     let get_owner_id article =
-       let* x = Backend.get_owner article.Article.uuid in
+     let find_owner_id article =
+       let* x = Backend.find_owner article.Article.uuid in
        Option.to_result
          ~none:("Couldn't get owner for article " ^ Article.show article)
          x
        |> Lwt.return
      in
-     let* chris_art_owner = get_owner_id chris_article in
-     let* aron_art_owner = get_owner_id aron_article in
+     let* chris_art_owner = find_owner_id chris_article in
+     let* aron_art_owner = find_owner_id aron_article in
      Lwt.return_ok
        (Uuidm.to_string chris_art_owner, Uuidm.to_string aron_art_owner))
     >|= Alcotest.(check (result (pair string string) string))
@@ -58,8 +58,8 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
           (Ok (Uuidm.to_string (snd chris), Uuidm.to_string (snd aron)))
   ;;
 
-  let test_get_authorizable _ () =
-    (match%lwt Backend.get_authorizable ~typ:`User (snd aron) with
+  let test_find_authorizable _ () =
+    (match%lwt Backend.find_authorizable ~typ:`User (snd aron) with
      | Ok _ -> Lwt.return_true
      | Error err -> raise (Failure err))
     >|= Alcotest.(check bool) "Fetch an authorizable." true
@@ -71,7 +71,7 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
   ;;
 
   let test_check_roles _ () =
-    (let* roles = Backend.get_roles (snd aron) in
+    (let* roles = Backend.find_roles (snd aron) in
      let expected = Guardian.Role_set.of_list [ `User; `Admin ] in
      let diff =
        Guardian.Role_set.(
@@ -99,7 +99,7 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
          (Ocauth.Role_set.singleton (`Editor Uuidm.nil))
      in
      let* () =
-       let* roles = Backend.get_roles (snd aron) in
+       let* roles = Backend.find_roles (snd aron) in
        if Ocauth.Role_set.mem (`Editor Uuidm.nil) roles
        then Lwt.return_ok ()
        else
@@ -111,27 +111,27 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
          (snd aron)
          (Ocauth.Role_set.singleton (`Editor Uuidm.nil))
      in
-     let* roles = Backend.get_roles (snd aron) in
+     let* roles = Backend.find_roles (snd aron) in
      Lwt.return_ok (Ocauth.Role_set.mem (`Editor Uuidm.nil) roles))
     >|= Alcotest.(check (result bool string)) "Check a user's roles." (Ok false)
   ;;
 
-  let test_push_perms _ () =
+  let test_push_rules _ () =
     (let* put =
-       Backend.save_rules global_perms
+       Backend.save_rules global_rules
        |> Lwt_result.map_error [%show: Ocauth.Authorizer.auth_rule list]
      in
-     Lwt.return_ok (List.map Ocauth.Authorizer.show_auth_rule put))
+     Lwt.return_ok (CCList.map Ocauth.Authorizer.show_auth_rule put))
     >|= Alcotest.(check (result (slist string String.compare) string))
           "Push global permissions."
-          (Ok (List.map Ocauth.Authorizer.show_auth_rule global_perms))
+          (Ok (CCList.map Ocauth.Authorizer.show_auth_rule global_rules))
   ;;
 
-  let test_read_perms _ () =
-    (let* article_perms = Backend.get_perms (`Entity `Article) in
-     let* editor_perms = Backend.get_perms (`One chris_article.uuid) in
-     let perms = article_perms @ editor_perms in
-     let global_set = Guardian.Authorizer.Auth_rule_set.of_list global_perms in
+  let test_read_rules _ () =
+    (let* article_rules = Backend.find_rules (`Entity `Article) in
+     let* editor_rules = Backend.find_rules (`One chris_article.uuid) in
+     let perms = article_rules @ editor_rules in
+     let global_set = Guardian.Authorizer.Auth_rule_set.of_list global_rules in
      let retrieved_set = Guardian.Authorizer.Auth_rule_set.of_list perms in
      let diff =
        Guardian.Authorizer.Auth_rule_set.diff global_set retrieved_set
@@ -148,21 +148,21 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
           (Ok ())
   ;;
 
-  let test_drop_perms _ () =
-    (let* () = Backend.save_rule bad_perm in
-     let* perms = Backend.get_perms (`One aron_article.uuid) in
+  let test_drop_rules _ () =
+    (let* () = Backend.save_rule bad_rule in
+     let* perms = Backend.find_rules (`One aron_article.uuid) in
      let* () =
        match perms with
        | [ perm ] ->
-         if perm = bad_perm
+         if perm = bad_rule
          then Lwt.return_ok ()
          else
            Lwt.return_error
              "Failed to push bad permission to test perm dropping."
        | _ -> Lwt.return_error "Invalid permissions."
      in
-     let* () = Backend.delete_perm bad_perm in
-     let* perms' = Backend.get_perms (`One aron_article.uuid) in
+     let* () = Backend.delete_rule bad_rule in
+     let* perms' = Backend.find_rules (`One aron_article.uuid) in
      match perms' with
      | [] -> Lwt.return_ok ()
      | _ -> Lwt.return_error "Failed to remove bad perm.")
@@ -294,7 +294,7 @@ let _return =
         ; Alcotest_lwt.test_case
             "Retrieve an authorizable."
             `Quick
-            T.test_get_authorizable
+            T.test_find_authorizable
         ] )
     ; ( Printf.sprintf "(%s) Managing roles." name
       , [ Alcotest_lwt.test_case "Grant a role." `Quick T.test_grant_roles
@@ -302,9 +302,9 @@ let _return =
         ; Alcotest_lwt.test_case "Revoke a role." `Quick T.test_revoke_roles
         ] )
     ; ( Printf.sprintf "(%s) Managing authorization rules." name
-      , [ Alcotest_lwt.test_case "Push rules." `Quick T.test_push_perms
-        ; Alcotest_lwt.test_case "Drop rules." `Quick T.test_drop_perms
-        ; Alcotest_lwt.test_case "Read rules." `Quick T.test_read_perms
+      , [ Alcotest_lwt.test_case "Push rules." `Quick T.test_push_rules
+        ; Alcotest_lwt.test_case "Drop rules." `Quick T.test_drop_rules
+        ; Alcotest_lwt.test_case "Read rules." `Quick T.test_read_rules
         ] )
     ; ( Printf.sprintf "(%s) Admins should be able to do everything." name
       , [ Alcotest_lwt.test_case
@@ -345,11 +345,16 @@ let _return =
   in
   let test_cases =
     let module MariaConfig = struct
-      let connection_string = "mariadb://root@database:3306/test"
+      include Guardian_backends.Database_pools.DefaultConfig
+
+      let database_url = "mariadb://root@database:3306/test"
     end
     in
     let module Maria =
-      Guardian_backends.Mariadb_backend.Make (Role) (MariaConfig) ()
+      Guardian_backends.Mariadb_backend.Make
+        (Role)
+        (Guardian_backends.Database_pools.Make (MariaConfig) ())
+        ()
     in
     make_test_cases (module Maria) "MariadDB Backend"
     @ make_test_cases

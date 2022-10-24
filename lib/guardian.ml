@@ -8,7 +8,8 @@ module Util = struct
     let fmt = format_of_string "`%s (%s@)" in
     try
       Scanf.sscanf s fmt (fun name params ->
-        String.(lowercase_ascii name, List.map trim (split_on_char ',' params)))
+        String.(
+          lowercase_ascii name, CCList.map trim (split_on_char ',' params)))
     with
     | End_of_file ->
       let fmt = format_of_string "`%s" in
@@ -143,14 +144,17 @@ module Make (R : Role.S) = struct
     include BES
 
     let ( let* ) = Lwt_result.bind
-    let revoke_role id role = revoke_roles id (Role_set.singleton role)
 
-    let get_authorizable ~(typ : 'kind) id =
-      let* mem = BES.mem_authorizable id in
+    let revoke_role ?ctx id role =
+      revoke_roles ?ctx id (Role_set.singleton role)
+    ;;
+
+    let find_authorizable ?ctx ~(typ : 'kind) id =
+      let* mem = BES.mem_authorizable ?ctx id in
       if mem
       then
-        let* roles = BES.get_roles id in
-        let* owner = BES.get_owner id in
+        let* roles = BES.find_roles ?ctx id in
+        let* owner = BES.find_owner ?ctx id in
         Lwt.return (Ok (Authorizable.make ~roles ~typ ?owner id))
       else
         Lwt.return
@@ -163,12 +167,12 @@ module Make (R : Role.S) = struct
     (** [save_rules rules] adds all the permissions [rules] to the backend. If
         there is an error at any point, it returns a `result` containing all of
         the items that were not added. *)
-    let save_rules rules =
-      List.fold_left
+    let save_rules ?ctx rules =
+      CCList.fold_left
         (fun acc x ->
           match%lwt acc with
           | Ok acc' ->
-            (match%lwt BES.save_rule x with
+            (match%lwt BES.save_rule ?ctx x with
              | Ok () -> Lwt.return_ok (x :: acc')
              | Error _ -> Lwt.return_error [ x ])
           | Error xs -> Lwt.return_error (x :: xs))
@@ -180,7 +184,9 @@ module Make (R : Role.S) = struct
         [to_authorizable] * functions of authorizable modules. The newly
         decorated function connects * to the persistent backend to ensure that
         the authorizable's roles and ownership * are consistent in both spaces. *)
-    let decorate_to_authorizable (to_authorizable : 'a -> 'kind Authorizable.t)
+    let decorate_to_authorizable
+      ?ctx
+      (to_authorizable : 'a -> 'kind Authorizable.t)
       : 'a -> ('kind Authorizable.t, string) Lwt_result.t
       =
      fun x ->
@@ -189,13 +195,13 @@ module Make (R : Role.S) = struct
       let* mem = BES.mem_authorizable ent.uuid in
       if mem
       then
-        let* ent' = get_authorizable ~typ:ent.typ ent.uuid in
+        let* ent' = find_authorizable ~typ:ent.typ ent.uuid in
         let roles = Role_set.union ent.roles ent'.roles in
         let* () = BES.grant_roles uuid roles in
         let* owner =
           match ent.owner, ent'.owner with
           | Some owner, None ->
-            let* () = BES.set_owner ent.uuid ~owner in
+            let* () = BES.save_owner ?ctx ent.uuid ~owner in
             Lwt.return_ok (Some owner)
           | None, Some owner -> Lwt.return_ok (Some owner)
           | None, None -> Lwt.return_ok None
@@ -204,7 +210,7 @@ module Make (R : Role.S) = struct
             (* Lwt_result.fail( "decorate_to_authorizable: both the database and
                the decorated function \ returned distinct values for the owner
                of authorizable " ^ Uuidm.to_string ent.uuid) *)
-            let* () = BES.set_owner ent.uuid ~owner:x in
+            let* () = BES.save_owner ?ctx ent.uuid ~owner:x in
             Lwt.return_ok (Some x)
           | Some x, Some _ (* when x = y *) -> Lwt.return_ok (Some x)
         in
@@ -214,15 +220,15 @@ module Make (R : Role.S) = struct
         Lwt.return_ok ent
    ;;
 
-    let get_checker authorizable =
+    let find_checker ?ctx authorizable =
       let%lwt auth_rules =
         Role_set.elements authorizable.Authorizable.roles
-        |> List.map (fun r -> `Entity r)
-        |> List.cons (`One authorizable.Authorizable.uuid)
-        |> Lwt_list.map_s BES.get_perms
+        |> CCList.map (fun r -> `Entity r)
+        |> CCList.cons (`One authorizable.Authorizable.uuid)
+        |> Lwt_list.map_s (BES.find_rules ?ctx)
       in
       let* auth_rules =
-        List.fold_left
+        CCList.fold_left
           (fun acc x ->
             let%lwt acc = acc in
             match acc, x with
@@ -243,7 +249,7 @@ module Make (R : Role.S) = struct
       then true
       else (
         let actor_roles = actor.Authorizable.roles in
-        List.exists
+        CCList.exists
           (fun (actor', action', _) ->
             match actor' with
             | `One id -> actor.uuid = id && action = action'
@@ -253,14 +259,14 @@ module Make (R : Role.S) = struct
           auth_rules)
     ;;
 
-    let get_role_checker role_set =
+    let find_role_checker ?ctx role_set =
       let%lwt auth_rules =
         Role_set.elements role_set
-        |> List.map (fun r -> `Entity r)
-        |> Lwt_list.map_s BES.get_perms
+        |> CCList.map (fun r -> `Entity r)
+        |> Lwt_list.map_s (BES.find_rules ?ctx)
       in
       let* auth_rules =
-        List.fold_left
+        CCList.fold_left
           (fun acc x ->
             let%lwt acc = acc in
             match acc, x with
@@ -272,7 +278,7 @@ module Make (R : Role.S) = struct
       Lwt.return_ok
       @@ fun actor action ->
       let actor_roles = actor.Authorizable.roles in
-      List.exists
+      CCList.exists
         (fun (actor', action', _) ->
           match actor' with
           | `One id -> actor.uuid = id && action = action'
@@ -285,19 +291,20 @@ module Make (R : Role.S) = struct
     (** [wrap_function ?error ~effects f] produces a wrapped version of [f]
         which checks permissions and gracefully reports authorization errors. *)
     let wrap_function
+      ?ctx
       ~(error : string -> 'etyp)
       ~effects
       (f : 'param -> ('rval, 'etyp) Lwt_result.t)
       =
       let* cans =
-        List.map
+        CCList.map
           (fun (action, target) ->
             let* can =
               match target with
               | `One uuid ->
-                let* authorizable = get_authorizable ~typ:() uuid in
-                get_checker authorizable
-              | `Entity role -> get_role_checker (Role_set.singleton role)
+                let* authorizable = find_authorizable ?ctx ~typ:() uuid in
+                find_checker authorizable
+              | `Entity role -> find_role_checker (Role_set.singleton role)
             in
             let can actor =
               if can actor action
@@ -313,7 +320,7 @@ module Make (R : Role.S) = struct
             in
             Lwt.return_ok can)
           effects
-        |> List.fold_left
+        |> CCList.fold_left
              (fun acc x ->
                let* x' = x in
                let* acc' = acc in
@@ -322,7 +329,7 @@ module Make (R : Role.S) = struct
       in
       Lwt.return_ok (fun ~actor param ->
         let* _can =
-          List.fold_left
+          CCList.fold_left
             (fun acc can ->
               match acc with
               | Ok _ -> can actor
@@ -337,7 +344,7 @@ module Make (R : Role.S) = struct
     (* Because of effects that look like [`Action A, `One X] we need to make an
        extra pass to get all of entity X's roles, because if you have permission
        to do A to one of X's roles, then you should be able to do A to X. *)
-    let rec expand_effects (effects : Authorizer.effect list)
+    let rec expand_effects ?ctx (effects : Authorizer.effect list)
       : (Authorizer.effect list, string) result Lwt.t
       =
       let open Lwt_result.Syntax in
@@ -346,17 +353,17 @@ module Make (R : Role.S) = struct
           (fun effect ->
             match effect with
             | action, `One x ->
-              let* roles = get_roles x in
+              let* roles = find_roles ?ctx x in
               let* set =
-                List.map
+                CCList.map
                   (fun role -> expand_effects [ action, `Entity role ])
                   (Role_set.elements roles)
-                |> List.fold_left
+                |> CCList.fold_left
                      (fun rv effect ->
                        let* rv = rv in
                        let* effect = effect in
                        let set' =
-                         List.fold_left
+                         CCList.fold_left
                            (fun acc x -> Authorizer.Effect_set.add x acc)
                            rv
                            effect
@@ -368,7 +375,7 @@ module Make (R : Role.S) = struct
             | x -> Lwt.return_ok [ x ])
           effects
       in
-      List.fold_left
+      CCList.fold_left
         (fun x acc ->
           match acc, x with
           | Error _, _ -> acc
@@ -381,7 +388,7 @@ module Make (R : Role.S) = struct
 
     (** [collect_rules e] Query the database for a list of rules pertaining to
         the effects [e]. *)
-    let collect_rules (effects : Authorizer.effect list) =
+    let collect_rules ?ctx (effects : Authorizer.effect list) =
       Lwt_result.map_error
         (Format.asprintf
            "Failed to collect rules for effects list %s. Error message: %s"
@@ -392,7 +399,7 @@ module Make (R : Role.S) = struct
       let%lwt results =
         Lwt_list.map_s
           (fun (action, target) ->
-            let* rules = get_perms target in
+            let* rules = find_rules ?ctx target in
             CCList.filter
               (fun (_actor, action', _target) ->
                 action = action' || action' = `Manage)
@@ -417,11 +424,11 @@ module Make (R : Role.S) = struct
       |> Lwt_result.return
     ;;
 
-    let checker_of_effects effects ~actor =
+    let checker_of_effects ?ctx effects ~actor =
       Lwt_list.fold_left_s
         (fun acc effect ->
           let* () = Lwt_result.lift acc in
-          let* rules = collect_rules [ effect ] in
+          let* rules = collect_rules ?ctx [ effect ] in
           Authorizer.checker_of_rules ~any_of:true rules ~actor
           |> CCResult.map_err (fun err ->
                Format.asprintf
@@ -438,16 +445,16 @@ module Make (R : Role.S) = struct
 
     (** turn a single argument function returning a [result] into one that
         raises a [Failure] instead *)
-    let exceptionalize1 f name arg =
-      let%lwt res = f arg in
+    let with_exn ?ctx f name arg =
+      let%lwt res = f ?ctx arg in
       match res with
       | Ok x -> Lwt.return x
       | Error s -> raise (Failure (name ^ " failed: " ^ s))
     ;;
 
-    let get_roles_exn = exceptionalize1 BES.get_roles "get_roles_exn"
-    let get_perms_exn = exceptionalize1 BES.get_perms "get_perms_exn"
-    let save_rule_exn = exceptionalize1 BES.save_rule "save_rule_exn"
-    let delete_perm_exn = exceptionalize1 BES.delete_perm "delete_perm_exn"
+    let find_roles_exn ?ctx = with_exn BES.find_roles ?ctx "find_roles_exn"
+    let find_rules_exn ?ctx = with_exn BES.find_rules ?ctx "find_rules_exn"
+    let save_rule_exn ?ctx = with_exn BES.save_rule ?ctx "save_rule_exn"
+    let delete_rule_exn ?ctx = with_exn BES.delete_rule ?ctx "delete_rule_exn"
   end
 end

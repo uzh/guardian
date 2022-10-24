@@ -9,11 +9,11 @@ end
 module Make (R : Role.S) : S with type elt = R.t = struct
   include Set.Make (R)
 
-  let to_yojson t = `List (List.map R.to_yojson (elements t))
+  let to_yojson t = `List (CCList.map R.to_yojson (elements t))
 
   let of_yojson = function
     | `List items ->
-      List.fold_left
+      CCList.fold_left
         (fun acc x ->
           Result.bind acc (fun acc' ->
             match R.of_yojson x with

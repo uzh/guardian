@@ -41,7 +41,7 @@ module Make (P : Ocauth.Persistence_s) = struct
     let f new_author =
       let _ = t.author <- new_author in
       let* ent = to_authorizable t in
-      let* () = P.set_owner ent.uuid ~owner:(snd new_author) in
+      let* () = P.save_owner ent.uuid ~owner:(snd new_author) in
       Lwt.return_ok t
     in
     let* wrapped =

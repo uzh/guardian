@@ -1,18 +1,8 @@
 open Lwt.Infix
 open Caqti_request.Infix
 
-module Make
-  (R : Guardian.Role_s) (CONFIG : sig
-    val connection_string : string
-  end)
-  () =
-struct
+module Make (R : Guardian.Role_s) (Db : Database_pools.Sig) () = struct
   module Guardian = Guardian.Make (R)
-
-  module Db =
-    (val Caqti_lwt.connect (Uri.of_string CONFIG.connection_string)
-         >>= Caqti_lwt.or_fail
-         |> Lwt_main.run)
 
   let ( let* ) = Lwt_result.bind
 
@@ -24,18 +14,19 @@ struct
     type actor_spec = Guardian.Authorizer.actor_spec
     type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
 
-    let get_roles id : (Guardian.Role_set.t, string) Lwt_result.t =
+    let find_roles ?ctx id : (Guardian.Role_set.t, string) Lwt_result.t =
       let caqti =
         {sql|SELECT roles FROM guardian_entities WHERE id = ?|sql}
         |> Caqti_type.(string ->! string)
       in
-      match%lwt Db.find caqti (Uuidm.to_string id) with
-      | Ok s ->
-        Guardian.Role_set.of_yojson (Yojson.Safe.from_string s) |> Lwt.return
-      | Error err -> Lwt.return_error (Caqti_error.show err)
+      let%lwt roles = Db.find ?ctx caqti (Uuidm.to_string id) in
+      roles
+      |> Yojson.Safe.from_string
+      |> Guardian.Role_set.of_yojson
+      |> Lwt.return
     ;;
 
-    let get_perms target_spec
+    let find_rules ?ctx target_spec
       : (Guardian.Authorizer.auth_rule list, string) Lwt_result.t
       =
       let%lwt res =
@@ -49,7 +40,7 @@ struct
             |> Caqti_type.(
                  string ->* tup3 string (option string) (option string))
           in
-          Db.collect_list caqti (Uuidm.to_string uuid)
+          Db.collect ?ctx caqti (Uuidm.to_string uuid)
         | `Entity role ->
           let caqti =
             {sql|
@@ -59,29 +50,26 @@ struct
             |> Caqti_type.(
                  string ->* tup3 string (option string) (option string))
           in
-          Db.collect_list caqti (R.show role)
+          Db.collect ?ctx caqti (R.show role)
       in
-      match res with
-      | Ok s ->
-        List.map
-          (fun (act, actor_id, actor_role) : Guardian.Authorizer.auth_rule ->
-            let act = Guardian.Action.of_string act in
-            match actor_id, Option.map R.of_string actor_role with
-            | Some id, None ->
-              (match Uuidm.of_string id with
-               | Some id' -> `One id', act, target_spec
-               | None -> raise (Failure ("Invalid UUID: " ^ id)))
-            | None, Some role -> `Entity role, act, target_spec
-            | Some _, Some _ | None, None ->
-              raise
-                (Failure
-                   "Either both actor fields were occupied, or both were not."))
-          s
-        |> Lwt.return_ok
-      | Error err -> Lwt.return_error (Caqti_error.show err)
+      CCList.map
+        (fun (act, actor_id, actor_role) : Guardian.Authorizer.auth_rule ->
+          let act = Guardian.Action.of_string act in
+          match actor_id, Option.map R.of_string actor_role with
+          | Some id, None ->
+            (match Uuidm.of_string id with
+             | Some id' -> `One id', act, target_spec
+             | None -> raise (Failure (Format.asprintf "Invalid UUID: %s" id)))
+          | None, Some role -> `Entity role, act, target_spec
+          | Some _, Some _ | None, None ->
+            raise
+              (Failure
+                 "Either both actor fields were occupied, or both were not."))
+        res
+      |> Lwt.return_ok
     ;;
 
-    let act_on_perm query (actor, act, target) =
+    let act_on_rule ?ctx query (actor, act, target) =
       let spec_to_str = function
         | `One s -> Uuidm.to_string s
         | `Entity s -> R.show s
@@ -89,15 +77,11 @@ struct
       let actor' = spec_to_str actor in
       let act' = Guardian.Action.to_string act in
       let target' = spec_to_str target in
-      let caqti =
-        (Caqti_type.(tup3 string string string) ->. Caqti_type.unit) @@ query
-      in
-      match%lwt Db.exec caqti (actor', act', target') with
-      | Ok () -> Lwt.return_ok ()
-      | Error err -> Lwt.return_error (Caqti_error.show err)
+      let caqti = Caqti_type.(tup3 string string string ->. unit) @@ query in
+      Db.exec ?ctx caqti (actor', act', target') |> Lwt_result.ok
     ;;
 
-    let save_rule (auth_rule : auth_rule) : (unit, string) Lwt_result.t =
+    let save_rule ?ctx (auth_rule : auth_rule) : (unit, string) Lwt_result.t =
       let query =
         match auth_rule with
         | `One _, _, `One _ ->
@@ -109,10 +93,10 @@ struct
         | `Entity _, _, `Entity _ ->
           {sql|INSERT INTO guardian_rules (actor_role, act, target_role) VALUES (?, ?, ?)|sql}
       in
-      act_on_perm query auth_rule
+      act_on_rule ?ctx query auth_rule
     ;;
 
-    let delete_perm auth_rule =
+    let delete_rule ?ctx auth_rule =
       let query =
         match auth_rule with
         | `One _, _, `One _ ->
@@ -124,12 +108,12 @@ struct
         | `Entity _, _, `Entity _ ->
           {sql|DELETE FROM guardian_rules WHERE actor_role = ? AND act = ? AND target_role = ?|sql}
       in
-      act_on_perm query auth_rule
+      act_on_rule ?ctx query auth_rule
     ;;
 
-    let grant_roles uuid roles =
+    let grant_roles ?ctx uuid roles =
       let open Guardian in
-      let* pre_roles = get_roles uuid in
+      let* pre_roles = find_roles ?ctx uuid in
       let roles' = Role_set.union roles pre_roles in
       if Role_set.(cardinal roles' > cardinal pre_roles)
       then (
@@ -138,67 +122,58 @@ struct
           @@ {sql|UPDATE guardian_entities SET roles = ? WHERE id = ?|sql}
         in
         let roles'' = Yojson.Safe.to_string (Role_set.to_yojson roles') in
-        match%lwt Db.exec caqti (roles'', Uuidm.to_string uuid) with
-        | Ok () -> Lwt.return_ok ()
-        | Error err -> Lwt.return_error (Caqti_error.show err))
+        Db.exec ?ctx caqti (roles'', Uuidm.to_string uuid) |> Lwt_result.ok)
       else Lwt.return_ok ()
     ;;
 
-    let revoke_roles uuid roles =
+    let revoke_roles ?ctx uuid roles =
       let open Guardian in
-      let* pre_roles = get_roles uuid in
+      let* pre_roles = find_roles ?ctx uuid in
       let roles' = Role_set.diff pre_roles roles in
       let caqti =
         Caqti_type.(tup2 string string ->. unit)
         @@ {sql|UPDATE guardian_entities SET roles = ? WHERE id = ?|sql}
       in
       let roles'' = Yojson.Safe.to_string (Role_set.to_yojson roles') in
-      match%lwt Db.exec caqti (roles'', Uuidm.to_string uuid) with
-      | Ok () -> Lwt.return_ok ()
-      | Error err -> Lwt.return_error (Caqti_error.show err)
+      Db.exec ?ctx caqti (roles'', Uuidm.to_string uuid) |> Lwt_result.ok
     ;;
 
-    let create_authorizable ~id ?owner roles =
+    let create_authorizable ?ctx ~id ?owner roles =
       let caqti =
         Caqti_type.(tup3 string string (option string) ->. unit)
         @@ {sql|INSERT INTO guardian_entities (id, roles, parent) VALUES (?, ?, ?)|sql}
       in
       let roles' = Guardian.Role_set.to_yojson roles |> Yojson.Safe.to_string in
-      let owner' = Option.map Uuidm.to_string owner in
-      match%lwt Db.exec caqti (Uuidm.to_string id, roles', owner') with
-      | Ok _ -> Lwt.return_ok ()
-      | Error err -> Lwt.return_error (Caqti_error.show err)
+      let owner' = CCOption.map Uuidm.to_string owner in
+      Db.exec ?ctx caqti (Uuidm.to_string id, roles', owner') |> Lwt_result.ok
     ;;
 
-    let mem_authorizable id =
+    let mem_authorizable ?ctx id =
       let caqti =
         Caqti_type.(string ->? string)
         @@ {sql|SELECT roles FROM guardian_entities WHERE id = ?|sql}
       in
-      match%lwt Db.find_opt caqti (Uuidm.to_string id) with
-      | Ok (Some _) -> Lwt.return_ok true
-      | Ok None -> Lwt.return_ok false
-      | Error err -> Lwt.return_error (Caqti_error.show err)
+      Db.find_opt ?ctx caqti (Uuidm.to_string id)
+      >|= CCOption.is_some
+      |> Lwt_result.ok
     ;;
 
-    let get_owner id =
+    let find_owner ?ctx id =
       let caqti =
         Caqti_type.(string ->! option string)
         @@ {sql|SELECT parent FROM guardian_entities WHERE id = ?|sql}
       in
-      match%lwt Db.find caqti (Uuidm.to_string id) with
-      | Ok s -> Lwt.return_ok (Option.bind s Uuidm.of_string)
-      | Error err -> Lwt.return_error (Caqti_error.show err)
+      Db.find ?ctx caqti (Uuidm.to_string id)
+      >|= CCFun.flip CCOption.bind Uuidm.of_string
+      |> Lwt_result.ok
     ;;
 
-    let set_owner id ~owner =
+    let save_owner ?ctx id ~owner =
       let caqti =
         Caqti_type.(tup2 string string ->. unit)
         @@ {sql|UPDATE guardian_entities SET parent = ? WHERE id = ?|sql}
       in
-      match%lwt Db.exec caqti Uuidm.(to_string owner, to_string id) with
-      | Ok _ -> Lwt.return_ok ()
-      | Error err -> Lwt_result.fail (Caqti_error.show err)
+      Db.exec ?ctx caqti Uuidm.(to_string owner, to_string id) |> Lwt_result.ok
     ;;
   end)
 end

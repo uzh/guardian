@@ -1,3 +1,4 @@
+(** TODO: optional [ctx] arguments are ignored by sqlite backend *)
 module Make (R : Guardian.Role_s) = struct
   module Guardian = Guardian.Make (R)
 
@@ -6,6 +7,7 @@ module Make (R : Guardian.Role_s) = struct
   (** TODO: generalize this. right now it's fine because this backend should
       really only be used for testing purposes, but in the future it would be
       nice to have actual sqlite3 support. *)
+
   let db = Sqlite3.db_open "test_db.sqlite3"
 
   module Backend = struct
@@ -21,10 +23,11 @@ module Make (R : Guardian.Role_s) = struct
       | rc -> Lwt.return_error (Sqlite3.Rc.to_string rc)
     ;;
 
-    let create_authorizable ~id ?(owner : Uuidm.t option) roles
+    let create_authorizable ?ctx ~id ?(owner : Uuidm.t option) roles
       : (unit, string) Lwt_result.t
       =
       let open Sqlite3 in
+      let (_ : (string * string) list option) = ctx in
       let stmt =
         prepare
           db
@@ -36,15 +39,16 @@ module Make (R : Guardian.Role_s) = struct
           stmt
           [ Data.TEXT (Uuidm.to_string id)
           ; Data.TEXT roles'
-          ; Data.opt_text (Option.map Uuidm.to_string owner)
+          ; Data.opt_text (CCOption.map Uuidm.to_string owner)
           ]
         |> lwt_return_rc
       in
       lwt_return_rc (step stmt)
     ;;
 
-    let get_roles id =
+    let find_roles ?ctx id =
       let open Sqlite3 in
+      let (_ : (string * string) list option) = ctx in
       let id' = Uuidm.to_string id in
       let stmt =
         prepare db {sql|SELECT roles FROM guardian_entities WHERE id = ?|sql}
@@ -59,8 +63,9 @@ module Make (R : Guardian.Role_s) = struct
         |> Lwt.return
     ;;
 
-    let get_owner id =
+    let find_owner ?ctx id =
       let open Sqlite3 in
+      let (_ : (string * string) list option) = ctx in
       let id' = Uuidm.to_string id in
       let stmt =
         prepare db {sql|SELECT parent FROM guardian_entities WHERE id = ?|sql}
@@ -75,8 +80,9 @@ module Make (R : Guardian.Role_s) = struct
       | None -> Lwt.return_ok None
     ;;
 
-    let save_rule ((actor, action, target) : auth_rule) =
+    let save_rule ?ctx ((actor, action, target) : auth_rule) =
       let open Sqlite3 in
+      let (_ : (string * string) list option) = ctx in
       let action' = Guardian.Action.to_string action in
       let stmt =
         match actor, target with
@@ -152,8 +158,12 @@ module Make (R : Guardian.Role_s) = struct
       lwt_return_rc (step stmt)
     ;;
 
-    let delete_perm ((actor, action, target) : Guardian.Authorizer.auth_rule) =
+    let delete_rule
+      ?ctx
+      ((actor, action, target) : Guardian.Authorizer.auth_rule)
+      =
       let open Sqlite3 in
+      let (_ : (string * string) list option) = ctx in
       match actor, target with
       | `One aid, `One tid ->
         let stmt =
@@ -229,8 +239,9 @@ module Make (R : Guardian.Role_s) = struct
         lwt_return_rc (step stmt)
     ;;
 
-    let get_perms (spec : actor_spec) =
+    let find_rules ?ctx (spec : actor_spec) =
       let open Sqlite3 in
+      let (_ : (string * string) list option) = ctx in
       let* stmt =
         match spec with
         | `One uuidm ->
@@ -268,7 +279,9 @@ module Make (R : Guardian.Role_s) = struct
             let (actor_spec : Guardian.Authorizer.actor_spec) =
               match Data.(to_string row.(1), to_string row.(2)) with
               | Some actor_id, None ->
-                `One (Uuidm.of_string actor_id |> Option.get)
+                `One
+                  (Uuidm.of_string actor_id
+                  |> CCOption.get_exn_or "Malformatted UUID!")
               | None, Some actor_role -> `Entity (R.of_string actor_role)
               | _ -> raise (Invalid_argument "Invalid actor spec")
             in
@@ -280,21 +293,25 @@ module Make (R : Guardian.Role_s) = struct
       Lwt.return_ok rv
     ;;
 
-    let mem_authorizable id =
+    let mem_authorizable ?ctx id =
       let open Sqlite3 in
+      let (_ : (string * string) list option) = ctx in
       let stmt =
         prepare db {sql|SELECT * FROM guardian_entities WHERE id = ?|sql}
       in
-      let _ = bind_values stmt [ Data.TEXT (Uuidm.to_string id) ] in
-      let _, rv = fold stmt ~f:(fun _acc _row -> Some true) ~init:None in
-      Option.value rv ~default:false |> Lwt.return_ok
+      let (_ : Rc.t) = bind_values stmt [ Data.TEXT (Uuidm.to_string id) ] in
+      let (_ : Rc.t), rv =
+        fold stmt ~f:(fun _acc _row -> Some true) ~init:None
+      in
+      rv |> CCOption.get_or ~default:false |> Lwt.return_ok
     ;;
 
-    let grant_roles id roles =
+    let grant_roles ?ctx id roles =
       let open Sqlite3 in
+      let (_ : (string * string) list option) = ctx in
       let id' = Uuidm.to_string id in
       let* roles' =
-        let* pre_roles = get_roles id in
+        let* pre_roles = find_roles id in
         Guardian.Role_set.union pre_roles roles
         |> Guardian.Role_set.to_yojson
         |> Yojson.Safe.to_string
@@ -316,11 +333,12 @@ module Make (R : Guardian.Role_s) = struct
       lwt_return_rc (step stmt)
     ;;
 
-    let revoke_roles id roles =
+    let revoke_roles ?ctx id roles =
       let open Sqlite3 in
+      let (_ : (string * string) list option) = ctx in
       let id' = Uuidm.to_string id in
       let* roles' =
-        let* pre_roles = get_roles id in
+        let* pre_roles = find_roles id in
         Guardian.Role_set.diff pre_roles roles
         |> Guardian.Role_set.to_yojson
         |> Yojson.Safe.to_string
@@ -342,8 +360,9 @@ module Make (R : Guardian.Role_s) = struct
       lwt_return_rc (step stmt)
     ;;
 
-    let set_owner id ~owner =
+    let save_owner ?ctx id ~owner =
       let open Sqlite3 in
+      let (_ : (string * string) list option) = ctx in
       let id' = Uuidm.to_string id in
       let owner' = Uuidm.to_string owner in
       let stmt =
