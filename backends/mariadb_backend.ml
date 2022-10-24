@@ -42,18 +42,22 @@ struct
         match target_spec with
         | `One uuid ->
           let caqti =
-            (Caqti_type.string
-            ->* Caqti_type.(tup3 string (option string) (option string)))
-            @@ "SELECT act, actor_id, actor_role FROM guardian_rules WHERE \
-                target_id = ?"
+            {sql|
+              SELECT act, actor_id, actor_role FROM guardian_rules
+              WHERE target_id = ?
+            |sql}
+            |> Caqti_type.(
+                 string ->* tup3 string (option string) (option string))
           in
           Db.collect_list caqti (Uuidm.to_string uuid)
         | `Entity role ->
           let caqti =
-            (Caqti_type.string
-            ->* Caqti_type.(tup3 string (option string) (option string)))
-            @@ "SELECT act, actor_id, actor_role FROM guardian_rules WHERE \
-                target_role = ?"
+            {sql|
+              SELECT act, actor_id, actor_role FROM guardian_rules
+              WHERE target_role = ?
+            |sql}
+            |> Caqti_type.(
+                 string ->* tup3 string (option string) (option string))
           in
           Db.collect_list caqti (R.show role)
       in
@@ -97,17 +101,13 @@ struct
       let query =
         match auth_rule with
         | `One _, _, `One _ ->
-          "INSERT INTO guardian_rules (actor_id, act, target_id) VALUES (?, ?, \
-           ?)"
+          {sql|INSERT INTO guardian_rules (actor_id, act, target_id) VALUES (?, ?, ?)|sql}
         | `One _, _, `Entity _ ->
-          "INSERT INTO guardian_rules (actor_id, act, target_role) VALUES (?, \
-           ?, ?)"
+          {sql|INSERT INTO guardian_rules (actor_id, act, target_role) VALUES (?, ?, ?)|sql}
         | `Entity _, _, `One _ ->
-          "INSERT INTO guardian_rules (actor_role, act, target_id) VALUES (?, \
-           ?, ?)"
+          {sql|INSERT INTO guardian_rules (actor_role, act, target_id) VALUES (?, ?, ?)|sql}
         | `Entity _, _, `Entity _ ->
-          "INSERT INTO guardian_rules (actor_role, act, target_role) VALUES \
-           (?, ?, ?)"
+          {sql|INSERT INTO guardian_rules (actor_role, act, target_role) VALUES (?, ?, ?)|sql}
       in
       act_on_perm query auth_rule
     ;;
@@ -116,17 +116,13 @@ struct
       let query =
         match auth_rule with
         | `One _, _, `One _ ->
-          "DELETE FROM guardian_rules WHERE actor_id = ? AND act = ? AND \
-           target_id = ?"
+          {sql|DELETE FROM guardian_rules WHERE actor_id = ? AND act = ? AND target_id = ?|sql}
         | `One _, _, `Entity _ ->
-          "DELETE FROM guardian_rules WHERE actor_id = ? AND act = ? AND \
-           target_role = ?"
+          {sql|DELETE FROM guardian_rules WHERE actor_id = ? AND act = ? AND target_role = ?|sql}
         | `Entity _, _, `One _ ->
-          "DELETE FROM guardian_rules WHERE actor_role = ? AND act = ? AND \
-           target_id = ?"
+          {sql|DELETE FROM guardian_rules WHERE actor_role = ? AND act = ? AND target_id = ?|sql}
         | `Entity _, _, `Entity _ ->
-          "DELETE FROM guardian_rules WHERE actor_role = ? AND act = ? AND \
-           target_role = ?"
+          {sql|DELETE FROM guardian_rules WHERE actor_role = ? AND act = ? AND target_role = ?|sql}
       in
       act_on_perm query auth_rule
     ;;
@@ -138,8 +134,8 @@ struct
       if Role_set.(cardinal roles' > cardinal pre_roles)
       then (
         let caqti =
-          (Caqti_type.(tup2 string string) ->. Caqti_type.unit)
-          @@ "UPDATE guardian_entities SET roles = ? WHERE id = ?"
+          Caqti_type.(tup2 string string ->. unit)
+          @@ {sql|UPDATE guardian_entities SET roles = ? WHERE id = ?|sql}
         in
         let roles'' = Yojson.Safe.to_string (Role_set.to_yojson roles') in
         match%lwt Db.exec caqti (roles'', Uuidm.to_string uuid) with
@@ -153,8 +149,8 @@ struct
       let* pre_roles = get_roles uuid in
       let roles' = Role_set.diff pre_roles roles in
       let caqti =
-        (Caqti_type.(tup2 string string) ->. Caqti_type.unit)
-        @@ "UPDATE guardian_entities SET roles = ? WHERE id = ?"
+        Caqti_type.(tup2 string string ->. unit)
+        @@ {sql|UPDATE guardian_entities SET roles = ? WHERE id = ?|sql}
       in
       let roles'' = Yojson.Safe.to_string (Role_set.to_yojson roles') in
       match%lwt Db.exec caqti (roles'', Uuidm.to_string uuid) with
@@ -164,8 +160,8 @@ struct
 
     let create_authorizable ~id ?owner roles =
       let caqti =
-        (Caqti_type.(tup3 string string (option string)) ->. Caqti_type.unit)
-        @@ "INSERT INTO guardian_entities (id, roles, parent) VALUES (?, ?, ?)"
+        Caqti_type.(tup3 string string (option string) ->. unit)
+        @@ {sql|INSERT INTO guardian_entities (id, roles, parent) VALUES (?, ?, ?)|sql}
       in
       let roles' = Guardian.Role_set.to_yojson roles |> Yojson.Safe.to_string in
       let owner' = Option.map Uuidm.to_string owner in
@@ -176,8 +172,8 @@ struct
 
     let mem_authorizable id =
       let caqti =
-        (Caqti_type.string ->? Caqti_type.string)
-        @@ "SELECT roles FROM guardian_entities WHERE id = ?"
+        Caqti_type.(string ->? string)
+        @@ {sql|SELECT roles FROM guardian_entities WHERE id = ?|sql}
       in
       match%lwt Db.find_opt caqti (Uuidm.to_string id) with
       | Ok (Some _) -> Lwt.return_ok true
@@ -187,8 +183,8 @@ struct
 
     let get_owner id =
       let caqti =
-        (Caqti_type.string ->! Caqti_type.(option string))
-        @@ "SELECT parent FROM guardian_entities WHERE id = ?"
+        Caqti_type.(string ->! option string)
+        @@ {sql|SELECT parent FROM guardian_entities WHERE id = ?|sql}
       in
       match%lwt Db.find caqti (Uuidm.to_string id) with
       | Ok s -> Lwt.return_ok (Option.bind s Uuidm.of_string)
@@ -197,8 +193,8 @@ struct
 
     let set_owner id ~owner =
       let caqti =
-        (Caqti_type.(tup2 string string) ->. Caqti_type.unit)
-        @@ "UPDATE guardian_entities SET parent = ? WHERE id = ?"
+        Caqti_type.(tup2 string string ->. unit)
+        @@ {sql|UPDATE guardian_entities SET parent = ? WHERE id = ?|sql}
       in
       match%lwt Db.exec caqti Uuidm.(to_string owner, to_string id) with
       | Ok _ -> Lwt.return_ok ()
