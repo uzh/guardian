@@ -14,12 +14,11 @@
 
 (maintainers "engineering@econ.uzh.ch")
 
-(homepage "https://gitlab.uzh.ch/econ/it/framework/ocaml/permissions")
+(homepage "https://github.com/uzh/guardian")
 
-(bug_reports
- "https://gitlab.uzh.ch/econ/it/framework/ocaml/permissions/-/issues")
+(bug_reports "https://github.com/uzh/guardian/issues")
 
-(documentation "https://gitlab.uzh.ch/econ/it/framework/ocaml/permissions")
+(documentation "https://github.com/uzh/guardian")
 
 (package
  (name guardian)

@@ -11,7 +11,7 @@ module type Backend_store_s = sig
   (** [get_perms target_spec] *)
   val get_perms : actor_spec -> (auth_rule list, string) monad
 
-  val put_perm : auth_rule -> (unit, string) monad
+  val save_rule : auth_rule -> (unit, string) monad
   val delete_perm : auth_rule -> (unit, string) monad
   val grant_roles : Uuidm.t -> role_set -> (unit, string) monad
   val revoke_roles : Uuidm.t -> role_set -> (unit, string) monad
@@ -35,7 +35,7 @@ module type S = sig
     -> Uuidm.t
     -> ('kind authorizable, string) Lwt_result.t
 
-  val put_perms
+  val save_rules
     :  auth_rule list
     -> (auth_rule list, auth_rule list) Lwt_result.t
 
@@ -73,6 +73,6 @@ module type S = sig
   val get_roles_exn : Uuidm.t -> role_set Lwt.t
 
   val get_perms_exn : actor_spec -> auth_rule list Lwt.t
-  val put_perm_exn : auth_rule -> unit Lwt.t
+  val save_rule_exn : auth_rule -> unit Lwt.t
   val delete_perm_exn : auth_rule -> unit Lwt.t
 end

@@ -160,20 +160,20 @@ module Make (R : Role.S) = struct
                 (Uuidm.to_string id)))
     ;;
 
-    (** [put_perms perms] adds all the permissions [perms] to the backend. If
+    (** [save_rules rules] adds all the permissions [rules] to the backend. If
         there is an error at any point, it returns a `result` containing all of
         the items that were not added. *)
-    let put_perms perms =
+    let save_rules rules =
       List.fold_left
         (fun acc x ->
           match%lwt acc with
           | Ok acc' ->
-            (match%lwt BES.put_perm x with
+            (match%lwt BES.save_rule x with
              | Ok () -> Lwt.return_ok (x :: acc')
              | Error _ -> Lwt.return_error [ x ])
           | Error xs -> Lwt.return_error (x :: xs))
         (Lwt.return_ok [])
-        perms
+        rules
     ;;
 
     (** This convenience function should be used to decorate the
@@ -447,7 +447,7 @@ module Make (R : Role.S) = struct
 
     let get_roles_exn = exceptionalize1 BES.get_roles "get_roles_exn"
     let get_perms_exn = exceptionalize1 BES.get_perms "get_perms_exn"
-    let put_perm_exn = exceptionalize1 BES.put_perm "put_perm_exn"
+    let save_rule_exn = exceptionalize1 BES.save_rule "save_rule_exn"
     let delete_perm_exn = exceptionalize1 BES.delete_perm "delete_perm_exn"
   end
 end

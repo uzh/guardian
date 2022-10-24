@@ -77,7 +77,7 @@ module Make (R : Guardian.Role_s) = struct
       | None -> Lwt.return_ok None
     ;;
 
-    let put_perm ((actor, action, target) : auth_rule) =
+    let save_rule ((actor, action, target) : auth_rule) =
       let action' = Guardian.Action.to_string action in
       let stmt =
         let open Sqlite3 in

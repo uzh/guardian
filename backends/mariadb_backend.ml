@@ -93,7 +93,7 @@ struct
       | Error err -> Lwt.return_error (Caqti_error.show err)
     ;;
 
-    let put_perm (auth_rule : auth_rule) : (unit, string) Lwt_result.t =
+    let save_rule (auth_rule : auth_rule) : (unit, string) Lwt_result.t =
       let query =
         match auth_rule with
         | `One _, _, `One _ ->

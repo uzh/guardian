@@ -11,10 +11,9 @@ authors: [
   "Department of Economics, University of Zurich" "John Christopher McAlpine"
 ]
 license: "GPL-2.0-or-later"
-homepage: "https://gitlab.uzh.ch/econ/it/framework/ocaml/permissions"
-doc: "https://gitlab.uzh.ch/econ/it/framework/ocaml/permissions"
-bug-reports:
-  "https://gitlab.uzh.ch/econ/it/framework/ocaml/permissions/-/issues"
+homepage: "https://github.com/uzh/guardian"
+doc: "https://github.com/uzh/guardian"
+bug-reports: "https://github.com/uzh/guardian/issues"
 depends: [
   "base64" {>= "3.5.0"}
   "caqti-driver-mariadb" {>= "1.8.0"}
