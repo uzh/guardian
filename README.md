@@ -1,4 +1,4 @@
-# permissions
+# Guardian
 
 Generic framework for roles and permissions to be used in our projects
 
