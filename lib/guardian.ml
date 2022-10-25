@@ -123,7 +123,10 @@ module Make (R : Role.S) = struct
       (** [to_authorizable x] converts [x] to a uniquely identifiable object,
           complete * with roles. The [authorizable] may not, however, be
           converted back into type [t]. **)
-      val to_authorizable : t -> (kind Authorizable.t, string) Lwt_result.t
+      val to_authorizable
+        :  ?ctx:(string * string) list
+        -> t
+        -> (kind Authorizable.t, string) Lwt_result.t
     end
   end
 
@@ -192,12 +195,12 @@ module Make (R : Role.S) = struct
      fun x ->
       let (ent : 'kind Authorizable.t) = to_authorizable x in
       let uuid = ent.uuid in
-      let* mem = BES.mem_authorizable ent.uuid in
+      let* mem = BES.mem_authorizable ?ctx ent.uuid in
       if mem
       then
-        let* ent' = find_authorizable ~typ:ent.typ ent.uuid in
+        let* ent' = find_authorizable ?ctx ~typ:ent.typ ent.uuid in
         let roles = Role_set.union ent.roles ent'.roles in
-        let* () = BES.grant_roles uuid roles in
+        let* () = BES.grant_roles ?ctx uuid roles in
         let* owner =
           match ent.owner, ent'.owner with
           | Some owner, None ->
@@ -216,7 +219,9 @@ module Make (R : Role.S) = struct
         in
         Lwt.return_ok Authorizable.{ uuid; roles; owner; typ = ent.typ }
       else
-        let* () = BES.create_authorizable ~id:uuid ?owner:ent.owner ent.roles in
+        let* () =
+          BES.create_authorizable ?ctx ~id:uuid ?owner:ent.owner ent.roles
+        in
         Lwt.return_ok ent
    ;;
 
@@ -303,7 +308,7 @@ module Make (R : Role.S) = struct
               match target with
               | `One uuid ->
                 let* authorizable = find_authorizable ?ctx ~typ:() uuid in
-                find_checker authorizable
+                find_checker ?ctx authorizable
               | `Entity role -> find_role_checker (Role_set.singleton role)
             in
             let can actor =

@@ -318,7 +318,7 @@ module Make (R : Guardian.Role_s) = struct
         |> Lwt.return_ok
       in
       let* stmt =
-        let* mem = mem_authorizable id in
+        let* mem = mem_authorizable ?ctx id in
         if mem
         then
           Lwt.return_ok
@@ -345,7 +345,7 @@ module Make (R : Guardian.Role_s) = struct
         |> Lwt.return_ok
       in
       let* stmt =
-        let* mem = mem_authorizable id in
+        let* mem = mem_authorizable ?ctx id in
         if mem
         then
           Lwt.return_ok

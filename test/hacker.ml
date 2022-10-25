@@ -10,5 +10,5 @@ module Make (P : Ocauth.Persistence_s) = struct
       (snd t)
   ;;
 
-  let to_authorizable = P.decorate_to_authorizable to_authorizable
+  let to_authorizable ?ctx = P.decorate_to_authorizable ?ctx to_authorizable
 end

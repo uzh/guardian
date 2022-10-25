@@ -9,5 +9,5 @@ module Make (P : Ocauth.Persistence_s) = struct
     Authorizable.make ~roles:(Role_set.singleton `User) ~typ:`User (snd t)
   ;;
 
-  let to_authorizable = P.decorate_to_authorizable to_authorizable
+  let to_authorizable ?ctx = P.decorate_to_authorizable ?ctx to_authorizable
 end

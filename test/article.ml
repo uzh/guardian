@@ -18,34 +18,43 @@ module Make (P : Ocauth.Persistence_s) = struct
     Authorizable.make ~roles ~typ:`Article ~owner:(snd t.author) t.uuid
   ;;
 
-  let to_authorizable = P.decorate_to_authorizable to_authorizable
+  let to_authorizable ?ctx = P.decorate_to_authorizable ?ctx to_authorizable
 
   let update_title
+    ?ctx
     (actor : [ `User | `Article ] Ocauth.Authorizable.t)
     t
     new_title
     =
+    let ( let* ) = Lwt_result.bind in
     let f new_title =
-      let _ = t.title <- new_title in
+      let () = t.title <- new_title in
       Lwt.return_ok t
     in
-    let ( let* ) = Lwt_result.bind in
     let* wrapped =
-      P.wrap_function ~error:(fun x -> x) ~effects:[ `Update, `One t.uuid ] f
+      P.wrap_function
+        ?ctx
+        ~error:(fun x -> x)
+        ~effects:[ `Update, `One t.uuid ]
+        f
     in
     wrapped ~actor new_title
   ;;
 
-  let update_author (actor : [ `User ] Ocauth.Authorizable.t) t new_author =
+  let update_author ?ctx (actor : [ `User ] Ocauth.Authorizable.t) t new_author =
     let ( let* ) = Lwt_result.bind in
     let f new_author =
-      let _ = t.author <- new_author in
-      let* ent = to_authorizable t in
-      let* () = P.save_owner ent.uuid ~owner:(snd new_author) in
+      let () = t.author <- new_author in
+      let* ent = to_authorizable ?ctx t in
+      let* () = P.save_owner ?ctx ent.uuid ~owner:(snd new_author) in
       Lwt.return_ok t
     in
     let* wrapped =
-      P.wrap_function ~error:(fun x -> x) ~effects:[ `Manage, `One t.uuid ] f
+      P.wrap_function
+        ?ctx
+        ~error:(fun x -> x)
+        ~effects:[ `Manage, `One t.uuid ]
+        f
     in
     wrapped ~actor new_author
   ;;

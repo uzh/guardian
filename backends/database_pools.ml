@@ -1,5 +1,9 @@
 exception Exception of string
 
+type connection_type =
+  | SinglePool of string
+  | MultiPools of (string * string) list
+
 let with_log ?(log_level = Logs.Error) ?(msg_prefix = "Error") err =
   let msg = Caqti_error.show err in
   Logs.msg log_level (fun m -> m "%s: %s" msg_prefix msg);
@@ -16,38 +20,16 @@ let map_or_raise ?log_level ?msg_prefix fcn result =
 ;;
 
 module type ConfigSig = sig
-  val database_url : string
-  val database_pool_size : int option
-  val database_skip_default_pool_creation : bool option
-  val database_choose_pool : string option
-  val database_max_pools : int option
+  val database : connection_type
+  val database_pool_size : int
 end
 
 module DefaultConfig : ConfigSig = struct
-  let database_url = "mariadb://root@database:3306/dev"
-  let database_choose_pool = None
-  let database_skip_default_pool_creation = None
-  let database_pool_size = None
-  let database_max_pools = None
+  let database = SinglePool "mariadb://root@database:3306/test"
+  let database_pool_size = 5
 end
 
-module Make (CONFIG : ConfigSig) () = struct
-  module Config = struct
-    module Database = struct
-      let url = CONFIG.database_url
-      let pool_size = CCOption.get_or ~default:5 CONFIG.database_pool_size
-
-      let skip_default_pool_creation =
-        CCOption.get_or
-          ~default:false
-          CONFIG.database_skip_default_pool_creation
-      ;;
-
-      let choose_pool = CONFIG.database_choose_pool
-      let max_pools = CCOption.get_or ~default:100 CONFIG.database_max_pools
-    end
-  end
-
+module Make (Config : ConfigSig) () = struct
   let main_pool_ref
     : (Caqti_lwt.connection, Caqti_error.t) Caqti_lwt.Pool.t option ref
     =
@@ -57,63 +39,74 @@ module Make (CONFIG : ConfigSig) () = struct
   let pools
     : (string, (Caqti_lwt.connection, Caqti_error.t) Caqti_lwt.Pool.t) Hashtbl.t
     =
-    Hashtbl.create Config.Database.max_pools
+    let spare_for_pools = 5 in
+    Hashtbl.create
+      (match Config.database with
+       | SinglePool _ -> 1
+       | MultiPools pools -> CCList.length pools + spare_for_pools)
   ;;
 
   let print_pool_usage pool =
     let n_connections = Caqti_lwt.Pool.size pool in
-    let max_connections = Config.Database.pool_size in
+    let max_connections = Config.database_pool_size in
     Logs.debug (fun m -> m "Pool usage: %i/%i" n_connections max_connections)
   ;;
 
-  let connect_or_failwith pool_size ok_fun database_url =
+  let connect_or_failwith
+    ?(pool_size = Config.database_pool_size)
+    ok_fun
+    database_url
+    =
     database_url
     |> Uri.of_string
     |> Caqti_lwt.connect_pool ~max_size:pool_size
     |> map_or_raise ~msg_prefix:"Failed to connect to DB pool" ok_fun
   ;;
 
-  let fetch_pool ?(ctx = []) () =
-    let chosen_pool_name_ctx = CCList.assoc_opt ~eq:String.equal "pool" ctx in
-    let chosen_pool =
-      let open CCOption in
-      choice [ chosen_pool_name_ctx; Config.Database.choose_pool ]
-      >>= Hashtbl.find_opt pools
-    in
-    match chosen_pool, !main_pool_ref with
-    | Some pool, _ -> pool
-    | None, Some pool ->
-      Logs.debug (fun m -> m "Skipping pool creation, re-using existing pool");
-      pool
-    | None, None ->
-      if Config.Database.skip_default_pool_creation
-      then
-        Logs.warn (fun m ->
-          m
-            "database_skip_default_pool_creation config was set to true, but \
-             no pool was defined for querying.");
-      let pool_size = Config.Database.pool_size in
-      Logs.info (fun m -> m "Create pool with size %i" pool_size);
-      Config.Database.url
-      |> connect_or_failwith pool_size (fun pool ->
-           main_pool_ref := Some pool;
-           pool)
+  let add_pool ?pool_size name database_url =
+    match Config.database with
+    | SinglePool _ ->
+      raise @@ Exception "SinglePool is selected: Switch to 'MultiPools' first"
+    | MultiPools _ when CCOption.is_some (Hashtbl.find_opt pools name) ->
+      let msg =
+        Format.asprintf
+          "Failed to create pool: Connection pool with name '%s' exists already"
+          name
+      in
+      Logs.err (fun m -> m "%s" msg);
+      raise @@ Exception msg
+    | MultiPools _ ->
+      database_url |> connect_or_failwith ?pool_size (Hashtbl.add pools name)
   ;;
 
-  let add_pool ?(pool_size = Config.Database.pool_size) name database_url =
-    database_url
-    |> connect_or_failwith pool_size (fun pool ->
-         if CCOption.is_some (Hashtbl.find_opt pools name)
-         then (
-           let msg =
-             Format.asprintf
-               "Failed to create pool: Connection pool with name '%s' exists \
-                already"
-               name
-           in
-           Logs.err (fun m -> m "%s" msg);
-           raise @@ Exception msg)
-         else Hashtbl.add pools name pool)
+  let initialize () =
+    match Config.database with
+    | SinglePool database_url when CCOption.is_none !main_pool_ref ->
+      database_url
+      |> connect_or_failwith (fun pool ->
+           main_pool_ref := Some pool;
+           ())
+    | SinglePool _ -> ()
+    | MultiPools pools' ->
+      pools'
+      |> CCList.filter (fun (name, _) ->
+           CCOption.is_none (Hashtbl.find_opt pools name))
+      |> CCList.iter (fun (name, url) ->
+           url |> connect_or_failwith (Hashtbl.add pools name))
+  ;;
+
+  let fetch_pool ?(ctx = []) () =
+    let open CCOption in
+    let () = initialize () in
+    match Config.database with
+    | SinglePool _ ->
+      !main_pool_ref |> get_exn_or "Initialization missed: run 'initialize'"
+    | MultiPools _ ->
+      CCList.assoc_opt ~eq:CCString.equal "pool" ctx
+      >>= Hashtbl.find_opt pools
+      |> (function
+      | Some pool -> pool
+      | None -> raise @@ Exception "Unknown Pool: Please 'add_pool' first!")
   ;;
 
   let transaction ?ctx f =
@@ -196,6 +189,8 @@ module Make (CONFIG : ConfigSig) () = struct
 end
 
 module type Sig = sig
+  val initialize : unit -> unit
+
   val fetch_pool
     :  ?ctx:(string * string) list
     -> unit
