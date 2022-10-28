@@ -63,7 +63,7 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
   let test_find_authorizable ?ctx _ () =
     (match%lwt Backend.find_authorizable ?ctx ~typ:`User (snd aron) with
      | Ok _ -> Lwt.return_true
-     | Error err -> raise (Failure err))
+     | Error err -> failwith err)
     >|= Alcotest.(check bool) "Fetch an authorizable." true
   ;;
 
@@ -86,7 +86,7 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
        let received = [%show: Role.t list] (elements roles) in
        let expected = [%show: Role.t list] (elements expected) in
        Lwt.return_error
-         (Printf.sprintf
+         (Format.asprintf
             "Got %s for roles of authorizable %s, but expected %s."
             received
             (Uuidm.to_string (snd aron))
@@ -126,7 +126,7 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
        |> Lwt_result.map_error [%show: Ocauth.Authorizer.auth_rule list]
      in
      Lwt.return_ok (CCList.map Ocauth.Authorizer.show_auth_rule put))
-    >|= Alcotest.(check (result (slist string String.compare) string))
+    >|= Alcotest.(check (result (slist string CCString.compare) string))
           "Push global permissions."
           (Ok (CCList.map Ocauth.Authorizer.show_auth_rule global_rules))
   ;;
@@ -146,7 +146,7 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
      in
      if Guardian.Authorizer.Auth_rule_set.compare global_set retrieved_set = 0
      then Lwt.return_ok ()
-     else Lwt.return_error (Printf.sprintf "Permissions diff: %s." diff'))
+     else Lwt.return_error (Format.asprintf "Permissions diff: %s." diff'))
     >|= Alcotest.(check (result unit string))
           "Read the global permissions we've just pushed."
           (Ok ())
@@ -157,12 +157,9 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
      let* perms = Backend.find_rules ?ctx (`One aron_article.uuid) in
      let* () =
        match perms with
-       | [ perm ] ->
-         if perm = bad_rule
-         then Lwt.return_ok ()
-         else
-           Lwt.return_error
-             "Failed to push bad permission to test perm dropping."
+       | [ perm ] when perm = bad_rule -> Lwt.return_ok ()
+       | [ _ ] ->
+         Lwt.return_error "Failed to push bad permission to test perm dropping."
        | _ -> Lwt.return_error "Invalid permissions."
      in
      let* () = Backend.delete_rule ?ctx bad_rule in
@@ -193,8 +190,8 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
        let%lwt res =
          Article.update_title ?ctx aron_ent chris_article "Updated Title"
        in
-       Lwt.return (Result.is_ok res)
-     | Error err -> raise (Failure err))
+       Lwt.return (CCResult.is_ok res)
+     | Error err -> failwith err)
     >|= Alcotest.(check bool)
           "Aron (admin) can update an article Chris owns"
           true
@@ -207,8 +204,8 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
        let%lwt res =
          Article.update_title ?ctx chris_ent aron_article "Updated Title"
        in
-       Lwt.return (Result.is_error res)
-     | Error err -> raise (Failure err))
+       Lwt.return (CCResult.is_error res)
+     | Error err -> failwith err)
     >|= Alcotest.(check bool) "Chris cannot update an article Aron owns" true
   ;;
 
@@ -219,8 +216,8 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
        let%lwt res =
          Article.update_title ?ctx chris_article' chris_article "Updated Title"
        in
-       Lwt.return (Result.is_ok res)
-     | Error err -> raise (Failure err))
+       Lwt.return (CCResult.is_ok res)
+     | Error err -> failwith err)
     >|= Alcotest.(check bool) "Article can update itself." true
   ;;
 
@@ -231,8 +228,8 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
        let%lwt res =
          Article.update_title ?ctx chris_article' aron_article "Updated Title"
        in
-       Lwt.return (Result.is_error res)
-     | Error err -> raise (Failure err))
+       Lwt.return (CCResult.is_error res)
+     | Error err -> failwith err)
     >|= Alcotest.(check bool) "Article cannot update another article." true
   ;;
 
@@ -284,19 +281,19 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
   (** IMPORTANT: the following tests should not compile! *)
   (* let hacker_cannot_update_article () = let () = print_endline "about to run
      a test" in Alcotest.(check bool) "Article cannot update another article."
-     (Result.is_error (Article.update_title (Hacker.to_authorizable ben)
-     aron_article "Updated Title")) true
+     (CCResult.is_error (Article.update_title (Hacker.to_authorizable ben)
+     aron_article "Updated Title")) true ;;
 
      let owner_can_do_nothing () = Alcotest.(check bool) "authorizable.owner
-     shouldn't be allowed to do anything." (Result.is_error
+     shouldn't be allowed to do anything." (CCResult.is_error
      (Article.update_title (Article.to_authorizable aron_article).owner
-     aron_article "Updated Title")) true *)
+     aron_article "Updated Title")) true ;; *)
 end
 
 let () =
   let make_test_cases ?ctx (module Backend : Ocauth.Persistence_s) name =
     let module T = Tests (Backend) in
-    [ ( Printf.sprintf "(%s) Managing authorizables." name
+    [ ( Format.asprintf "(%s) Managing authorizables." name
       , [ Alcotest_lwt.test_case
             "Create an authorizable."
             `Quick
@@ -306,7 +303,7 @@ let () =
             `Quick
             (T.test_find_authorizable ?ctx)
         ] )
-    ; ( Printf.sprintf "(%s) Managing roles." name
+    ; ( Format.asprintf "(%s) Managing roles." name
       , [ Alcotest_lwt.test_case
             "Grant a role."
             `Quick
@@ -317,18 +314,18 @@ let () =
             `Quick
             (T.test_revoke_roles ?ctx)
         ] )
-    ; ( Printf.sprintf "(%s) Managing authorization rules." name
+    ; ( Format.asprintf "(%s) Managing authorization rules." name
       , [ Alcotest_lwt.test_case "Push rules." `Quick (T.test_push_rules ?ctx)
         ; Alcotest_lwt.test_case "Drop rules." `Quick (T.test_drop_rules ?ctx)
         ; Alcotest_lwt.test_case "Read rules." `Quick (T.test_read_rules ?ctx)
         ] )
-    ; ( Printf.sprintf "(%s) Admins should be able to do everything." name
+    ; ( Format.asprintf "(%s) Admins should be able to do everything." name
       , [ Alcotest_lwt.test_case
             "Update someone else's article."
             `Quick
             (T.test_admin_update_others' ?ctx)
         ] )
-    ; ( Printf.sprintf
+    ; ( Format.asprintf
           "(%s) An authorizable should be able to do everything to entities it \
            owns."
           name
@@ -337,11 +334,11 @@ let () =
             `Quick
             (T.test_update_owned ?ctx)
         ] )
-    ; ( Printf.sprintf
+    ; ( Format.asprintf
           "(%s) An authorizable should be able to do everything to itself."
           name
       , [ Alcotest_lwt.test_case "Update" `Quick (T.can_update_self ?ctx) ] )
-    ; ( Printf.sprintf
+    ; ( Format.asprintf
           "(%s) Entities should be denied access to entities they shouldn't \
            access."
           name
@@ -350,16 +347,18 @@ let () =
             "Cannot update"
             `Quick
             (T.article_cannot_update_other_article ?ctx)
-          (* uncomment the next line to make sure compile-time invariants work *)
-          (* ; Alcotest.test_case "Cannot update" `Quick hacker_cannot_update_article *)
+          (* uncomment the next line to make sure compile-time invariants
+             work *)
+          (* ; Alcotest.test_case "Cannot update" `Quick
+             (T.hacker_cannot_update_article ?ctx) *)
         ] )
-    ; ( Printf.sprintf "(%s) Check access for targeted roles." name
+    ; ( Format.asprintf "(%s) Check access for targeted roles." name
       , [ Alcotest_lwt.test_case
             "Editor can edit"
             `Quick
             (T.editor_can_edit ?ctx)
         ] )
-    ; ( Printf.sprintf "(%s) Managing ownership." name
+    ; ( Format.asprintf "(%s) Managing ownership." name
       , [ Alcotest_lwt.test_case "Set owner" `Quick (T.set_owner ?ctx) ] )
     ]
   in
@@ -369,10 +368,7 @@ let () =
     include DefaultConfig
 
     let database =
-      MultiPools
-        [ "test", "mariadb://root@database:3306/test"
-        ; test_database, "mariadb://root@database:3306/test"
-        ]
+      MultiPools [ test_database, "mariadb://root@database:3306/test" ]
     ;;
   end
   in

@@ -14,7 +14,7 @@ module Make (P : Ocauth.Persistence_s) = struct
 
   let to_authorizable t =
     let open Ocauth in
-    let roles = Ocauth.Role_set.singleton `Article in
+    let roles = Role_set.singleton `Article in
     Authorizable.make ~roles ~typ:`Article ~owner:(snd t.author) t.uuid
   ;;
 
@@ -32,11 +32,7 @@ module Make (P : Ocauth.Persistence_s) = struct
       Lwt.return_ok t
     in
     let* wrapped =
-      P.wrap_function
-        ?ctx
-        ~error:(fun x -> x)
-        ~effects:[ `Update, `One t.uuid ]
-        f
+      P.wrap_function ?ctx ~error:CCFun.id ~effects:[ `Update, `One t.uuid ] f
     in
     wrapped ~actor new_title
   ;;
@@ -50,11 +46,7 @@ module Make (P : Ocauth.Persistence_s) = struct
       Lwt.return_ok t
     in
     let* wrapped =
-      P.wrap_function
-        ?ctx
-        ~error:(fun x -> x)
-        ~effects:[ `Manage, `One t.uuid ]
-        f
+      P.wrap_function ?ctx ~error:CCFun.id ~effects:[ `Manage, `One t.uuid ] f
     in
     wrapped ~actor new_author
   ;;

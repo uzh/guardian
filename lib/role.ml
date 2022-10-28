@@ -1,7 +1,7 @@
 (** representation is simply the group's name *)
 type t = string [@@deriving show, eq, ord]
 
-let of_yojson : Yojson.Safe.t -> (t, string) Result.t = function
+let of_yojson : Yojson.Safe.t -> (t, string) CCResult.t = function
   | `String s -> Ok s
   | _ -> Error "Invalid role."
 ;;

@@ -4,16 +4,16 @@ end
 
 module Util = struct
   let decompose_variant_string s =
-    let s = String.trim s in
+    let open CCString in
+    let s = trim s in
     let fmt = format_of_string "`%s (%s@)" in
     try
       Scanf.sscanf s fmt (fun name params ->
-        String.(
-          lowercase_ascii name, CCList.map trim (split_on_char ',' params)))
+        lowercase_ascii name, CCList.map trim (split_on_char ',' params))
     with
     | End_of_file ->
       let fmt = format_of_string "`%s" in
-      Scanf.sscanf s fmt (fun name -> String.lowercase_ascii name, [])
+      Scanf.sscanf s fmt (fun name -> lowercase_ascii name, [])
   ;;
 end
 
@@ -35,7 +35,7 @@ module Make (R : Role.S) = struct
 
     let to_string t = show (fun f _x -> Format.pp_print_string f "") t
     let make ~roles ~typ ?owner uuid = { roles; owner; uuid; typ }
-    let a_owns_b a b = Option.map (fun b' -> a.uuid = b') b.owner = Some true
+    let a_owns_b a b = CCOption.map (fun b' -> a.uuid = b') b.owner = Some true
     let has_role t role = Role_set.mem role t.roles
   end
 
@@ -162,7 +162,7 @@ module Make (R : Role.S) = struct
       else
         Lwt.return
           (Error
-             (Printf.sprintf
+             (Format.asprintf
                 "Authorizable %s doesn't exist."
                 (Uuidm.to_string id)))
     ;;
@@ -225,63 +225,20 @@ module Make (R : Role.S) = struct
         Lwt.return_ok ent
    ;;
 
-    let find_checker ?ctx authorizable =
-      let%lwt auth_rules =
-        Role_set.elements authorizable.Authorizable.roles
-        |> CCList.map (fun r -> `Entity r)
-        |> CCList.cons (`One authorizable.Authorizable.uuid)
-        |> Lwt_list.map_s (BES.find_rules ?ctx)
-      in
-      let* auth_rules =
-        CCList.fold_left
-          (fun acc x ->
-            let%lwt acc = acc in
-            match acc, x with
-            | Ok acc, Ok perms -> Lwt.return_ok (perms @ acc)
-            | Error err, _ | _, Error err -> Lwt.return_error err)
-          (Lwt.return_ok [])
-          auth_rules
-      in
-      Lwt.return_ok
-      @@ fun actor action ->
-      let is_owner =
-        match authorizable.Authorizable.owner with
-        | Some x -> Authorizable.(actor.uuid = x)
-        | None -> false
-      in
-      let is_self = Authorizable.(actor.uuid = authorizable.uuid) in
-      if is_self || is_owner
-      then true
-      else (
-        let actor_roles = actor.Authorizable.roles in
-        CCList.exists
-          (fun (actor', action', _) ->
-            match actor' with
-            | `One id -> actor.uuid = id && action = action'
-            | `Entity role ->
-              Role_set.mem role actor_roles
-              && (action = action' || action' = `Manage))
-          auth_rules)
+    let fold_auth_rules
+      :  (auth_rule list, string) result list
+      -> (auth_rule list, string) Lwt_result.t
+      =
+      CCList.fold_left
+        (fun acc x ->
+          let%lwt acc = acc in
+          match acc, x with
+          | Ok acc, Ok perms -> Lwt.return_ok (perms @ acc)
+          | Error err, _ | _, Error err -> Lwt.return_error err)
+        (Lwt.return_ok [])
     ;;
 
-    let find_role_checker ?ctx role_set =
-      let%lwt auth_rules =
-        Role_set.elements role_set
-        |> CCList.map (fun r -> `Entity r)
-        |> Lwt_list.map_s (BES.find_rules ?ctx)
-      in
-      let* auth_rules =
-        CCList.fold_left
-          (fun acc x ->
-            let%lwt acc = acc in
-            match acc, x with
-            | Ok acc, Ok perms -> Lwt.return_ok (perms @ acc)
-            | Error err, _ | _, Error err -> Lwt.return_error err)
-          (Lwt.return_ok [])
-          auth_rules
-      in
-      Lwt.return_ok
-      @@ fun actor action ->
+    let exists_in auth_rules actor action =
       let actor_roles = actor.Authorizable.roles in
       CCList.exists
         (fun (actor', action', _) ->
@@ -291,6 +248,35 @@ module Make (R : Role.S) = struct
             Role_set.mem role actor_roles
             && (action = action' || action' = `Manage))
         auth_rules
+    ;;
+
+    let find_checker ?ctx authorizable =
+      let%lwt auth_rules =
+        Role_set.elements authorizable.Authorizable.roles
+        |> CCList.map (fun r -> `Entity r)
+        |> CCList.cons (`One authorizable.Authorizable.uuid)
+        |> Lwt_list.map_s (BES.find_rules ?ctx)
+      in
+      let* auth_rules = fold_auth_rules auth_rules in
+      Lwt.return_ok
+      @@ fun actor action ->
+      let is_owner =
+        match authorizable.Authorizable.owner with
+        | Some x -> Authorizable.(actor.uuid = x)
+        | None -> false
+      in
+      let is_self = Authorizable.(actor.uuid = authorizable.uuid) in
+      if is_self || is_owner then true else exists_in auth_rules actor action
+    ;;
+
+    let find_role_checker ?ctx role_set =
+      let%lwt auth_rules =
+        Role_set.elements role_set
+        |> CCList.map (fun r -> `Entity r)
+        |> Lwt_list.map_s (BES.find_rules ?ctx)
+      in
+      let* auth_rules = fold_auth_rules auth_rules in
+      Lwt.return_ok @@ exists_in auth_rules
     ;;
 
     (** [wrap_function ?error ~effects f] produces a wrapped version of [f]
@@ -413,13 +399,13 @@ module Make (R : Role.S) = struct
           effects
       in
       let* rules =
-        Lwt_list.fold_left_s
+        CCList.fold_left
           (fun acc (x : (auth_rule list, string) result) ->
-            let* acc = Lwt_result.lift acc in
-            let* x = Lwt_result.lift x in
-            Lwt_result.return (CCList.append acc x))
+            let open CCResult in
+            both acc x >|= CCFun.uncurry CCList.append)
           (Ok [])
           results
+        |> Lwt_result.lift
       in
       CCList.fold_right
         Authorizer.Auth_rule_set.add
@@ -451,10 +437,9 @@ module Make (R : Role.S) = struct
     (** turn a single argument function returning a [result] into one that
         raises a [Failure] instead *)
     let with_exn ?ctx f name arg =
-      let%lwt res = f ?ctx arg in
-      match res with
+      match%lwt f ?ctx arg with
       | Ok x -> Lwt.return x
-      | Error s -> raise (Failure (name ^ " failed: " ^ s))
+      | Error s -> failwith @@ Format.asprintf "%s failed: %s" name s
     ;;
 
     let find_roles_exn ?ctx = with_exn BES.find_roles ?ctx "find_roles_exn"

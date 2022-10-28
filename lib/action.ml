@@ -10,7 +10,7 @@ type t =
 let to_string = show
 
 let of_string s =
-  match String.(trim s |> lowercase_ascii) with
+  match CCString.(trim s |> lowercase_ascii) with
   | "create" | "`create" -> `Create
   | "read" | "`read" -> `Read
   | "update" | "`update" -> `Update

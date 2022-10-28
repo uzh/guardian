@@ -4,15 +4,12 @@ let to_yojson t = `String (to_string t)
 
 let of_yojson = function
   | `String s ->
-    of_string s
-    |> (function
-    | Some x -> Ok x
-    | None -> Error ("Invalid UUID: " ^ s))
+    of_string s |> CCOption.to_result (Format.asprintf "Invalid UUID: %s" s)
   | _ -> raise (Invalid_argument "")
 ;;
 
 let of_string_exn s =
   match of_string s with
   | Some x -> x
-  | None -> raise (Failure (Printf.sprintf "'%10s' is not a valid uuid" s))
+  | None -> failwith @@ Format.asprintf "'%10s' is not a valid uuid" s
 ;;

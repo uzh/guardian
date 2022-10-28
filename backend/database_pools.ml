@@ -156,7 +156,7 @@ module Make (Config : ConfigSig) = struct
     Caqti_lwt.Pool.use
       (fun connection ->
         let module Connection = (val connection : Caqti_lwt.CONNECTION) in
-        f connection |> Lwt.map Result.ok)
+        f connection >|= CCResult.return)
       pool
     >|= get_or_raise ()
   ;;

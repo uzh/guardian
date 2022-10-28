@@ -55,7 +55,7 @@ module Make (R : Guardian.Role_s) (Db : Database_pools.Sig) = struct
       CCList.map
         (fun (act, actor_id, actor_role) : Guardian.Authorizer.auth_rule ->
           let act = Guardian.Action.of_string act in
-          match actor_id, Option.map R.of_string actor_role with
+          match actor_id, CCOption.map R.of_string actor_role with
           | Some id, None ->
             (match Uuidm.of_string id with
              | Some id' -> `One id', act, target_spec

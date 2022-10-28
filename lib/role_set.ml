@@ -2,7 +2,7 @@ module type S = sig
   include Set.S
 
   val to_yojson : t -> Yojson.Safe.t
-  val of_yojson : Yojson.Safe.t -> (t, string) Result.t
+  val of_yojson : Yojson.Safe.t -> (t, string) CCResult.t
   val pp : Format.formatter -> t -> unit
 end
 
@@ -11,14 +11,17 @@ module Make (R : Role.S) : S with type elt = R.t = struct
 
   let to_yojson t = `List (CCList.map R.to_yojson (elements t))
 
-  let of_yojson = function
+  let of_yojson =
+    let open CCResult in
+    function
     | `List items ->
       CCList.fold_left
         (fun acc x ->
-          Result.bind acc (fun acc' ->
-            match R.of_yojson x with
-            | Ok role -> Ok (add role acc')
-            | Error _ as err -> err))
+          acc
+          >>= fun acc' ->
+          match R.of_yojson x with
+          | Ok role -> Ok (add role acc')
+          | Error _ as err -> err)
         (Ok empty)
         items
     | _ -> Error "Invalid role set"

@@ -57,7 +57,7 @@ module Make (R : Guardian.Role_s) = struct
       in
       let (_ : Rc.t) = bind_values stmt [ Data.TEXT id' ] in
       let* () = lwt_return_rc (step stmt) in
-      match String.trim (column_text stmt 0) with
+      match CCString.trim (column_text stmt 0) with
       | "" -> Lwt.return_ok Guardian.Role_set.empty
       | coltext ->
         Yojson.Safe.from_string coltext
