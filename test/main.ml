@@ -1,6 +1,6 @@
 module Guardian = Guardian.Make (Role)
 
-module Tests (Backend : Ocauth.Persistence_s) = struct
+module Tests (Backend : Guard.Persistence_s) = struct
   module Article = Article.Make (Backend)
   module Hacker = Hacker.Make (Backend)
   module User = User.Make (Backend)
@@ -82,7 +82,7 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
      if diff = []
      then Lwt.return_ok ()
      else
-       let open Ocauth.Role_set in
+       let open Guard.Role_set in
        let received = [%show: Role.t list] (elements roles) in
        let expected = [%show: Role.t list] (elements expected) in
        Lwt.return_error
@@ -99,11 +99,11 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
        Backend.grant_roles
          ?ctx
          (snd aron)
-         (Ocauth.Role_set.singleton (`Editor Uuidm.nil))
+         (Guard.Role_set.singleton (`Editor Uuidm.nil))
      in
      let* () =
        let* roles = Backend.find_roles ?ctx (snd aron) in
-       if Ocauth.Role_set.mem (`Editor Uuidm.nil) roles
+       if Guard.Role_set.mem (`Editor Uuidm.nil) roles
        then Lwt.return_ok ()
        else
          Lwt.return_error
@@ -113,22 +113,22 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
        Backend.revoke_roles
          ?ctx
          (snd aron)
-         (Ocauth.Role_set.singleton (`Editor Uuidm.nil))
+         (Guard.Role_set.singleton (`Editor Uuidm.nil))
      in
      let* roles = Backend.find_roles ?ctx (snd aron) in
-     Lwt.return_ok (Ocauth.Role_set.mem (`Editor Uuidm.nil) roles))
+     Lwt.return_ok (Guard.Role_set.mem (`Editor Uuidm.nil) roles))
     >|= Alcotest.(check (result bool string)) "Check a user's roles." (Ok false)
   ;;
 
   let test_push_rules ?ctx _ () =
     (let* put =
        Backend.save_rules ?ctx global_rules
-       |> Lwt_result.map_error [%show: Ocauth.Authorizer.auth_rule list]
+       |> Lwt_result.map_error [%show: Guard.Authorizer.auth_rule list]
      in
-     Lwt.return_ok (CCList.map Ocauth.Authorizer.show_auth_rule put))
+     Lwt.return_ok (CCList.map Guard.Authorizer.show_auth_rule put))
     >|= Alcotest.(check (result (slist string CCString.compare) string))
           "Push global permissions."
-          (Ok (CCList.map Ocauth.Authorizer.show_auth_rule global_rules))
+          (Ok (CCList.map Guard.Authorizer.show_auth_rule global_rules))
   ;;
 
   let test_read_rules ?ctx _ () =
@@ -238,7 +238,7 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
        Backend.grant_roles
          ?ctx
          (snd thomas)
-         (Ocauth.Role_set.singleton (`Editor chris_article.uuid))
+         (Guard.Role_set.singleton (`Editor chris_article.uuid))
      in
      let* thomas_authorizable = User.to_authorizable ?ctx thomas in
      let* _chris_article' =
@@ -291,7 +291,7 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
 end
 
 let () =
-  let make_test_cases ?ctx (module Backend : Ocauth.Persistence_s) name =
+  let make_test_cases ?ctx (module Backend : Guard.Persistence_s) name =
     let module T = Tests (Backend) in
     [ ( Format.asprintf "(%s) Managing authorizables." name
       , [ Alcotest_lwt.test_case

@@ -64,7 +64,7 @@ module Make (R : Role.S) = struct
         [any_of]: indicates that the checker should pass if any of the rules in
         the list is satisfied. The default behaviour is to only pass if all
         rules are.
-        [val can : actor:\[ whatever \] Ocauth.Authorizable.t -> (unit, string) result] *)
+        [val can : actor:\[ whatever \] Guard.Authorizable.t -> (unit, string) result] *)
     let checker_of_rules ?(any_of = false) (rules : auth_rule list) =
       let ( let* ) = CCResult.( let* ) in
       fun ~actor ->

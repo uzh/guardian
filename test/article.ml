@@ -1,4 +1,4 @@
-module Make (P : Ocauth.Persistence_s) = struct
+module Make (P : Guard.Persistence_s) = struct
   module User = User.Make (P)
 
   (* pretend that all these fields aren't publically visible *)
@@ -13,7 +13,7 @@ module Make (P : Ocauth.Persistence_s) = struct
   type kind = [ `Article ]
 
   let to_authorizable t =
-    let open Ocauth in
+    let open Guard in
     let roles = Role_set.singleton `Article in
     Authorizable.make ~roles ~typ:`Article ~owner:(snd t.author) t.uuid
   ;;
@@ -22,7 +22,7 @@ module Make (P : Ocauth.Persistence_s) = struct
 
   let update_title
     ?ctx
-    (actor : [ `User | `Article ] Ocauth.Authorizable.t)
+    (actor : [ `User | `Article ] Guard.Authorizable.t)
     t
     new_title
     =
@@ -37,7 +37,7 @@ module Make (P : Ocauth.Persistence_s) = struct
     wrapped ~actor new_title
   ;;
 
-  let update_author ?ctx (actor : [ `User ] Ocauth.Authorizable.t) t new_author =
+  let update_author ?ctx (actor : [ `User ] Guard.Authorizable.t) t new_author =
     let ( let* ) = Lwt_result.bind in
     let f new_author =
       let () = t.author <- new_author in
