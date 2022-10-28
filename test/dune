@@ -1,14 +1,6 @@
-(rule
- (target test_db.sqlite3)
- (deps init_db.sql)
- (action
-  (with-stdin-from
-   init_db.sql
-   (run sqlite3 -batch %{target}))))
-
 (test
  (name main)
- (libraries alcotest alcotest-lwt guardian guardian.backends sqlite3)
+ (libraries alcotest alcotest-lwt guardian guardian.backend sqlite3)
  (preprocess
   (pps
    lwt_ppx
@@ -17,20 +9,10 @@
    ppx_deriving.make
    ppx_deriving.ord
    ppx_deriving.show))
- (deps article.ml hacker.ml test_db.sqlite3 main.ml user.ml)
+ (deps article.ml hacker.ml main.ml user.ml)
  (action
   (progn
    ; TODO: Test with github actions - working in devcontainer
-   ; Set up the MariaDB
-   (run
-    bash
-    -c
-    "echo 'CREATE DATABASE IF NOT EXISTS test' | mysql --host=database -u root")
-   (with-stdin-from
-    init_db.sql
-    (run bash -c "mysql --host=database -u root test"))
-   ; Set up the SQLite3 database
-   (run chmod u+w test_db.sqlite3)
    (with-accepted-exit-codes ; because we still need to cleanup if the tests fail
     (or 0 1)
     (run %{test} -e))

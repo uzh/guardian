@@ -29,7 +29,7 @@ module DefaultConfig : ConfigSig = struct
   let database_pool_size = 5
 end
 
-module Make (Config : ConfigSig) () = struct
+module Make (Config : ConfigSig) = struct
   let main_pool_ref
     : (Caqti_lwt.connection, Caqti_error.t) Caqti_lwt.Pool.t option ref
     =

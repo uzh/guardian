@@ -293,7 +293,7 @@ module Tests (Backend : Ocauth.Persistence_s) = struct
      aron_article "Updated Title")) true *)
 end
 
-let _return =
+let () =
   let make_test_cases ?ctx (module Backend : Ocauth.Persistence_s) name =
     let module T = Tests (Backend) in
     [ ( Printf.sprintf "(%s) Managing authorizables." name
@@ -363,33 +363,29 @@ let _return =
       , [ Alcotest_lwt.test_case "Set owner" `Quick (T.set_owner ?ctx) ] )
     ]
   in
-  let test_cases =
-    let test_database = "test" in
-    let module MariaConfig = struct
-      include Guardian_backends.Database_pools.DefaultConfig
+  let open Guardian_backend.Pools in
+  let test_database = "test" in
+  let module MariaConfig = struct
+    include DefaultConfig
 
-      let database =
-        Guardian_backends.Database_pools.MultiPools
-          [ test_database, "mariadb://root@database:3306/test" ]
-      ;;
-    end
-    in
-    let module Maria =
-      Guardian_backends.Mariadb_backend.Make
-        (Role)
-        (Guardian_backends.Database_pools.Make (MariaConfig) ())
-        ()
-    in
-    make_test_cases
-      ~ctx:[ "pool", test_database ]
-      (module Maria)
-      "MariadDB Backend"
-    (* @ make_test_cases ~ctx:[ "pool", "hoppla" ] (module Maria) "MariadDB 2
-       Backend" *)
-    @ make_test_cases
-        (module Guardian_backends.Sqlite3_backend.Make (Role))
-        "SQLite3 Backend"
+    let database =
+      MultiPools
+        [ "test", "mariadb://root@database:3306/test"
+        ; test_database, "mariadb://root@database:3306/test"
+        ]
+    ;;
+  end
   in
-  let () = Lwt_main.run @@ Alcotest_lwt.run "Authorization" test_cases in
-  Ok ()
+  let module Maria = Guardian_backend.MariaDb.Make (Role) (Make (MariaConfig))
+  in
+  let module Sqlite = Guardian_backend.Sqlite.Make (Role) in
+  Lwt_main.run
+  @@ let%lwt () = Maria.migrate ~ctx:[ "pool", test_database ] () in
+     let%lwt () = Sqlite.migrate () in
+     make_test_cases
+       ~ctx:[ "pool", test_database ]
+       (module Maria)
+       "MariadDB Backend"
+     @ make_test_cases (module Sqlite) "SQLite3 Backend"
+     |> Alcotest_lwt.run "Authorization"
 ;;

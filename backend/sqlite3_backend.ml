@@ -1,3 +1,5 @@
+exception Exception of string
+
 (** TODO: optional [ctx] arguments are ignored by sqlite backend *)
 module Make (R : Guardian.Role_s) = struct
   module Guardian = Guardian.Make (R)
@@ -373,6 +375,92 @@ module Make (R : Guardian.Role_s) = struct
       let () = ignore (bind_values stmt Data.[ TEXT owner'; TEXT id' ]) in
       lwt_return_rc (step stmt)
     ;;
+
+    module Migration = struct
+      let get_or_exn = function
+        | Ok res -> Lwt.return res
+        | Error err -> raise @@ Exception err
+      ;;
+
+      let create_guardian_entities_table ?ctx () =
+        let open Sqlite3 in
+        let open Lwt.Infix in
+        let (_ : (string * string) list option) = ctx in
+        prepare
+          db
+          {sql|
+            CREATE TABLE IF NOT EXISTS guardian_entities (
+              id TEXT UNIQUE NOT NULL,
+              roles TEXT NOT NULL,
+              parent TEXT
+            )
+          |sql}
+        |> step
+        |> lwt_return_rc
+        >>= get_or_exn
+      ;;
+
+      let create_guardian_rules_table ?ctx () =
+        let open Sqlite3 in
+        let open Lwt.Infix in
+        let (_ : (string * string) list option) = ctx in
+        prepare
+          db
+          {sql|
+            CREATE TABLE IF NOT EXISTS guardian_rules (
+              actor_id TEXT,
+              actor_role TEXT,
+              act TEXT NOT NULL,
+              target_id TEXT,
+              target_role TEXT,
+              -- These constraints are necessary to prevent rules that cannot be
+              -- represented within OCaml.
+              CONSTRAINT only_one_actor
+                  CHECK(
+                      (actor_id IS NULL OR actor_role IS NULL)
+                      and (actor_id IS NOT NULL OR actor_role IS NOT NULL)
+                  ),
+              CONSTRAINT only_one_target
+                  CHECK(
+                      (target_id IS NULL OR target_role IS NULL)
+                      and (target_id IS NOT NULL OR target_role IS NOT NULL)
+                  ),
+              UNIQUE(actor_role, act, target_role),
+              UNIQUE(actor_role, act, target_id),
+              UNIQUE(actor_id, act, target_role),
+              UNIQUE(actor_id, act, target_id)
+            )
+          |sql}
+        |> step
+        |> lwt_return_rc
+        >>= get_or_exn
+      ;;
+
+      let find_all () =
+        [ ( "create guardian entities table"
+          , "2022-10-28T11:30"
+          , create_guardian_entities_table )
+        ; ( "create guardian rule table"
+          , "2022-10-28T11:31"
+          , create_guardian_rules_table )
+        ]
+      ;;
+
+      let run ?ctx () =
+        ()
+        |> find_all
+        |> Lwt_list.iter_s (fun (key, date, fcn) ->
+             Logs.debug (fun m -> m "Migration: Run '%s' from '%s'" key date);
+             fcn ?ctx ())
+      ;;
+    end
+
+    (** [find_migrations ()] returns a list of all migrations as a tuple with
+        key, datetime and the migration function handle **)
+    let find_migrations = Migration.find_all
+
+    (** [migrate ()] runs all migration on a specified context [?ctx] **)
+    let migrate = Migration.run
   end
 
   include Guardian.Make_persistence (Backend)

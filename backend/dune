@@ -1,7 +1,7 @@
 (library
- (public_name guardian.backends)
+ (public_name guardian.backend)
  (inline_tests)
- (name guardian_backends)
+ (name Guardian_backend)
  (libraries
   base64
   caqti
