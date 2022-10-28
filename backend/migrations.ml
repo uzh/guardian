@@ -36,6 +36,8 @@ let create_guardian_rules_table_sql =
   |sql}
 ;;
 
+let all_tables = [ "guardian_entities"; "guardian_rules" ]
+
 let all =
   [ ( "create guardian entities table"
     , "2022-10-28T11:30"

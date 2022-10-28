@@ -381,7 +381,9 @@ let () =
   let module Sqlite = Guardian_backend.Sqlite.Make (Role) in
   Lwt_main.run
   @@ let%lwt () = Maria.migrate ~ctx:[ "pool", test_database ] () in
+     let%lwt () = Maria.clean ~ctx:[ "pool", test_database ] () in
      let%lwt () = Sqlite.migrate () in
+     (* let%lwt () = Sqlite.clean () in *)
      make_test_cases
        ~ctx:[ "pool", test_database ]
        (module Maria)

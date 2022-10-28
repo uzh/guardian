@@ -381,9 +381,16 @@ module Make (R : Guardian.Role_s) = struct
       lwt_return_rc (step stmt)
     ;;
 
-    (** [find_migrations ()] returns a list of all migrations as a tup3 with
+    (** [find_migrations ()] returns a list of all migrations as a tuple with
         key, datetime and sql query **)
     let find_migrations () = Migrations.all
+
+    (** [find_clean ()] returns a list of all migrations as a tuple with key and
+        sql query **)
+    let find_clean () =
+      Migrations.all_tables
+      |> CCList.map (fun m -> m, Format.asprintf "DELETE FROM %s" m)
+    ;;
 
     (** [migrate ()] runs all migration on a specified context [?ctx] **)
     let migrate ?ctx () =
@@ -394,6 +401,18 @@ module Make (R : Guardian.Role_s) = struct
            let open Sqlite3 in
            let open Lwt.Infix in
            Logs.debug (fun m -> m "Migration: Run '%s' from '%s'" key date);
+           sql |> prepare db |> step |> lwt_return_rc >>= get_or_exn)
+    ;;
+
+    (** [clean ()] runs clean on a specified context [?ctx] **)
+    let clean ?ctx () =
+      let (_ : (string * string) list option) = ctx in
+      ()
+      |> find_clean
+      |> Lwt_list.iter_s (fun (key, sql) ->
+           let open Sqlite3 in
+           let open Lwt.Infix in
+           Logs.debug (fun m -> m "Clean: Run '%s'" key);
            sql |> prepare db |> step |> lwt_return_rc >>= get_or_exn)
     ;;
   end

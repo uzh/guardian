@@ -176,9 +176,16 @@ module Make (R : Guardian.Role_s) (Db : Database_pools.Sig) = struct
       Db.exec ?ctx caqti Uuidm.(to_string owner, to_string id) |> Lwt_result.ok
     ;;
 
-    (** [find_migrations ()] returns a list of all migrations as a tup3 with
+    (** [find_migrations ()] returns a list of all migrations as a tuple with
         key, datetime and sql query **)
     let find_migrations () = Migrations.all
+
+    (** [find_clean ()] returns a list of all migrations as a tuple with key and
+        sql query **)
+    let find_clean () =
+      Migrations.all_tables
+      |> CCList.map (fun m -> m, Format.asprintf "TRUNCATE TABLE %s" m)
+    ;;
 
     (** [migrate ()] runs all migration on a specified context [?ctx] **)
     let migrate ?ctx () =
@@ -186,6 +193,15 @@ module Make (R : Guardian.Role_s) (Db : Database_pools.Sig) = struct
       |> find_migrations
       |> Lwt_list.iter_s (fun (key, date, sql) ->
            Logs.debug (fun m -> m "Migration: Run '%s' from '%s'" key date);
+           Db.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
+    ;;
+
+    (** [clean ()] runs clean on a specified context [?ctx] **)
+    let clean ?ctx () =
+      ()
+      |> find_clean
+      |> Lwt_list.iter_s (fun (key, sql) ->
+           Logs.debug (fun m -> m "Clean: Run '%s'" key);
            Db.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
     ;;
   end)

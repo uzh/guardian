@@ -63,7 +63,9 @@ module type Backend_store_s = sig
     -> (unit, string) monad
 
   val find_migrations : unit -> (string * string * string) list
+  val find_clean : unit -> (string * string) list
   val migrate : ?ctx:(string * string) list -> unit -> unit Lwt.t
+  val clean : ?ctx:(string * string) list -> unit -> unit Lwt.t
 end
 
 module type S = sig

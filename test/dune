@@ -12,13 +12,4 @@
  (deps article.ml guard.ml hacker.ml main.ml user.ml)
  (action
   (progn
-   ; TODO: Test with github actions - working in devcontainer
-   (with-accepted-exit-codes ; because we still need to cleanup if the tests fail
-    (or 0 1)
-    (run %{test} -e))
-   ; Drop and recreate database
-   (run bash -c "echo 'DROP DATABASE test' | mysql --host=database -u root")
-   (run
-    bash
-    -c
-    "echo 'CREATE DATABASE IF NOT EXISTS test' | mysql --host=database -u root"))))
+   (run %{test} -e))))
