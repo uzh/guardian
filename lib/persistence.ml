@@ -62,11 +62,7 @@ module type Backend_store_s = sig
     -> owner:Uuidm.t
     -> (unit, string) monad
 
-  val find_migrations
-    :  unit
-    -> (string * string * (?ctx:(string * string) list -> unit -> unit Lwt.t))
-       list
-
+  val find_migrations : unit -> (string * string * string) list
   val migrate : ?ctx:(string * string) list -> unit -> unit Lwt.t
 end
 

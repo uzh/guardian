@@ -176,77 +176,17 @@ module Make (R : Guardian.Role_s) (Db : Database_pools.Sig) = struct
       Db.exec ?ctx caqti Uuidm.(to_string owner, to_string id) |> Lwt_result.ok
     ;;
 
-    module Migration = struct
-      let create_guardian_entities_table ?ctx () =
-        let request =
-          {sql|
-            CREATE TABLE IF NOT EXISTS guardian_entities (
-              id TEXT UNIQUE NOT NULL,
-              roles TEXT NOT NULL,
-              parent TEXT
-            )
-          |sql}
-          |> Caqti_type.(unit ->. unit)
-        in
-        Db.exec ?ctx request ()
-      ;;
-
-      let create_guardian_rules_table ?ctx () =
-        let request =
-          {sql|
-            CREATE TABLE IF NOT EXISTS guardian_rules (
-              actor_id TEXT,
-              actor_role TEXT,
-              act TEXT NOT NULL,
-              target_id TEXT,
-              target_role TEXT,
-              -- These constraints are necessary to prevent rules that cannot be
-              -- represented within OCaml.
-              CONSTRAINT only_one_actor
-                  CHECK(
-                      (actor_id IS NULL OR actor_role IS NULL)
-                      and (actor_id IS NOT NULL OR actor_role IS NOT NULL)
-                  ),
-              CONSTRAINT only_one_target
-                  CHECK(
-                      (target_id IS NULL OR target_role IS NULL)
-                      and (target_id IS NOT NULL OR target_role IS NOT NULL)
-                  ),
-              UNIQUE(actor_role, act, target_role),
-              UNIQUE(actor_role, act, target_id),
-              UNIQUE(actor_id, act, target_role),
-              UNIQUE(actor_id, act, target_id)
-            )
-          |sql}
-          |> Caqti_type.(unit ->. unit)
-        in
-        Db.exec ?ctx request ()
-      ;;
-
-      let find_all () =
-        [ ( "create guardian entities table"
-          , "2022-10-28T11:30"
-          , create_guardian_entities_table )
-        ; ( "create guardian rule table"
-          , "2022-10-28T11:31"
-          , create_guardian_rules_table )
-        ]
-      ;;
-
-      let run ?ctx () =
-        ()
-        |> find_all
-        |> Lwt_list.iter_s (fun (key, date, fcn) ->
-             Logs.debug (fun m -> m "Migration: Run '%s' from '%s'" key date);
-             fcn ?ctx ())
-      ;;
-    end
-
     (** [find_migrations ()] returns a list of all migrations as a tup3 with
-        key, datetime and the migration function handle **)
-    let find_migrations = Migration.find_all
+        key, datetime and sql query **)
+    let find_migrations () = Migrations.all
 
     (** [migrate ()] runs all migration on a specified context [?ctx] **)
-    let migrate = Migration.run
+    let migrate ?ctx () =
+      ()
+      |> find_migrations
+      |> Lwt_list.iter_s (fun (key, date, sql) ->
+           Logs.debug (fun m -> m "Migration: Run '%s' from '%s'" key date);
+           Db.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
+    ;;
   end)
 end
