@@ -1,0 +1,75 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  build:
+    name: Build and test
+
+    runs-on: ${{ matrix.os }}
+
+    env:
+      MYSQL_DATABASE: test
+      MYSQL_ROOT_PASSWORD: password
+
+    services:
+      database:
+        image: mariadb:10.6
+        env:
+          MYSQL_DATABASE: ${{ env.MYSQL_DATABASE }}
+          MYSQL_ROOT_PASSWORD: ${{ env.MYSQL_ROOT_PASSWORD }}
+        ports: ['3306:3306']
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        ocaml-compiler: [4.12.x]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Use OCaml ${{ matrix.ocaml-version }}
+        uses: ocaml/setup-ocaml@v2
+        with:
+          ocaml-compiler: ${{ matrix.ocaml-compiler }}
+          dune-cache: true
+          opam-pin: true
+          opam-depext: false
+
+      - name: Install system dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y libmariadbclient-dev
+
+      - name: Pin current guardian
+        run: |
+          opam pin add -yn guardian .
+          OPAMSOLVERTIMEOUT=180 opam depext -y guardian
+
+      - name: Install dependencies
+        run: opam install --deps-only --with-test -y .
+
+      - name: Build
+        run: opam exec -- dune build --root .
+
+      - name: Check formatting
+        run: make format
+
+      - name: Run tests
+        env:
+          DATABASE_URL: mariadb://root:${{ env.MYSQL_ROOT_PASSWORD }}@127.0.0.1:3306/${{ env.MYSQL_DATABASE }}
+        run: opam config exec -- make test
+
+      - uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: tests
+          path: _build/default/test/_build/_tests/
+
+      - name: Notify about failure
+        if: failure()
+        run: |
+           cat << EOF > message.json
+           {"@type":"MessageCard","@context":"https://schema.org/extensions","summary":"Pipeline failed!","themeColor":"ff0000","title":"$GITHUB_REPOSITORY pipeline failed 💢!","sections":[{"facts":[{"name":"Repository:","value":"$GITHUB_REPOSITORY"},{"name":"Branch:","value":"$GITHUB_REF_NAME"},{"name":"Commit:","value":"$GITHUB_SHA"}]}],"potentialAction":[{"@type":"OpenUri","name":"View on GitHub","targets":[{"os":"default","uri":"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"}]}]}
+           EOF
+           curl -X POST ${{ secrets.ECON_TEAMS_WEBHOOK }} --header 'Content-Type: application/json' -d @message.json

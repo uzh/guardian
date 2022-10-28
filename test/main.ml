@@ -368,7 +368,11 @@ let () =
     include DefaultConfig
 
     let database =
-      MultiPools [ test_database, "mariadb://root@database:3306/test" ]
+      MultiPools
+        [ ( test_database
+          , Sys.getenv_opt "DATABASE_URL"
+            |> CCOption.get_or ~default:"mariadb://root@database:3306/test" )
+        ]
     ;;
   end
   in
