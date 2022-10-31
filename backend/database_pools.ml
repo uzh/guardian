@@ -12,7 +12,7 @@ let with_log ?(log_level = Logs.Error) ?(msg_prefix = "Error") err =
 
 let get_or_raise ?log_level ?msg_prefix () = function
   | Ok result -> result
-  | Error error -> raise @@ Exception (with_log ?log_level ?msg_prefix error)
+  | Error error -> failwith (with_log ?log_level ?msg_prefix error)
 ;;
 
 let map_or_raise ?log_level ?msg_prefix fcn result =
@@ -64,18 +64,18 @@ module Make (Config : ConfigSig) = struct
   ;;
 
   let add_pool ?pool_size name database_url =
-    match Config.database with
-    | SinglePool _ ->
-      raise @@ Exception "SinglePool is selected: Switch to 'MultiPools' first"
-    | MultiPools _ when CCOption.is_some (Hashtbl.find_opt pools name) ->
+    match Config.database, Hashtbl.find_opt pools name with
+    | SinglePool _, _ ->
+      failwith "SinglePool is selected: Switch to 'MultiPools' first"
+    | MultiPools _, Some _ ->
       let msg =
         Format.asprintf
           "Failed to create pool: Connection pool with name '%s' exists already"
           name
       in
       Logs.err (fun m -> m "%s" msg);
-      raise @@ Exception msg
-    | MultiPools _ ->
+      failwith msg
+    | MultiPools _, None ->
       database_url |> connect_or_failwith ?pool_size (Hashtbl.add pools name)
   ;;
 
@@ -106,7 +106,7 @@ module Make (Config : ConfigSig) = struct
       >>= Hashtbl.find_opt pools
       |> (function
       | Some pool -> pool
-      | None -> raise @@ Exception "Unknown Pool: Please 'add_pool' first!")
+      | None -> failwith "Unknown Pool: Please 'add_pool' first!")
   ;;
 
   let transaction ?ctx f =

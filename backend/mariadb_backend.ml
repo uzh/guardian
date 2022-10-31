@@ -4,8 +4,6 @@ open Caqti_request.Infix
 module Make (R : Guardian.Role_s) (Db : Database_pools.Sig) = struct
   module Guardian = Guardian.Make (R)
 
-  let ( let* ) = Lwt_result.bind
-
   include Guardian.Make_persistence (struct
     type role = R.t
     type role_set = Guardian.Role_set.t
@@ -112,6 +110,7 @@ module Make (R : Guardian.Role_s) (Db : Database_pools.Sig) = struct
     ;;
 
     let grant_roles ?ctx uuid roles =
+      let open Lwt_result.Syntax in
       let open Guardian in
       let* pre_roles = find_roles ?ctx uuid in
       let roles' = Role_set.union roles pre_roles in
@@ -127,6 +126,7 @@ module Make (R : Guardian.Role_s) (Db : Database_pools.Sig) = struct
     ;;
 
     let revoke_roles ?ctx uuid roles =
+      let open Lwt_result.Syntax in
       let open Guardian in
       let* pre_roles = find_roles ?ctx uuid in
       let roles' = Role_set.diff pre_roles roles in

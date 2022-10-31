@@ -1,15 +1,10 @@
 exception Exception of string
 
-let get_or_exn = function
-  | Ok res -> Lwt.return res
-  | Error err -> raise @@ Exception err
-;;
+let get_or_exn m = m |> CCResult.get_or_failwith |> Lwt.return
 
 (** TODO: optional [ctx] arguments are ignored by sqlite backend *)
 module Make (R : Guardian.Role_s) = struct
   module Guardian = Guardian.Make (R)
-
-  let ( let* ) = Lwt_result.bind
 
   (** TODO: generalize this. right now it's fine because this backend should
       really only be used for testing purposes, but in the future it would be
@@ -33,6 +28,7 @@ module Make (R : Guardian.Role_s) = struct
     let create_authorizable ?ctx ~id ?(owner : Uuidm.t option) roles
       : (unit, string) Lwt_result.t
       =
+      let open Lwt_result.Syntax in
       let open Sqlite3 in
       let (_ : (string * string) list option) = ctx in
       let stmt =
@@ -54,6 +50,7 @@ module Make (R : Guardian.Role_s) = struct
     ;;
 
     let find_roles ?ctx id =
+      let open Lwt_result.Syntax in
       let open Sqlite3 in
       let (_ : (string * string) list option) = ctx in
       let id' = Uuidm.to_string id in
@@ -71,6 +68,7 @@ module Make (R : Guardian.Role_s) = struct
     ;;
 
     let find_owner ?ctx id =
+      let open Lwt_result.Syntax in
       let open Sqlite3 in
       let (_ : (string * string) list option) = ctx in
       let id' = Uuidm.to_string id in
@@ -169,6 +167,7 @@ module Make (R : Guardian.Role_s) = struct
       ?ctx
       ((actor, action, target) : Guardian.Authorizer.auth_rule)
       =
+      let open Lwt_result.Syntax in
       let open Sqlite3 in
       let (_ : (string * string) list option) = ctx in
       match actor, target with
@@ -247,6 +246,7 @@ module Make (R : Guardian.Role_s) = struct
     ;;
 
     let find_rules ?ctx (spec : actor_spec) =
+      let open Lwt_result.Syntax in
       let open Sqlite3 in
       let (_ : (string * string) list option) = ctx in
       let* stmt =
@@ -314,6 +314,7 @@ module Make (R : Guardian.Role_s) = struct
     ;;
 
     let grant_roles ?ctx id roles =
+      let open Lwt_result.Syntax in
       let open Sqlite3 in
       let (_ : (string * string) list option) = ctx in
       let id' = Uuidm.to_string id in
@@ -341,6 +342,7 @@ module Make (R : Guardian.Role_s) = struct
     ;;
 
     let revoke_roles ?ctx id roles =
+      let open Lwt_result.Syntax in
       let open Sqlite3 in
       let (_ : (string * string) list option) = ctx in
       let id' = Uuidm.to_string id in

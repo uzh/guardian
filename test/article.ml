@@ -26,7 +26,7 @@ module Make (P : Guard.Persistence_s) = struct
     t
     new_title
     =
-    let ( let* ) = Lwt_result.bind in
+    let open Lwt_result.Syntax in
     let f new_title =
       let () = t.title <- new_title in
       Lwt.return_ok t
@@ -38,7 +38,7 @@ module Make (P : Guard.Persistence_s) = struct
   ;;
 
   let update_author ?ctx (actor : [ `User ] Guard.Authorizable.t) t new_author =
-    let ( let* ) = Lwt_result.bind in
+    let open Lwt_result.Syntax in
     let f new_author =
       let () = t.author <- new_author in
       let* ent = to_authorizable ?ctx t in

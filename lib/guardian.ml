@@ -66,7 +66,7 @@ module Make (R : Role.S) = struct
         rules are.
         [val can : actor:\[ whatever \] Guard.Authorizable.t -> (unit, string) result] *)
     let checker_of_rules ?(any_of = false) (rules : auth_rule list) =
-      let ( let* ) = CCResult.( let* ) in
+      let open CCResult in
       fun ~actor ->
         let results =
           CCList.map
@@ -146,13 +146,12 @@ module Make (R : Role.S) = struct
               and type role = R.t) : Persistence_s = struct
     include BES
 
-    let ( let* ) = Lwt_result.bind
-
     let revoke_role ?ctx id role =
       revoke_roles ?ctx id (Role_set.singleton role)
     ;;
 
     let find_authorizable ?ctx ~(typ : 'kind) id =
+      let open Lwt_result.Syntax in
       let* mem = BES.mem_authorizable ?ctx id in
       if mem
       then
@@ -193,6 +192,7 @@ module Make (R : Role.S) = struct
       : 'a -> ('kind Authorizable.t, string) Lwt_result.t
       =
      fun x ->
+      let open Lwt_result.Syntax in
       let (ent : 'kind Authorizable.t) = to_authorizable x in
       let uuid = ent.uuid in
       let* mem = BES.mem_authorizable ?ctx ent.uuid in
@@ -251,6 +251,7 @@ module Make (R : Role.S) = struct
     ;;
 
     let find_checker ?ctx authorizable =
+      let open Lwt_result.Syntax in
       let%lwt auth_rules =
         Role_set.elements authorizable.Authorizable.roles
         |> CCList.map (fun r -> `Entity r)
@@ -270,6 +271,7 @@ module Make (R : Role.S) = struct
     ;;
 
     let find_role_checker ?ctx role_set =
+      let open Lwt_result.Syntax in
       let%lwt auth_rules =
         Role_set.elements role_set
         |> CCList.map (fun r -> `Entity r)
@@ -287,6 +289,7 @@ module Make (R : Role.S) = struct
       ~effects
       (f : 'param -> ('rval, 'etyp) Lwt_result.t)
       =
+      let open Lwt_result.Syntax in
       let* cans =
         CCList.map
           (fun (action, target) ->
@@ -418,6 +421,7 @@ module Make (R : Role.S) = struct
     let checker_of_effects ?ctx effects ~actor =
       Lwt_list.fold_left_s
         (fun acc effect ->
+          let open Lwt_result.Syntax in
           let* () = Lwt_result.lift acc in
           let* rules = collect_rules ?ctx [ effect ] in
           Authorizer.checker_of_rules ~any_of:true rules ~actor
