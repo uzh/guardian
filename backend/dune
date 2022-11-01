@@ -1,18 +1,23 @@
 (library
- (public_name guardian)
+ (public_name guardian.backend)
  (inline_tests)
- (name guardian)
- (wrapped true)
+ (name Guardian_backend)
  (libraries
   base64
+  caqti
+  caqti-driver-mariadb
+  caqti-lwt
   conformist
   containers
   fmt
   fmt.tty
+  guardian
   logs
   logs.fmt
   lwt
   lwt.unix
+  sqlite3
+  uri
   uuidm
   yojson)
  (preprocess

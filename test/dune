@@ -1,57 +1,15 @@
-(rule
- (target test_db.sqlite3)
- (deps init_db.sql)
- (enabled_if %{bin-available:sqlite3})
- (action
-  (with-stdin-from
-   init_db.sql
-   (run sqlite3 -batch %{target}))))
-
 (test
  (name main)
- (enabled_if %{bin-available:sqlite3})
- (libraries alcotest alcotest-lwt guardian sqlite3 guardian.backends)
+ (libraries alcotest alcotest-lwt guardian guardian.backend sqlite3)
  (preprocess
   (pps
-   ppx_deriving.make
-   ppx_deriving.show
-   ppx_deriving.ord
    lwt_ppx
    ppx_deriving_yojson
-   ppx_deriving.eq))
- (deps article.ml hacker.ml test_db.sqlite3 main.ml user.ml)
+   ppx_deriving.eq
+   ppx_deriving.make
+   ppx_deriving.ord
+   ppx_deriving.show))
+ (deps article.ml guard.ml hacker.ml main.ml user.ml)
  (action
   (progn
-   ; TODO: automate setting up the docker instance for the MariaDB.
-   ; for now, just use the default MariaDB docker image from the repo with this command:
-   ; docker run -p 127.0.0.1:3306:3306  --name mariadb-ocaml-authorize-test -e MARIADB_ROOT_PASSWORD=my-secret-pw -d mariadb:tag
-   ; Set up the MariaDB
-   (run
-    docker
-    exec
-    mariadb-ocaml-authorize-test
-    "bash"
-    "-c"
-    "echo 'CREATE DATABASE authorization' | mysql --password=my-secret-pw")
-   (with-stdin-from
-    init_db.sql
-    (run
-     docker
-     exec
-     "-i"
-     mariadb-ocaml-authorize-test
-     "bash"
-     "-c"
-     "mysql --password=my-secret-pw authorization"))
-   ; Set up the SQLite3 database
-   (run chmod u+w test_db.sqlite3)
-   (with-accepted-exit-codes ; because we still need to cleanup if the tests fail
-    (or 0 1)
-    (run %{test} -e))
-   (run
-    docker
-    exec
-    mariadb-ocaml-authorize-test
-    "bash"
-    "-c"
-    "echo 'DROP DATABASE authorization' | mysql --password=my-secret-pw"))))
+   (run %{test} -e))))

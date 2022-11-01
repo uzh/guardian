@@ -1,4 +1,4 @@
-(lang dune 3.0)
+(lang dune 2.9)
 
 (generate_opam_files true)
 
@@ -14,12 +14,11 @@
 
 (maintainers "engineering@econ.uzh.ch")
 
-(homepage "https://gitlab.uzh.ch/econ/it/framework/ocaml/permissions")
+(homepage "https://github.com/uzh/guardian")
 
-(bug_reports
- "https://gitlab.uzh.ch/econ/it/framework/ocaml/permissions/-/issues")
+(bug_reports "https://github.com/uzh/guardian/issues")
 
-(documentation "https://gitlab.uzh.ch/econ/it/framework/ocaml/permissions")
+(documentation "https://github.com/uzh/guardian")
 
 (package
  (name guardian)
@@ -37,7 +36,9 @@
   (containers
    (>= 3.6))
   (dune
-   (>= 3.4.1))
+   (and
+    (> 2.9.0)
+    (< 3.0.0)))
   (logs
    (>= 0.7.0))
   (lwt
@@ -48,6 +49,8 @@
    (= 1.1.4))
   (ocaml
    (>= 4.12.0))
+  (ocamlformat
+   (>= 0.24.1))
   (ppx_deriving
    (>= 5.2.1))
   (ppx_deriving_yojson

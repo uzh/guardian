@@ -1,7 +1,6 @@
 # ocaml/opam post create script
 
 sudo chown -R opam: _build
-sudo chown -R opam: node_modules
 
 opam init -a --shell=zsh
 
