@@ -350,7 +350,7 @@ module Make (R : Role.S) = struct
               let* roles = find_roles ?ctx x in
               let* set =
                 CCList.map
-                  (fun role -> expand_effects [ action, `Entity role ])
+                  (fun role -> expand_effects ?ctx [ action, `Entity role ])
                   (Role_set.elements roles)
                 |> CCList.fold_left
                      (fun rv effect ->
@@ -389,7 +389,7 @@ module Make (R : Role.S) = struct
            ([%show: Authorizer.effect list] effects))
       @@
       let open Lwt_result.Syntax in
-      let* effects = expand_effects effects in
+      let* effects = expand_effects ?ctx effects in
       let%lwt results =
         Lwt_list.map_s
           (fun (action, target) ->
