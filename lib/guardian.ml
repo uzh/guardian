@@ -44,13 +44,14 @@ module Make (R : Role.S) = struct
       [ `Entity of R.t
       | `One of Uuidm.t
       ]
-    [@@deriving show, ord]
+    [@@deriving eq, show, ord]
 
-    type auth_rule = actor_spec * Action.t * actor_spec [@@deriving show, ord]
+    type auth_rule = actor_spec * Action.t * actor_spec
+    [@@deriving eq, show, ord]
 
     (** [action, target] Denotes an effect a function may have on and therefore
         which permissions an actor needs to invoke it. *)
-    type effect = Action.t * actor_spec [@@deriving show, ord]
+    type effect = Action.t * actor_spec [@@deriving eq, show, ord]
 
     module Effect_set = Set.Make (struct
       type t = effect [@@deriving ord]

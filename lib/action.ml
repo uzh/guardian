@@ -5,7 +5,7 @@ type t =
   | `Delete
   | `Manage
   ]
-[@@deriving ord, show]
+[@@deriving eq, ord, show]
 
 let to_string = show
 
