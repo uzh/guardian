@@ -5,5 +5,5 @@ include
       | `Admin
       | `Article
       | `Hacker
-      | `Editor of Uuidm.t
+      | `Editor of Guardian.Uuid.Target.t
       ]

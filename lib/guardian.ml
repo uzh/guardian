@@ -1,6 +1,4 @@
-module Uuidm = struct
-  include Uuid
-end
+module Uuid = Uuid
 
 module Util = struct
   let decompose_variant_string s =
@@ -27,31 +25,51 @@ module Make (R : Role.S) = struct
   module Authorizable = struct
     type 'a t =
       { roles : Role_set.t
-      ; owner : Uuid.t option
-      ; uuid : Uuid.t
+      ; owner : Uuid.Actor.t option
+      ; uuid : Uuid.Actor.t
       ; typ : 'a
       }
     [@@deriving eq, ord, show, yojson]
 
     let to_string t = show (fun f _x -> Format.pp_print_string f "") t
     let make ~roles ~typ ?owner uuid = { roles; owner; uuid; typ }
-    let a_owns_b a b = CCOption.map (fun b' -> a.uuid = b') b.owner = Some true
+
+    let a_owns_b a b =
+      CCOption.map_or ~default:false (fun b' -> a.uuid = b') b.owner
+    ;;
+
     let has_role t role = Role_set.mem role t.roles
   end
 
   module Authorizer = struct
     type actor_spec =
-      [ `Entity of R.t
-      | `One of Uuidm.t
+      [ `ActorEntity of R.t
+      | `Actor of Uuid.Actor.t
       ]
     [@@deriving eq, show, ord]
 
-    type auth_rule = actor_spec * Action.t * actor_spec
+    let actor_value = function
+      | `ActorEntity x -> R.show x
+      | `Actor x -> Uuid.Actor.to_string x
+    ;;
+
+    type target_spec =
+      [ `TargetEntity of R.t
+      | `Target of Uuid.Target.t
+      ]
+    [@@deriving eq, show, ord]
+
+    let target_value = function
+      | `TargetEntity x -> R.show x
+      | `Target x -> Uuid.Target.to_string x
+    ;;
+
+    type auth_rule = actor_spec * Action.t * target_spec
     [@@deriving eq, show, ord]
 
     (** [action, target] Denotes an effect a function may have on and therefore
         which permissions an actor needs to invoke it. *)
-    type effect = Action.t * actor_spec [@@deriving eq, show, ord]
+    type effect = Action.t * target_spec [@@deriving eq, show, ord]
 
     module Effect_set = Set.Make (struct
       type t = effect [@@deriving ord]
@@ -74,12 +92,12 @@ module Make (R : Role.S) = struct
             (fun (actor', action, target) ->
               let is_matched =
                 match actor' with
-                | `One uuid ->
-                  uuid = actor.Authorizable.uuid
-                  && (action = action || action = `Manage)
-                | `Entity role ->
+                | `Actor uuid ->
+                  uuid == actor.Authorizable.uuid
+                  && (action == action || action == `Manage)
+                | `ActorEntity role ->
                   Role_set.mem role actor.Authorizable.roles
-                  && (action = action || action = `Manage)
+                  && (action == action || action == `Manage)
               in
               if is_matched
               then Ok ()
@@ -136,6 +154,7 @@ module Make (R : Role.S) = struct
       with type 'a authorizable = 'a Authorizable.t
        and type role_set = Role_set.t
        and type actor_spec = Authorizer.actor_spec
+       and type target_spec = Authorizer.target_spec
        and type auth_rule = Authorizer.auth_rule
 
   module Make_persistence
@@ -143,6 +162,7 @@ module Make (R : Role.S) = struct
              with type 'a authorizable = 'a Authorizable.t
               and type role_set = Role_set.t
               and type actor_spec = Authorizer.actor_spec
+              and type target_spec = Authorizer.target_spec
               and type auth_rule = Authorizer.auth_rule
               and type role = R.t) : Persistence_s = struct
     include BES
@@ -151,7 +171,7 @@ module Make (R : Role.S) = struct
       revoke_roles ?ctx id (Role_set.singleton role)
     ;;
 
-    let find_authorizable ?ctx ~(typ : 'kind) id =
+    let find_authorizable ?ctx ~(typ : 'kind) (id : Uuid.Actor.t) =
       let open Lwt_result.Syntax in
       let* mem = BES.mem_authorizable ?ctx id in
       if mem
@@ -164,7 +184,7 @@ module Make (R : Role.S) = struct
           (Error
              (Format.asprintf
                 "Authorizable %s doesn't exist."
-                (Uuidm.to_string id)))
+                (Uuid.Actor.to_string id)))
     ;;
 
     (** [save_rules rules] adds all the permissions [rules] to the backend. If
@@ -213,7 +233,7 @@ module Make (R : Role.S) = struct
             (* Still unclear what the desirable behaviour is in this case. *)
             (* Lwt_result.fail( "decorate_to_authorizable: both the database and
                the decorated function \ returned distinct values for the owner
-               of authorizable " ^ Uuidm.to_string ent.uuid) *)
+               of authorizable " ^ Uuid.to_string ent.uuid) *)
             let* () = BES.save_owner ?ctx ent.uuid ~owner:x in
             Lwt.return_ok (Some x)
           | Some x, Some _ (* when x = y *) -> Lwt.return_ok (Some x)
@@ -239,13 +259,13 @@ module Make (R : Role.S) = struct
         (Lwt.return_ok [])
     ;;
 
-    let exists_in auth_rules actor action =
+    let exists_in (auth_rules : auth_rule list) actor action =
       let actor_roles = actor.Authorizable.roles in
       CCList.exists
         (fun (actor', action', _) ->
           match actor' with
-          | `One id -> actor.uuid = id && action = action'
-          | `Entity role ->
+          | `Actor id -> actor.uuid = id && action = action'
+          | `ActorEntity role ->
             Role_set.mem role actor_roles
             && (action = action' || action' = `Manage))
         auth_rules
@@ -255,17 +275,19 @@ module Make (R : Role.S) = struct
       let open Lwt_result.Syntax in
       let%lwt auth_rules =
         Role_set.elements authorizable.Authorizable.roles
-        |> CCList.map (fun r -> `Entity r)
-        |> CCList.cons (`One authorizable.Authorizable.uuid)
+        |> CCList.map (fun r -> `TargetEntity r)
+        |> CCList.cons
+             (`Target (authorizable.Authorizable.uuid |> Uuid.target_of_actor))
         |> Lwt_list.map_s (BES.find_rules ?ctx)
       in
       let* auth_rules = fold_auth_rules auth_rules in
       Lwt.return_ok
       @@ fun actor action ->
       let is_owner =
-        match authorizable.Authorizable.owner with
-        | Some x -> Authorizable.(actor.uuid = x)
-        | None -> false
+        CCOption.map_or
+          ~default:false
+          (Uuid.Actor.equal actor.Authorizable.uuid)
+          authorizable.Authorizable.owner
       in
       let is_self = Authorizable.(actor.uuid = authorizable.uuid) in
       if is_self || is_owner then true else exists_in auth_rules actor action
@@ -273,9 +295,10 @@ module Make (R : Role.S) = struct
 
     let find_role_checker ?ctx role_set =
       let open Lwt_result.Syntax in
+      let () = failwith (Format.asprintf "%a" Role_set.pp role_set) in
       let%lwt auth_rules =
         Role_set.elements role_set
-        |> CCList.map (fun r -> `Entity r)
+        |> CCList.map (fun r -> `TargetEntity r)
         |> Lwt_list.map_s (BES.find_rules ?ctx)
       in
       let* auth_rules = fold_auth_rules auth_rules in
@@ -287,7 +310,7 @@ module Make (R : Role.S) = struct
     let wrap_function
       ?ctx
       ~(error : string -> 'etyp)
-      ~effects
+      ~(effects : Authorizer.effect list)
       (f : 'param -> ('rval, 'etyp) Lwt_result.t)
       =
       let open Lwt_result.Syntax in
@@ -296,10 +319,13 @@ module Make (R : Role.S) = struct
           (fun (action, target) ->
             let* can =
               match target with
-              | `One uuid ->
-                let* authorizable = find_authorizable ?ctx ~typ:() uuid in
+              | `Target uuid ->
+                let* authorizable =
+                  find_authorizable ?ctx ~typ:() (uuid |> Uuid.actor_of_target)
+                in
                 find_checker ?ctx authorizable
-              | `Entity role -> find_role_checker (Role_set.singleton role)
+              | `TargetEntity role ->
+                find_role_checker ?ctx (Role_set.singleton role)
             in
             let can actor =
               if can actor action
@@ -310,7 +336,7 @@ module Make (R : Role.S) = struct
                      "Entity %s does not have permission to %s target %s."
                      (Authorizable.to_string actor)
                      (Action.to_string action)
-                     (Authorizer.show_actor_spec target)
+                     (Authorizer.show_target_spec target)
                   |> error)
             in
             Lwt.return_ok can)
@@ -336,9 +362,10 @@ module Make (R : Role.S) = struct
         f param)
     ;;
 
-    (* Because of effects that look like [`Action A, `One X] we need to make an
-       extra pass to get all of entity X's roles, because if you have permission
-       to do A to one of X's roles, then you should be able to do A to X. *)
+    (* Because of effects that look like [`Action A, `Target X] we need to make
+       an extra pass to get all of entity X's roles, because if you have
+       permission to do A to one of X's roles, then you should be able to do A
+       to X. *)
     let rec expand_effects ?ctx (effects : Authorizer.effect list)
       : (Authorizer.effect list, string) result Lwt.t
       =
@@ -347,11 +374,12 @@ module Make (R : Role.S) = struct
         Lwt_list.map_s
           (fun effect ->
             match effect with
-            | action, `One x ->
-              let* roles = find_roles ?ctx x in
+            | action, `Target (x : Uuid.Target.t) ->
+              let* roles = find_roles ?ctx (x |> Uuid.actor_of_target) in
               let* set =
                 CCList.map
-                  (fun role -> expand_effects ?ctx [ action, `Entity role ])
+                  (fun role ->
+                    expand_effects ?ctx [ action, `TargetEntity role ])
                   (Role_set.elements roles)
                 |> CCList.fold_left
                      (fun rv effect ->
@@ -432,7 +460,7 @@ module Make (R : Role.S) = struct
                   message: %s"
                  (Authorizable.to_string actor)
                  (Action.show (fst effect))
-                 ([%show: Authorizer.actor_spec] (snd effect))
+                 ([%show: Authorizer.target_spec] (snd effect))
                  err)
           |> Lwt_result.lift)
         (Ok ())

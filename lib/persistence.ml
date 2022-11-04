@@ -2,19 +2,20 @@ module type Backend_store_s = sig
   type role_set
   type role
   type actor_spec
+  type target_spec
   type auth_rule
   type 'a authorizable
   type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
 
   val find_roles
     :  ?ctx:(string * string) list
-    -> Uuidm.t
+    -> Uuid.Actor.t
     -> (role_set, string) monad
 
   (** [find_rules target_spec] *)
   val find_rules
     :  ?ctx:(string * string) list
-    -> actor_spec
+    -> target_spec
     -> (auth_rule list, string) monad
 
   val save_rule
@@ -29,37 +30,37 @@ module type Backend_store_s = sig
 
   val grant_roles
     :  ?ctx:(string * string) list
-    -> Uuidm.t
+    -> Uuid.Actor.t
     -> role_set
     -> (unit, string) monad
 
   val revoke_roles
     :  ?ctx:(string * string) list
-    -> Uuidm.t
+    -> Uuid.Actor.t
     -> role_set
     -> (unit, string) monad
 
   val create_authorizable
     :  ?ctx:(string * string) list
-    -> id:Uuidm.t
-    -> ?owner:Uuidm.t
+    -> id:Uuid.Actor.t
+    -> ?owner:Uuid.Actor.t
     -> role_set
     -> (unit, string) monad
 
   val mem_authorizable
     :  ?ctx:(string * string) list
-    -> Uuidm.t
+    -> Uuid.Actor.t
     -> (bool, string) monad
 
   val find_owner
     :  ?ctx:(string * string) list
-    -> Uuidm.t
-    -> (Uuidm.t option, string) monad
+    -> Uuid.Actor.t
+    -> (Uuid.Actor.t option, string) monad
 
   val save_owner
     :  ?ctx:(string * string) list
-    -> Uuidm.t
-    -> owner:Uuidm.t
+    -> Uuid.Actor.t
+    -> owner:Uuid.Actor.t
     -> (unit, string) monad
 
   val find_migrations : unit -> (string * string * string) list
@@ -74,7 +75,7 @@ module type S = sig
   val find_authorizable
     :  ?ctx:(string * string) list
     -> typ:'kind
-    -> Uuidm.t
+    -> Uuid.Actor.t
     -> ('kind authorizable, string) Lwt_result.t
 
   val save_rules
@@ -101,33 +102,36 @@ module type S = sig
   val wrap_function
     :  ?ctx:(string * string) list
     -> error:(string -> 'etyp)
-    -> effects:(Action.t * actor_spec) list
+    -> effects:(Action.t * target_spec) list
     -> ('param -> ('rval, 'etyp) monad)
     -> (actor:'a authorizable -> 'param -> ('rval, 'etyp) monad, string) monad
 
   val revoke_role
     :  ?ctx:(string * string) list
-    -> Uuidm.t
+    -> Uuid.Actor.t
     -> role
     -> (unit, string) monad
 
   val collect_rules
     :  ?ctx:(string * string) list
-    -> (Action.t * actor_spec) list
+    -> (Action.t * target_spec) list
     -> (auth_rule list, string) monad
 
   val checker_of_effects
     :  ?ctx:(string * string) list
-    -> (Action.t * actor_spec) list
+    -> (Action.t * target_spec) list
     -> actor:'a authorizable
     -> (unit, string) monad
 
   (** _exn variants of all functions *)
-  val find_roles_exn : ?ctx:(string * string) list -> Uuidm.t -> role_set Lwt.t
+  val find_roles_exn
+    :  ?ctx:(string * string) list
+    -> Uuid.Actor.t
+    -> role_set Lwt.t
 
   val find_rules_exn
     :  ?ctx:(string * string) list
-    -> actor_spec
+    -> target_spec
     -> auth_rule list Lwt.t
 
   val save_rule_exn : ?ctx:(string * string) list -> auth_rule -> unit Lwt.t

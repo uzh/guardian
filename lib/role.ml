@@ -10,7 +10,7 @@ module type S = sig
   type t [@@deriving show, eq, ord, yojson]
 
   val get_name : t -> string
-  val get_target : t -> Uuidm.t
+  val get_target : t -> Uuid.Target.t
   val of_string : string -> t
   val all : t list
 end

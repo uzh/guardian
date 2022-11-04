@@ -7,27 +7,44 @@ module Tests (Backend : Guard.Persistence_s) = struct
 
   (* ensure that the `User` module conforms to the `Authorizable_module` module
      type. *)
-  let _ = (module User : Guardian.Authorizer.Authorizable_module)
   let _ = (module Article : Guardian.Authorizer.Authorizable_module)
-  let chris = "Chris", Uuidm.v `V4
-  let aron = "Aron", Uuidm.v `V4
-  let ben : Hacker.t = "Ben Hackerman", Uuidm.v `V4
-  let thomas = "Thomas", Uuidm.v `V4
+  let _ = (module User : Guardian.Authorizer.Authorizable_module)
+  let chris = "Chris", Guardian.Uuid.Actor.create ()
+  let aron = "Aron", Guardian.Uuid.Actor.create ()
+  let ben : Hacker.t = "Ben Hackerman", Guardian.Uuid.Actor.create ()
+  let thomas = "Thomas", Guardian.Uuid.Actor.create ()
 
   let chris_article =
-    Article.make ~title:"Foo" ~content:"Bar" ~uuid:(Uuidm.v `V4) ~author:chris
+    Article.make
+      ~title:"Foo"
+      ~content:"Bar"
+      ~uuid:(Guardian.Uuid.Actor.create ())
+      ~author:chris
   ;;
 
   let aron_article =
-    Article.make ~title:"Fizz" ~content:"Buzz" ~uuid:(Uuidm.v `V4) ~author:aron
+    Article.make
+      ~title:"Fizz"
+      ~content:"Buzz"
+      ~uuid:(Guardian.Uuid.Actor.create ())
+      ~author:aron
   ;;
 
-  let bad_rule = `One (snd chris), `Update, `One aron_article.uuid
+  let bad_rule =
+    ( `Actor (snd chris)
+    , `Update
+    , `Target (aron_article.uuid |> Guardian.Uuid.target_of_actor) )
+  ;;
 
   let global_rules : Guardian.Authorizer.auth_rule list =
-    [ `Entity `User, `Read, `Entity `Article
-    ; `Entity `Admin, `Manage, `Entity `Article
-    ; `Entity (`Editor chris_article.uuid), `Update, `One chris_article.uuid
+    [ `ActorEntity `User, `Read, `TargetEntity `Article
+    ; `ActorEntity `Admin, `Manage, `TargetEntity `Article
+    ; ( `ActorEntity
+          (`Editor (chris_article.uuid |> Guardian.Uuid.target_of_actor))
+      , `Update
+      , `Target (chris_article.uuid |> Guardian.Uuid.target_of_actor) )
+      (* Explanation: Someone with actor rule "Editor of uuid X" has the
+         permission to update the "Target with uuid X" *)
     ]
   ;;
 
@@ -54,10 +71,10 @@ module Tests (Backend : Guard.Persistence_s) = struct
      let* chris_art_owner = find_owner_id chris_article in
      let* aron_art_owner = find_owner_id aron_article in
      Lwt.return_ok
-       (Uuidm.to_string chris_art_owner, Uuidm.to_string aron_art_owner))
+       Guardian.Uuid.Actor.(to_string chris_art_owner, to_string aron_art_owner))
     >|= Alcotest.(check (result (pair string string) string))
           "Create an authorizable."
-          (Ok (Uuidm.to_string (snd chris), Uuidm.to_string (snd aron)))
+          (Ok Guardian.Uuid.Actor.(to_string (snd chris), to_string (snd aron)))
   ;;
 
   let test_find_authorizable ?ctx _ () =
@@ -89,7 +106,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
          (Format.asprintf
             "Got %s for roles of authorizable %s, but expected %s."
             received
-            (Uuidm.to_string (snd aron))
+            (Guardian.Uuid.Actor.to_string (snd aron))
             expected))
     >|= Alcotest.(check (result unit string)) "Check a user's roles." (Ok ())
   ;;
@@ -99,11 +116,11 @@ module Tests (Backend : Guard.Persistence_s) = struct
        Backend.grant_roles
          ?ctx
          (snd aron)
-         (Guard.Role_set.singleton (`Editor Uuidm.nil))
+         (Guard.Role_set.singleton (`Editor Guardian.Uuid.Target.nil))
      in
      let* () =
        let* roles = Backend.find_roles ?ctx (snd aron) in
-       if Guard.Role_set.mem (`Editor Uuidm.nil) roles
+       if Guard.Role_set.mem (`Editor Guardian.Uuid.Target.nil) roles
        then Lwt.return_ok ()
        else
          Lwt.return_error
@@ -113,10 +130,10 @@ module Tests (Backend : Guard.Persistence_s) = struct
        Backend.revoke_roles
          ?ctx
          (snd aron)
-         (Guard.Role_set.singleton (`Editor Uuidm.nil))
+         (Guard.Role_set.singleton (`Editor Guardian.Uuid.Target.nil))
      in
      let* roles = Backend.find_roles ?ctx (snd aron) in
-     Lwt.return_ok (Guard.Role_set.mem (`Editor Uuidm.nil) roles))
+     Lwt.return_ok (Guard.Role_set.mem (`Editor Guardian.Uuid.Target.nil) roles))
     >|= Alcotest.(check (result bool string)) "Check a user's roles." (Ok false)
   ;;
 
@@ -132,8 +149,12 @@ module Tests (Backend : Guard.Persistence_s) = struct
   ;;
 
   let test_read_rules ?ctx _ () =
-    (let* article_rules = Backend.find_rules ?ctx (`Entity `Article) in
-     let* editor_rules = Backend.find_rules ?ctx (`One chris_article.uuid) in
+    (let* article_rules = Backend.find_rules ?ctx (`TargetEntity `Article) in
+     let* editor_rules =
+       Backend.find_rules
+         ?ctx
+         (`Target (chris_article.uuid |> Guardian.Uuid.target_of_actor))
+     in
      let perms = article_rules @ editor_rules in
      let global_set = Guardian.Authorizer.Auth_rule_set.of_list global_rules in
      let retrieved_set = Guardian.Authorizer.Auth_rule_set.of_list perms in
@@ -154,7 +175,11 @@ module Tests (Backend : Guard.Persistence_s) = struct
 
   let test_drop_rules ?ctx _ () =
     (let* () = Backend.save_rule ?ctx bad_rule in
-     let* perms = Backend.find_rules ?ctx (`One aron_article.uuid) in
+     let* perms =
+       Backend.find_rules
+         ?ctx
+         (`Target (aron_article.uuid |> Guardian.Uuid.target_of_actor))
+     in
      let* () =
        match perms with
        | [ perm ] when perm = bad_rule -> Lwt.return_ok ()
@@ -163,7 +188,11 @@ module Tests (Backend : Guard.Persistence_s) = struct
        | _ -> Lwt.return_error "Invalid permissions."
      in
      let* () = Backend.delete_rule ?ctx bad_rule in
-     let* perms' = Backend.find_rules ?ctx (`One aron_article.uuid) in
+     let* perms' =
+       Backend.find_rules
+         ?ctx
+         (`Target (aron_article.uuid |> Guardian.Uuid.target_of_actor))
+     in
      match perms' with
      | [] -> Lwt.return_ok ()
      | _ -> Lwt.return_error "Failed to remove bad perm.")
@@ -238,8 +267,13 @@ module Tests (Backend : Guard.Persistence_s) = struct
        Backend.grant_roles
          ?ctx
          (snd thomas)
-         (Guard.Role_set.singleton (`Editor chris_article.uuid))
+         (Guard.Role_set.singleton
+            (`Editor (chris_article.uuid |> Guardian.Uuid.target_of_actor)))
+       |> Lwt_result.map_error (fun err -> failwith err)
      in
+     (* let () = failwith (Format.asprintf "THOMAS %s; Article %s" (snd thomas
+        |> Guardian.Uuid.Actor.to_string) (chris_article.uuid |>
+        Guardian.Uuid.Actor.to_string)) in *)
      let* thomas_authorizable = User.to_authorizable ?ctx thomas in
      let* _chris_article' =
        Article.update_title
@@ -388,6 +422,6 @@ let () =
        ~ctx:[ "pool", test_database ]
        (module Maria)
        "MariadDB Backend"
-     @ make_test_cases (module Sqlite) "SQLite3 Backend"
+     (* @ make_test_cases (module Sqlite) "SQLite3 Backend" *)
      |> Alcotest_lwt.run "Authorization"
 ;;

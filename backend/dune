@@ -18,7 +18,6 @@
   lwt.unix
   sqlite3
   uri
-  uuidm
   yojson)
  (preprocess
   (pps

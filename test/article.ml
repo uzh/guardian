@@ -6,7 +6,7 @@ module Make (P : Guard.Persistence_s) = struct
     { mutable title : string
     ; mutable content : string
     ; mutable author : User.t
-    ; uuid : Uuidm.t
+    ; uuid : Guardian.Uuid.Actor.t
     }
   [@@deriving make, show]
 
@@ -32,7 +32,11 @@ module Make (P : Guard.Persistence_s) = struct
       Lwt.return_ok t
     in
     let* wrapped =
-      P.wrap_function ?ctx ~error:CCFun.id ~effects:[ `Update, `One t.uuid ] f
+      P.wrap_function
+        ?ctx
+        ~error:CCFun.id
+        ~effects:[ `Update, `Target (t.uuid |> Guardian.Uuid.target_of_actor) ]
+        f
     in
     wrapped ~actor new_title
   ;;
@@ -46,7 +50,11 @@ module Make (P : Guard.Persistence_s) = struct
       Lwt.return_ok t
     in
     let* wrapped =
-      P.wrap_function ?ctx ~error:CCFun.id ~effects:[ `Manage, `One t.uuid ] f
+      P.wrap_function
+        ?ctx
+        ~error:CCFun.id
+        ~effects:[ `Manage, `Target (t.uuid |> Guardian.Uuid.target_of_actor) ]
+        f
     in
     wrapped ~actor new_author
   ;;

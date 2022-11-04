@@ -3,8 +3,8 @@ type t =
   | `Admin
   | `Article
   | `Hacker
-  | `Editor of Guardian.Uuidm.t
-    [@equal fun a b -> Uuidm.equal a nil || Uuidm.equal b nil]
+  | `Editor of Guardian.Uuid.Target.t
+    [@equal fun a b -> Guardian.Uuid.Target.(equal a nil || equal b nil)]
   ]
 [@@deriving show, eq, ord, yojson]
 
@@ -21,7 +21,7 @@ let get_target = function
   | `Editor x -> x
 ;;
 
-let all = [ `User; `Admin; `Article; `Hacker; `Editor Uuidm.nil ]
+let all = [ `User; `Admin; `Article; `Hacker; `Editor Guardian.Uuid.Target.nil ]
 
 let of_string s =
   match Guardian.Util.decompose_variant_string s with
@@ -31,6 +31,6 @@ let of_string s =
   | "hacker", [] -> `Hacker
   | "editor", [ id ] ->
     let () = Printf.printf "Parsing role string: %s\n" s in
-    `Editor (Guardian.Uuidm.of_string_exn id)
+    `Editor (Guardian.Uuid.Target.of_string_exn id)
   | _ -> failwith ("Invalid role: " ^ s)
 ;;
