@@ -106,9 +106,6 @@ end
 module type Contract = sig
   include Backend
 
-  val to_authorizable : ?ctx:'a -> 'b -> ('c, string) Lwt_result.t
-  val to_authorizable_target : ?ctx:'a -> 'b -> ('c, string) Lwt_result.t
-
   module Actor : sig
     include module type of Actor
 
@@ -131,7 +128,7 @@ module type Contract = sig
       -> Uuid.Actor.t
       -> ('kind authorizable, string) Lwt_result.t
 
-    val decorate_to_authorizable
+    val decorate
       :  ?ctx:context
       -> ('a -> 'kind authorizable)
       -> 'a
@@ -148,8 +145,6 @@ module type Contract = sig
 
     val decorate
       :  ?ctx:context
-      -> typ:'kind
-      -> singleton:target_role_set
       -> ('a -> 'kind authorizable_target)
       -> 'a
       -> ('kind authorizable_target, string) Lwt_result.t

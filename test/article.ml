@@ -8,20 +8,23 @@ module Make (P : Guard.Persistence_s) = struct
     ; mutable author : User.t
     ; uuid : Guardian.Uuid.Target.t
     }
-  [@@deriving make, show]
+  [@@deriving show]
 
   type kind = [ `Article ]
 
+  let make ?id title content author =
+    let uuid = CCOption.get_or ~default:(Guard.Uuid.Target.create ()) id in
+    { uuid; title; content; author }
+  ;;
+
   let to_authorizable ?ctx =
     let open Guard in
-    let to_authorizable t =
-      AuthorizableTarget.make ~typ:`Article ~owner:(snd t.author) t.uuid
-    in
-    P.Target.decorate
-      ?ctx
-      ~singleton:(TargetRoleSet.singleton `Article)
-      ~typ:`Article
-      to_authorizable
+    P.Target.decorate ?ctx (fun t ->
+      AuthorizableTarget.make
+        ~typ:`Article
+        ~owner:(snd t.author)
+        ~entity:(TargetRoleSet.singleton `Article)
+        t.uuid)
   ;;
 
   let update_title ?ctx (actor : [ `User ] Guard.Authorizable.t) t new_title =

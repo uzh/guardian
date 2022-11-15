@@ -6,7 +6,7 @@ module type S = sig
   val pp : Format.formatter -> t -> unit
 end
 
-module Make (R : Role.RoleSig) : S with type elt = R.t = struct
+module Make (R : Role.Sig) : S with type elt = R.t = struct
   include Set.Make (R)
 
   let to_yojson t = `List (CCList.map R.to_yojson (elements t))

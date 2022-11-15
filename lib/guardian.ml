@@ -2,7 +2,7 @@ type context = (string * string) list
 
 module Uuid = Uuid
 
-module type RoleSig = Role.RoleSig
+module type RoleSig = Role.Sig
 
 module Util = struct
   let decompose_variant_string s =
@@ -51,12 +51,13 @@ module Make (A : RoleSig) (T : RoleSig) = struct
     type 'a t =
       { owner : Uuid.Actor.t
       ; uuid : Uuid.Target.t
+      ; entity : TargetRoleSet.t
       ; typ : 'a
       }
     [@@deriving eq, ord, show, yojson]
 
     let to_string t = show (fun f _x -> Format.pp_print_string f "") t
-    let make ~typ ~owner uuid = { owner; uuid; typ }
+    let make ~typ ~owner ~entity uuid = { owner; uuid; typ; entity }
   end
 
   module Authorizer = struct
@@ -202,19 +203,6 @@ module Make (A : RoleSig) (T : RoleSig) = struct
               and type role = A.t) : Persistence_s = struct
     include BES
 
-    let to_authorizable ?ctx _ =
-      let _ = ctx in
-      Lwt.return_error
-        "Invalid actor or undefined 'to_authorizable' function for actor type."
-    ;;
-
-    let to_authorizable_target ?ctx _ =
-      let _ = ctx in
-      Lwt.return_error
-        "Invalid target or undefined 'to_authorizable_target' function for \
-         target type."
-    ;;
-
     (** turn a single argument function returning a [result] into one that
         raises a [Failure] instead *)
     let with_exn ?ctx f name arg =
@@ -292,9 +280,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
           decorated function connects * to the persistent backend to ensure that
           the authorizable's roles and ownership * are consistent in both
           spaces. *)
-      let decorate_to_authorizable
-        ?ctx
-        (to_authorizable : 'a -> 'kind Authorizable.t)
+      let decorate ?ctx (to_authorizable : 'a -> 'kind Authorizable.t)
         : 'a -> ('kind Authorizable.t, string) Lwt_result.t
         =
        fun x ->
@@ -316,9 +302,9 @@ module Make (A : RoleSig) (T : RoleSig) = struct
             | None, None -> Lwt.return_ok None
             | Some x, Some y when x <> y ->
               (* Still unclear what the desirable behaviour is in this case. *)
-              (* Lwt_result.fail( "decorate_to_authorizable: both the database
-                 and the decorated function \ returned distinct values for the
-                 owner of authorizable " ^ Uuid.to_string ent.uuid) *)
+              (* Lwt_result.fail( "decorate: both the database and the decorated
+                 function \ returned distinct values for the owner of
+                 authorizable " ^ Uuid.to_string ent.uuid) *)
               let* () = Actor.save_owner ?ctx ent.uuid ~owner:x in
               Lwt.return_ok (Some x)
             | Some x, Some _ (* when x = y *) -> Lwt.return_ok (Some x)
@@ -348,37 +334,35 @@ module Make (A : RoleSig) (T : RoleSig) = struct
     module Target = struct
       include BES.Target
 
-      let decorate
-        ?ctx
-        ~(typ : 'kind)
-        ~(singleton : target_role_set)
-        (to_authorizable : 'a -> 'kind AuthorizableTarget.t)
+      let decorate ?ctx (to_authorizable : 'a -> 'kind AuthorizableTarget.t)
         : 'a -> ('kind AuthorizableTarget.t, string) Lwt_result.t
         =
        fun x ->
         let open Lwt_result.Syntax in
         let (ent : 'kind AuthorizableTarget.t) = to_authorizable x in
-        let uuid = ent.uuid in
-        let* mem = BES.Target.mem ?ctx ent.uuid in
+        let* mem = mem ?ctx ent.uuid in
         if mem
         then
-          let* ent' = BES.Target.find ?ctx ~typ uuid in
+          let* ent' = find ?ctx ~typ:ent.typ ent.uuid in
           let* owner =
             match ent.owner, ent'.owner with
             | x, y when x <> y ->
               (* Still unclear what the desirable behaviour is in this case. *)
-              (* Lwt_result.fail( "decorate_to_authorizable: both the database
-                 and the decorated function \ returned distinct values for the
-                 owner of authorizable " ^ Uuid.to_string ent.uuid) *)
-              let* () = BES.Target.save_owner ?ctx ent.uuid ~owner:x in
+              (* Lwt_result.fail( "decorate: both the database and the decorated
+                 function \ returned distinct values for the owner of
+                 authorizable " ^ Uuid.to_string ent.uuid) *)
+              let* () = save_owner ?ctx ent.uuid ~owner:x in
               Lwt.return_ok x
             | x, _ (* when x = y *) -> Lwt.return_ok x
           in
-          AuthorizableTarget.make ~typ ~owner uuid |> Lwt.return_ok
+          AuthorizableTarget.make
+            ~typ:ent.typ
+            ~owner
+            ~entity:ent.entity
+            ent.uuid
+          |> Lwt.return_ok
         else
-          let* () =
-            BES.Target.create ?ctx ~id:uuid ~owner:ent.owner singleton
-          in
+          let* () = create ?ctx ~id:ent.uuid ~owner:ent.owner ent.entity in
           Lwt.return_ok ent
      ;;
 
@@ -399,7 +383,8 @@ module Make (A : RoleSig) (T : RoleSig) = struct
           |> Uuid.Actor.equal actor.Authorizable.uuid
         in
         let is_self =
-          actor.uuid |> Uuid.target_of_actor = target.AuthorizableTarget.uuid
+          target.AuthorizableTarget.uuid
+          |> Uuid.Target.equal (actor.uuid |> Uuid.target_of_actor)
         in
         if is_self || is_owner then true else exists_in auth_rules actor action
       ;;

@@ -16,23 +16,8 @@ module Tests (Backend : Guard.Persistence_s) = struct
   let aron = "Aron", Guardian.Uuid.Actor.create ()
   let ben : Hacker.t = "Ben Hackerman", Guardian.Uuid.Actor.create ()
   let thomas = "Thomas", Guardian.Uuid.Actor.create ()
-
-  let chris_article =
-    Article.make
-      ~title:"Foo"
-      ~content:"Bar"
-      ~uuid:(Guardian.Uuid.Target.create ())
-      ~author:chris
-  ;;
-
-  let aron_article =
-    Article.make
-      ~title:"Fizz"
-      ~content:"Buzz"
-      ~uuid:(Guardian.Uuid.Target.create ())
-      ~author:aron
-  ;;
-
+  let chris_article = Article.make "Foo" "Bar" chris
+  let aron_article = Article.make "Fizz" "Buzz" aron
   let bad_rule = `Actor (snd chris), `Update, `Target aron_article.uuid
 
   let global_rules : Guardian.Authorizer.auth_rule list =

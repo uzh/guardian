@@ -211,14 +211,20 @@ struct
           {sql|SELECT roles, parent FROM guardian_targets WHERE id = ?|sql}
           |> Caqti_type.(string ->! tup2 string string)
         in
-        let%lwt roles, owner = Db.find ?ctx caqti (Uuid.Target.to_string id) in
-        let _ = roles |> Yojson.Safe.from_string |> Set.of_yojson in
+        let%lwt entity, owner = Db.find ?ctx caqti (Uuid.Target.to_string id) in
+        let* entity =
+          entity
+          |> Yojson.Safe.from_string
+          |> Guardian.TargetRoleSet.of_yojson
+          |> Lwt_result.lift
+        in
         let* owner =
-          Uuid.Actor.of_string owner
+          owner
+          |> Uuid.Actor.of_string
           |> CCOption.to_result (Format.asprintf "Invalid Owner UUID: %s" owner)
           |> Lwt_result.lift
         in
-        Guardian.AuthorizableTarget.make ~typ ~owner id |> Lwt.return_ok
+        Guardian.AuthorizableTarget.make ~typ ~owner ~entity id |> Lwt.return_ok
       ;;
 
       let find_roles ?ctx (id : Uuid.Target.t)

@@ -9,7 +9,7 @@ module MakeActor (P : Guard.Persistence_s) = struct
 
   let to_authorizable ?ctx =
     let open Guard in
-    P.Actor.decorate_to_authorizable ?ctx (fun (t : t) ->
+    P.Actor.decorate ?ctx (fun (t : t) : [> `User ] Authorizable.t ->
       Authorizable.make ~roles:(ActorRoleSet.singleton `User) ~typ:`User (snd t))
   ;;
 
@@ -38,14 +38,11 @@ module MakeTarget (P : Guard.Persistence_s) = struct
 
   let to_authorizable ?ctx =
     let open Guard in
-    P.Target.decorate
-      ?ctx
-      ~singleton:(TargetRoleSet.singleton `User)
-      ~typ:`User
-      (fun t ->
+    P.Target.decorate ?ctx (fun t ->
       AuthorizableTarget.make
         ~typ:`User
         ~owner:(snd t)
+        ~entity:(TargetRoleSet.singleton `User)
         (snd t |> Uuid.target_of_actor))
   ;;
 end

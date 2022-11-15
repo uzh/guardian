@@ -6,7 +6,7 @@ let of_yojson : Yojson.Safe.t -> (t, string) CCResult.t = function
   | _ -> Error "Invalid role."
 ;;
 
-module type RoleSig = sig
+module type Sig = sig
   type t [@@deriving eq, show, ord, yojson]
 
   val name : t -> string
