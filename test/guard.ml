@@ -1,1 +1,1 @@
-include Guardian.Make (Role)
+include Guardian.Make (Role.Actor) (Role.Target)

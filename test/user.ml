@@ -1,13 +1,47 @@
-module Make (P : Guard.Persistence_s) = struct
-  type t = string * Uuidm.t [@@deriving show]
-  type kind = [ `User ]
+type user = string * Guardian.Uuid.Actor.t [@@deriving show]
+type user_kind = [ `User ]
 
-  let make s : t = s, Uuidm.v `V4
+module MakeActor (P : Guard.Persistence_s) = struct
+  type t = user [@@deriving show]
+  type kind = user_kind
 
-  let to_authorizable (t : t) =
+  let make s : t = s, Guardian.Uuid.Actor.create ()
+
+  let to_authorizable ?ctx =
     let open Guard in
-    Authorizable.make ~roles:(Role_set.singleton `User) ~typ:`User (snd t)
+    P.Actor.decorate ?ctx (fun (t : t) : [> `User ] Authorizable.t ->
+      Authorizable.make (ActorRoleSet.singleton `User) `User (snd t))
   ;;
 
-  let to_authorizable ?ctx = P.decorate_to_authorizable ?ctx to_authorizable
+  let update_name
+    ?ctx
+    (actor : [ `User | `Admin ] Guard.Authorizable.t)
+    t
+    new_name
+    =
+    let open Lwt_result.Syntax in
+    let f new_name = Lwt.return_ok (new_name, snd t) in
+    let* wrapped =
+      P.wrap_function ?ctx CCFun.id [ `Update, `Target (snd t) ] f
+    in
+    wrapped ~actor new_name
+  ;;
+end
+
+module MakeTarget (P : Guard.Persistence_s) = struct
+  type t = user [@@deriving show]
+  type kind = user_kind
+
+  let to_authorizable ?ctx =
+    let open Guard in
+    P.Target.decorate ?ctx (fun t ->
+      let of_actor =
+        CCFun.(Uuid.(snd %> Actor.to_string %> Target.of_string_exn))
+      in
+      AuthorizableTarget.make
+        (of_actor t)
+        (Some (snd t))
+        `User
+        (TargetRoleSet.singleton `User))
+  ;;
 end

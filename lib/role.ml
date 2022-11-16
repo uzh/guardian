@@ -6,11 +6,12 @@ let of_yojson : Yojson.Safe.t -> (t, string) CCResult.t = function
   | _ -> Error "Invalid role."
 ;;
 
-module type S = sig
-  type t [@@deriving show, eq, ord, yojson]
+module type Sig = sig
+  type t [@@deriving eq, show, ord, yojson]
 
-  val get_name : t -> string
-  val get_target : t -> Uuidm.t
+  val name : t -> string
+  val find_target : t -> Uuid.Target.t option
+  val find_target_exn : t -> Uuid.Target.t
   val of_string : string -> t
   val all : t list
 end

@@ -1,36 +1,63 @@
-type t =
-  [ `User
-  | `Admin
-  | `Article
-  | `Hacker
-  | `Editor of Guardian.Uuidm.t
-    [@equal fun a b -> Uuidm.equal a nil || Uuidm.equal b nil]
-  ]
-[@@deriving show, eq, ord, yojson]
+module Actor = struct
+  type t =
+    [ `User
+    | `Admin
+    | `Hacker
+    | `Editor of Guardian.Uuid.Target.t
+      [@equal fun a b -> Guardian.Uuid.Target.(equal a nil || equal b nil)]
+    ]
+  [@@deriving show, eq, ord, yojson]
 
-let get_name = function
-  | `User -> "user"
-  | `Admin -> "admin"
-  | `Article -> "article"
-  | `Hacker -> "hacker"
-  | `Editor _ -> "editor"
-;;
+  let name = function
+    | `User -> "user"
+    | `Admin -> "admin"
+    | `Hacker -> "hacker"
+    | `Editor _ -> "editor"
+  ;;
 
-let get_target = function
-  | `User | `Admin | `Article | `Hacker -> failwith "No target"
-  | `Editor x -> x
-;;
+  let find_target = function
+    | `User | `Admin | `Hacker -> None
+    | `Editor x -> Some x
+  ;;
 
-let all = [ `User; `Admin; `Article; `Hacker; `Editor Uuidm.nil ]
+  let find_target_exn = CCFun.(find_target %> CCOption.get_exn_or "No target")
+  let all = [ `User; `Admin; `Hacker; `Editor Guardian.Uuid.Target.nil ]
 
-let of_string s =
-  match Guardian.Util.decompose_variant_string s with
-  | "user", [] -> `User
-  | "admin", [] -> `Admin
-  | "article", [] -> `Article
-  | "hacker", [] -> `Hacker
-  | "editor", [ id ] ->
-    let () = Printf.printf "Parsing role string: %s\n" s in
-    `Editor (Guardian.Uuidm.of_string_exn id)
-  | _ -> failwith ("Invalid role: " ^ s)
-;;
+  let of_string s =
+    match Guardian.Util.decompose_variant_string s with
+    | "user", [] -> `User
+    | "admin", [] -> `Admin
+    | "hacker", [] -> `Hacker
+    | "editor", [ id ] ->
+      Logs.debug (fun m -> m "Parsing role string: %s" s);
+      `Editor (Guardian.Uuid.Target.of_string_exn id)
+    | _ -> failwith (Format.asprintf "Invalid role: %s" s)
+  ;;
+end
+
+module Target = struct
+  type t =
+    [ `User
+    | `Article
+    ]
+  [@@deriving show, eq, ord, yojson]
+
+  let name = function
+    | `User -> "user"
+    | `Article -> "article"
+  ;;
+
+  let find_target = function
+    | `User | `Article -> None
+  ;;
+
+  let find_target_exn = CCFun.(find_target %> CCOption.get_exn_or "No target")
+  let all = [ `User; `Article ]
+
+  let of_string s =
+    match Guardian.Util.decompose_variant_string s with
+    | "user", [] -> `User
+    | "article", [] -> `Article
+    | _ -> failwith (Format.asprintf "Invalid role: %s" s)
+  ;;
+end

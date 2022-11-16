@@ -1,14 +1,13 @@
 module Make (P : Guard.Persistence_s) = struct
-  type t = string * Uuidm.t
+  type t = string * Guardian.Uuid.Actor.t
 
-  let make s : t = s, Uuidm.v `V4
+  let make s : t = s, Guardian.Uuid.Actor.create ()
 
-  let to_authorizable (t : t) : [ `Hacker ] Guard.Authorizable.t =
-    Guard.Authorizable.make
-      ~roles:(Guard.Role_set.of_list [ `Hacker ])
-      ~typ:`Hacker
-      (snd t)
+  let to_authorizable ?ctx =
+    P.Actor.decorate ?ctx (fun (t : t) : [ `Hacker ] Guard.Authorizable.t ->
+      Guard.Authorizable.make
+        (Guard.ActorRoleSet.of_list [ `Hacker ])
+        `Hacker
+        (snd t))
   ;;
-
-  let to_authorizable ?ctx = P.decorate_to_authorizable ?ctx to_authorizable
 end

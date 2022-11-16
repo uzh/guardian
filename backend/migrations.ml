@@ -1,6 +1,16 @@
-let create_guardian_entities_table_sql =
+let create_guardian_actors_table_sql =
   {sql|
-    CREATE TABLE IF NOT EXISTS guardian_entities (
+    CREATE TABLE IF NOT EXISTS guardian_actors (
+      id TEXT UNIQUE NOT NULL,
+      roles TEXT NOT NULL,
+      parent TEXT
+    )
+  |sql}
+;;
+
+let create_guardian_targets_table_sql =
+  {sql|
+    CREATE TABLE IF NOT EXISTS guardian_targets (
       id TEXT UNIQUE NOT NULL,
       roles TEXT NOT NULL,
       parent TEXT
@@ -36,14 +46,17 @@ let create_guardian_rules_table_sql =
   |sql}
 ;;
 
-let all_tables = [ "guardian_entities"; "guardian_rules" ]
+let all_tables = [ "guardian_actors"; "guardian_targets"; "guardian_rules" ]
 
 let all =
-  [ ( "create guardian entities table"
+  [ ( "create guardian actors table"
     , "2022-10-28T11:30"
-    , create_guardian_entities_table_sql )
+    , create_guardian_actors_table_sql )
   ; ( "create guardian rule table"
     , "2022-10-28T11:31"
     , create_guardian_rules_table_sql )
+  ; ( "create guardian targets table"
+    , "2022-11-14T11:30"
+    , create_guardian_targets_table_sql )
   ]
 ;;
