@@ -383,6 +383,6 @@ let () =
        ~ctx:[ "pool", test_database ]
        (module Maria)
        "MariadDB Backend"
-     (* @ make_test_cases (module Sqlite) "SQLite3 Backend" *)
+     @ make_test_cases (module Sqlite) "SQLite3 Backend"
      |> Alcotest_lwt.run "Authorization"
 ;;

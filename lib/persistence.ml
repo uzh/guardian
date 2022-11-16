@@ -12,6 +12,17 @@ module type Backend = sig
   type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
 
   module Actor : sig
+    module Authorizable : sig
+      val create
+        :  ?ctx:context
+        -> id:Uuid.Actor.t
+        -> ?owner:Uuid.Actor.t
+        -> actor_role_set
+        -> (unit, string) monad
+
+      val mem : ?ctx:context -> Uuid.Actor.t -> (bool, string) monad
+    end
+
     val find
       :  ?ctx:context
       -> typ:'kind
@@ -53,15 +64,6 @@ module type Backend = sig
       -> Uuid.Actor.t
       -> owner:Uuid.Actor.t
       -> (unit, string) monad
-
-    val create_authorizable
-      :  ?ctx:context
-      -> id:Uuid.Actor.t
-      -> ?owner:Uuid.Actor.t
-      -> actor_role_set
-      -> (unit, string) monad
-
-    val mem_authorizable : ?ctx:context -> Uuid.Actor.t -> (bool, string) monad
   end
 
   module Target : sig

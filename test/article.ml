@@ -21,10 +21,10 @@ module Make (P : Guard.Persistence_s) = struct
     let open Guard in
     P.Target.decorate ?ctx (fun t ->
       AuthorizableTarget.make
-        ~typ:`Article
-        ~owner:(snd t.author)
-        ~entity:(TargetRoleSet.singleton `Article)
-        t.uuid)
+        t.uuid
+        (snd t.author)
+        `Article
+        (TargetRoleSet.singleton `Article))
   ;;
 
   let update_title ?ctx (actor : [ `User ] Guard.Authorizable.t) t new_title =

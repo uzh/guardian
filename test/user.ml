@@ -40,9 +40,9 @@ module MakeTarget (P : Guard.Persistence_s) = struct
     let open Guard in
     P.Target.decorate ?ctx (fun t ->
       AuthorizableTarget.make
-        ~typ:`User
-        ~owner:(snd t)
-        ~entity:(TargetRoleSet.singleton `User)
-        (snd t |> Uuid.target_of_actor))
+        (snd t |> Uuid.target_of_actor)
+        (snd t)
+        `User
+        (TargetRoleSet.singleton `User))
   ;;
 end

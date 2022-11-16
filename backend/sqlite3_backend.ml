@@ -10,7 +10,9 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
   (** TODO: generalize this. right now it's fine because this backend should
       really only be used for testing purposes, but in the future it would be
       nice to have actual sqlite3 support. *)
-  module Set = Guardian.ActorRoleSet
+  module ActorSet = Guardian.ActorRoleSet
+
+  module TargetSet = Guardian.TargetRoleSet
 
   let db = Sqlite3.db_open "test_db.sqlite3"
 
@@ -20,9 +22,9 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
     type role = A.t
     type auth_rule = Guardian.Authorizer.auth_rule
     type actor_role_set = Guardian.ActorRoleSet.t
-    type actor_spec = Guardian.Authorizer.actor_spec
+    type actor_spec = Guardian.Authorizer.Actor.spec
     type target_role_set = Guardian.TargetRoleSet.t
-    type target_spec = Guardian.Authorizer.target_spec
+    type target_spec = Guardian.Authorizer.Target.spec
     type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
 
     let lwt_return_rc = function
@@ -31,34 +33,67 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
     ;;
 
     module Actor = struct
-      let create_authorizable ?ctx ~id ?(owner : Uuid.Actor.t option) roles
-        : (unit, string) Lwt_result.t
-        =
+      module Authorizable = struct
+        let create ?ctx ~id ?(owner : Uuid.Actor.t option) roles
+          : (unit, string) Lwt_result.t
+          =
+          let open Lwt_result.Syntax in
+          let open Sqlite3 in
+          let (_ : (string * string) list option) = ctx in
+          let stmt =
+            prepare
+              db
+              {sql|INSERT INTO guardian_actors (id, roles, parent) VALUES (?, ?, ?)|sql}
+          in
+          let roles' = ActorSet.to_yojson roles |> Yojson.Safe.to_string in
+          let* () =
+            bind_values
+              stmt
+              [ Data.TEXT (Uuid.Actor.to_string id)
+              ; Data.TEXT roles'
+              ; Data.opt_text (CCOption.map Uuid.Actor.to_string owner)
+              ]
+            |> lwt_return_rc
+          in
+          lwt_return_rc (step stmt)
+        ;;
+
+        let mem ?ctx id =
+          let open Sqlite3 in
+          let (_ : (string * string) list option) = ctx in
+          let stmt =
+            prepare db {sql|SELECT * FROM guardian_actors WHERE id = ?|sql}
+          in
+          let (_ : Rc.t) =
+            bind_values stmt [ Data.TEXT (Uuid.Actor.to_string id) ]
+          in
+          let (_ : Rc.t), rv =
+            fold stmt ~f:(fun _acc _row -> Some true) ~init:None
+          in
+          rv |> CCOption.get_or ~default:false |> Lwt.return_ok
+        ;;
+      end
+
+      let find ?ctx ~typ id =
         let open Lwt_result.Syntax in
         let open Sqlite3 in
         let (_ : (string * string) list option) = ctx in
+        let id' = Uuid.Actor.to_string id in
         let stmt =
           prepare
             db
-            {sql|INSERT INTO guardian_entities (id, roles, parent) VALUES (?, ?, ?)|sql}
+            {sql|SELECT roles, parent FROM guardian_actors WHERE id = ?|sql}
         in
-        let roles' = Set.to_yojson roles |> Yojson.Safe.to_string in
-        let* () =
-          bind_values
-            stmt
-            [ Data.TEXT (Uuid.Actor.to_string id)
-            ; Data.TEXT roles'
-            ; Data.opt_text (CCOption.map Uuid.Actor.to_string owner)
-            ]
-          |> lwt_return_rc
+        let (_ : Rc.t) = bind_values stmt [ Data.TEXT id' ] in
+        let* () = lwt_return_rc (step stmt) in
+        let roles =
+          column_text stmt 0
+          |> Yojson.Safe.from_string
+          |> ActorSet.of_yojson
+          |> CCResult.get_or_failwith
         in
-        lwt_return_rc (step stmt)
-      ;;
-
-      let find ?ctx ~typ _ =
-        let (_ : (string * string) list option) = ctx in
-        let _ = typ in
-        failwith "TODO"
+        let owner = column_text stmt 1 |> Uuid.Actor.of_string in
+        Guardian.Authorizable.make ~roles ~typ ?owner id |> Lwt.return_ok
       ;;
 
       let find_roles ?ctx id =
@@ -67,14 +102,14 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
         let (_ : (string * string) list option) = ctx in
         let id' = Uuid.Actor.to_string id in
         let stmt =
-          prepare db {sql|SELECT roles FROM guardian_entities WHERE id = ?|sql}
+          prepare db {sql|SELECT roles FROM guardian_actors WHERE id = ?|sql}
         in
         let (_ : Rc.t) = bind_values stmt [ Data.TEXT id' ] in
         let* () = lwt_return_rc (step stmt) in
         match CCString.trim (column_text stmt 0) with
-        | "" -> Lwt.return_ok Set.empty
+        | "" -> Lwt.return_ok ActorSet.empty
         | coltext ->
-          Yojson.Safe.from_string coltext |> Set.of_yojson |> Lwt.return
+          Yojson.Safe.from_string coltext |> ActorSet.of_yojson |> Lwt.return
       ;;
 
       let find_owner ?ctx id =
@@ -83,7 +118,7 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
         let (_ : (string * string) list option) = ctx in
         let id' = Uuid.Actor.to_string id in
         let stmt =
-          prepare db {sql|SELECT parent FROM guardian_entities WHERE id = ?|sql}
+          prepare db {sql|SELECT parent FROM guardian_actors WHERE id = ?|sql}
         in
         let* () =
           let (_ : Rc.t) = bind_values stmt [ Data.TEXT id' ] in
@@ -104,9 +139,9 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
           | `Actor aid, `Target tid ->
             let stmt =
               {sql|
-              INSERT INTO guardian_rules (actor_id, act, target_id)
-              VALUES (?, ?, ?)
-            |sql}
+                INSERT INTO guardian_rules (actor_id, act, target_id)
+                VALUES (?, ?, ?)
+              |sql}
               |> prepare db
             in
             let _ =
@@ -122,9 +157,9 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
           | `Actor aid, `TargetEntity trole ->
             let stmt =
               {sql|
-              INSERT INTO guardian_rules (actor_id, act, target_role)
-              VALUES (?, ?, ?)
-            |sql}
+                INSERT INTO guardian_rules (actor_id, act, target_role)
+                VALUES (?, ?, ?)
+              |sql}
               |> prepare db
             in
             let _ =
@@ -140,9 +175,9 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
           | `ActorEntity arole, `Target tid ->
             let stmt =
               {sql|
-              INSERT INTO guardian_rules (actor_role, act, target_id)
-              VALUES (?, ?, ?)
-            |sql}
+                INSERT INTO guardian_rules (actor_role, act, target_id)
+                VALUES (?, ?, ?)
+              |sql}
               |> prepare db
             in
             let _ =
@@ -158,19 +193,15 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
           | `ActorEntity arole, `TargetEntity trole ->
             let stmt =
               {sql|
-              INSERT INTO guardian_rules (actor_role, act, target_role)
-              VALUES (?, ?, ?)
-            |sql}
+                INSERT INTO guardian_rules (actor_role, act, target_role)
+                VALUES (?, ?, ?)
+              |sql}
               |> prepare db
             in
             let _ =
               bind_values
                 stmt
-                Data.
-                  [ TEXT (A.show arole)
-                  ; TEXT action'
-                  ; TEXT (trole |> Guardian.to_actor |> A.show)
-                  ]
+                Data.[ TEXT (A.show arole); TEXT action'; TEXT (T.show trole) ]
             in
             stmt
         in
@@ -188,8 +219,8 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
         | `Actor aid, `Target tid ->
           let stmt =
             {sql|
-            DELETE FROM guardian_rules WHERE actor_id = ? AND act = ? AND target_id = ?
-          |sql}
+              DELETE FROM guardian_rules WHERE actor_id = ? AND act = ? AND target_id = ?
+            |sql}
           in
           let stmt = prepare db stmt in
           let* () =
@@ -206,8 +237,8 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
         | `Actor aid, `TargetEntity trole ->
           let stmt =
             {sql|
-            DELETE FROM guardian_rules WHERE actor_id = ? AND act = ? AND target_role = ?
-          |sql}
+              DELETE FROM guardian_rules WHERE actor_id = ? AND act = ? AND target_role = ?
+            |sql}
           in
           let stmt = prepare db stmt in
           let* () =
@@ -224,8 +255,8 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
         | `ActorEntity arole, `Target tid ->
           let stmt =
             {sql|
-            DELETE FROM guardian_rules WHERE actor_role = ? AND act = ? AND target_id = ?
-          |sql}
+              DELETE FROM guardian_rules WHERE actor_role = ? AND act = ? AND target_id = ?
+            |sql}
           in
           let stmt = prepare db stmt in
           let* () =
@@ -242,8 +273,8 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
         | `ActorEntity arole, `TargetEntity trole ->
           let stmt =
             {sql|
-            DELETE FROM guardian_rules WHERE actor_role = ? AND act = ? AND target_role = ?
-          |sql}
+              DELETE FROM guardian_rules WHERE actor_role = ? AND act = ? AND target_role = ?
+            |sql}
           in
           let stmt = prepare db stmt in
           let* () =
@@ -253,7 +284,7 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
                  Data.
                    [ TEXT (A.show arole)
                    ; TEXT (Guardian.Action.to_string action)
-                   ; TEXT (trole |> Guardian.to_actor |> A.show)
+                   ; TEXT (T.show trole)
                    ])
           in
           lwt_return_rc (step stmt)
@@ -268,8 +299,8 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
           | `Target tid ->
             let stmt =
               {sql|
-              SELECT act, actor_id, actor_role FROM guardian_rules WHERE target_id = ?
-            |sql}
+                SELECT act, actor_id, actor_role FROM guardian_rules WHERE target_id = ?
+              |sql}
               |> prepare db
             in
             let* () =
@@ -280,20 +311,13 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
           | `TargetEntity role ->
             let stmt =
               {sql|
-              SELECT act, actor_id, actor_role FROM guardian_rules WHERE target_role = ?
-            |sql}
+                SELECT act, actor_id, actor_role FROM guardian_rules WHERE target_role = ?
+              |sql}
               |> prepare db
             in
-            let () =
-              Printf.printf
-                "Searching for role: %s\n"
-                (role |> Guardian.to_actor |> A.show)
-            in
+            let () = Printf.printf "Searching for role: %s\n" (T.show role) in
             let* () =
-              lwt_return_rc
-                (bind_values
-                   stmt
-                   [ Data.TEXT (role |> Guardian.to_actor |> A.show) ])
+              lwt_return_rc (bind_values stmt [ Data.TEXT (T.show role) ])
             in
             Lwt.return_ok stmt
         in
@@ -304,7 +328,7 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
               let action =
                 row.(0) |> Data.to_string_exn |> Guardian.Action.of_string
               in
-              let (actor_spec : Guardian.Authorizer.actor_spec) =
+              let (actor : Guardian.Authorizer.Actor.spec) =
                 match Data.(to_string row.(1), to_string row.(2)) with
                 | Some actor_id, None ->
                   `Actor
@@ -313,29 +337,12 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
                 | None, Some actor_role -> `ActorEntity (A.of_string actor_role)
                 | _ -> raise (Invalid_argument "Invalid actor spec")
               in
-              let x : Guardian.Authorizer.auth_rule =
-                actor_spec, action, spec
-              in
+              let x : Guardian.Authorizer.auth_rule = actor, action, spec in
               x :: acc)
             ~init:[]
         in
         let* () = lwt_return_rc rc in
         Lwt.return_ok rv
-      ;;
-
-      let mem_authorizable ?ctx id =
-        let open Sqlite3 in
-        let (_ : (string * string) list option) = ctx in
-        let stmt =
-          prepare db {sql|SELECT * FROM guardian_entities WHERE id = ?|sql}
-        in
-        let (_ : Rc.t) =
-          bind_values stmt [ Data.TEXT (Uuid.Actor.to_string id) ]
-        in
-        let (_ : Rc.t), rv =
-          fold stmt ~f:(fun _acc _row -> Some true) ~init:None
-        in
-        rv |> CCOption.get_or ~default:false |> Lwt.return_ok
       ;;
 
       let grant_roles ?ctx id roles =
@@ -345,19 +352,19 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
         let id' = Uuid.Actor.to_string id in
         let* roles' =
           let* pre_roles = find_roles id in
-          Set.union pre_roles roles
-          |> Set.to_yojson
+          ActorSet.union pre_roles roles
+          |> ActorSet.to_yojson
           |> Yojson.Safe.to_string
           |> Lwt.return_ok
         in
         let* stmt =
-          let* mem = mem_authorizable ?ctx id in
+          let* mem = Authorizable.mem ?ctx id in
           if mem
           then
             Lwt.return_ok
               (prepare
                  db
-                 {sql|UPDATE guardian_entities SET roles = ? WHERE id = ?|sql})
+                 {sql|UPDATE guardian_actors SET roles = ? WHERE id = ?|sql})
           else
             Lwt.return_error
               "Cannot grant a role to an authorizable which doesn't exist."
@@ -373,19 +380,19 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
         let id' = Uuid.Actor.to_string id in
         let* roles' =
           let* pre_roles = find_roles id in
-          Set.diff pre_roles roles
-          |> Set.to_yojson
+          ActorSet.diff pre_roles roles
+          |> ActorSet.to_yojson
           |> Yojson.Safe.to_string
           |> Lwt.return_ok
         in
         let* stmt =
-          let* mem = mem_authorizable ?ctx id in
+          let* mem = Authorizable.mem ?ctx id in
           if mem
           then
             Lwt.return_ok
               (prepare
                  db
-                 {sql|UPDATE guardian_entities SET roles = ? WHERE id = ?|sql})
+                 {sql|UPDATE guardian_actors SET roles = ? WHERE id = ?|sql})
           else
             Lwt.return_error
               "Cannot grant a role to an authorizable which doesn't exist."
@@ -402,7 +409,7 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
         let stmt =
           prepare
             db
-            {sql|UPDATE guardian_entities SET parent = ? WHERE id = ?|sql}
+            {sql|UPDATE guardian_actors SET parent = ? WHERE id = ?|sql}
         in
         let () = ignore (bind_values stmt Data.[ TEXT owner'; TEXT id' ]) in
         lwt_return_rc (step stmt)
@@ -410,10 +417,30 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
     end
 
     module Target = struct
-      let find ?ctx ~typ _ =
+      let find ?ctx ~typ id =
+        let open Lwt_result.Syntax in
+        let open Sqlite3 in
         let (_ : (string * string) list option) = ctx in
-        let _ = typ in
-        failwith "TODO"
+        let id' = Uuid.Target.to_string id in
+        let stmt =
+          prepare
+            db
+            {sql|SELECT roles, parent FROM guardian_targets WHERE id = ?|sql}
+        in
+        let (_ : Rc.t) = bind_values stmt [ Data.TEXT id' ] in
+        let* () = lwt_return_rc (step stmt) in
+        let entity =
+          column_text stmt 0
+          |> Yojson.Safe.from_string
+          |> TargetSet.of_yojson
+          |> CCResult.get_or_failwith
+        in
+        let owner =
+          column_text stmt 1
+          |> Uuid.Actor.of_string
+          |> CCOption.get_exn_or "Invalid Owner"
+        in
+        Guardian.AuthorizableTarget.make id owner typ entity |> Lwt.return_ok
       ;;
 
       let find_roles ?ctx (id : Uuid.Target.t) =
@@ -462,7 +489,7 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
         let open Sqlite3 in
         let (_ : (string * string) list option) = ctx in
         let stmt =
-          prepare db {sql|SELECT * FROM guardian_entities WHERE id = ?|sql}
+          prepare db {sql|SELECT * FROM guardian_targets WHERE id = ?|sql}
         in
         let (_ : Rc.t) =
           bind_values stmt [ Data.TEXT (Uuid.Target.to_string id) ]

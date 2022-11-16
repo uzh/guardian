@@ -49,46 +49,50 @@ module Make (A : RoleSig) (T : RoleSig) = struct
 
   module AuthorizableTarget = struct
     type 'a t =
-      { owner : Uuid.Actor.t
-      ; uuid : Uuid.Target.t
+      { uuid : Uuid.Target.t
+      ; owner : Uuid.Actor.t
       ; entity : TargetRoleSet.t
       ; typ : 'a
       }
     [@@deriving eq, ord, show, yojson]
 
     let to_string t = show (fun f _x -> Format.pp_print_string f "") t
-    let make ~typ ~owner ~entity uuid = { owner; uuid; typ; entity }
+    let make uuid owner typ entity = { owner; uuid; typ; entity }
   end
 
   module Authorizer = struct
-    type actor_spec =
-      [ `ActorEntity of A.t
-      | `Actor of Uuid.Actor.t
-      ]
-    [@@deriving eq, show, ord]
+    module Actor = struct
+      type spec =
+        [ `ActorEntity of A.t
+        | `Actor of Uuid.Actor.t
+        ]
+      [@@deriving eq, show, ord]
 
-    let actor_value = function
-      | `ActorEntity x -> A.show x
-      | `Actor x -> Uuid.Actor.to_string x
-    ;;
+      let value = function
+        | `ActorEntity x -> A.show x
+        | `Actor x -> Uuid.Actor.to_string x
+      ;;
+    end
 
-    type target_spec =
-      [ `TargetEntity of T.t
-      | `Target of Uuid.Target.t
-      ]
-    [@@deriving eq, show, ord]
+    module Target = struct
+      type spec =
+        [ `TargetEntity of T.t
+        | `Target of Uuid.Target.t
+        ]
+      [@@deriving eq, show, ord]
 
-    let target_value = function
-      | `TargetEntity x -> T.show x
-      | `Target x -> Uuid.Target.to_string x
-    ;;
+      let value = function
+        | `TargetEntity x -> T.show x
+        | `Target x -> Uuid.Target.to_string x
+      ;;
+    end
 
-    type auth_rule = actor_spec * Action.t * target_spec
+    type auth_rule = Actor.spec * Action.t * Target.spec
     [@@deriving eq, show, ord]
 
     (** [action, target] Denotes an effect a function may have on and therefore
         which permissions an actor needs to invoke it. *)
-    type effect = Action.t * target_spec [@@deriving eq, show, ord]
+    type effect = Action.t * Target.spec [@@deriving eq, show, ord]
 
     module Effect_set = Set.Make (struct
       type t = effect [@@deriving ord]
@@ -186,22 +190,22 @@ module Make (A : RoleSig) (T : RoleSig) = struct
       with type 'a authorizable = 'a Authorizable.t
        and type 'b authorizable_target = 'b AuthorizableTarget.t
        and type actor_role_set = ActorRoleSet.t
-       and type actor_spec = Authorizer.actor_spec
+       and type actor_spec = Authorizer.Actor.spec
        and type target_role_set = TargetRoleSet.t
-       and type target_spec = Authorizer.target_spec
+       and type target_spec = Authorizer.Target.spec
        and type auth_rule = Authorizer.auth_rule
 
   module Make_persistence
-    (BES : Persistence.Backend
-             with type 'a authorizable = 'a Authorizable.t
-              and type 'b authorizable_target = 'b AuthorizableTarget.t
-              and type actor_role_set = ActorRoleSet.t
-              and type actor_spec = Authorizer.actor_spec
-              and type target_role_set = TargetRoleSet.t
-              and type target_spec = Authorizer.target_spec
-              and type auth_rule = Authorizer.auth_rule
-              and type role = A.t) : Persistence_s = struct
-    include BES
+    (Backend : Persistence.Backend
+                 with type 'a authorizable = 'a Authorizable.t
+                  and type 'b authorizable_target = 'b AuthorizableTarget.t
+                  and type actor_role_set = ActorRoleSet.t
+                  and type actor_spec = Authorizer.Actor.spec
+                  and type target_role_set = TargetRoleSet.t
+                  and type target_spec = Authorizer.Target.spec
+                  and type auth_rule = Authorizer.auth_rule
+                  and type role = A.t) : Persistence_s = struct
+    include Backend
 
     (** turn a single argument function returning a [result] into one that
         raises a [Failure] instead *)
@@ -237,7 +241,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
     ;;
 
     module Actor = struct
-      include BES.Actor
+      (* include Actor *)
 
       let revoke_role ?ctx id role =
         Actor.revoke_roles ?ctx id (ActorRoleSet.singleton role)
@@ -245,7 +249,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
 
       let find_authorizable ?ctx ~(typ : 'kind) (id : Uuid.Actor.t) =
         let open Lwt_result.Syntax in
-        let* mem = Actor.mem_authorizable ?ctx id in
+        let* mem = Actor.Authorizable.mem ?ctx id in
         if mem
         then
           let* roles = Actor.find_roles ?ctx id in
@@ -267,7 +271,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
           (fun acc x ->
             match%lwt acc with
             | Ok acc' ->
-              (match%lwt BES.Actor.save_rule ?ctx x with
+              (match%lwt Actor.save_rule ?ctx x with
                | Ok () -> Lwt.return_ok (x :: acc')
                | Error _ -> Lwt.return_error [ x ])
             | Error xs -> Lwt.return_error (x :: xs))
@@ -287,7 +291,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
         let open Lwt_result.Syntax in
         let (ent : 'kind Authorizable.t) = to_authorizable x in
         let uuid = ent.uuid in
-        let* mem = Actor.mem_authorizable ?ctx ent.uuid in
+        let* mem = Actor.Authorizable.mem ?ctx ent.uuid in
         if mem
         then
           let* ent' = find_authorizable ?ctx ~typ:ent.typ ent.uuid in
@@ -312,7 +316,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
           Lwt.return_ok Authorizable.{ uuid; roles; owner; typ = ent.typ }
         else
           let* () =
-            Actor.create_authorizable ?ctx ~id:uuid ?owner:ent.owner ent.roles
+            Actor.Authorizable.create ?ctx ~id:uuid ?owner:ent.owner ent.roles
           in
           Lwt.return_ok ent
      ;;
@@ -329,10 +333,12 @@ module Make (A : RoleSig) (T : RoleSig) = struct
       ;;
 
       let find_roles_exn ?ctx = with_exn Actor.find_roles ?ctx "find_roles_exn"
+
+      include Actor
     end
 
     module Target = struct
-      include BES.Target
+      include Target
 
       let decorate ?ctx (to_authorizable : 'a -> 'kind AuthorizableTarget.t)
         : 'a -> ('kind AuthorizableTarget.t, string) Lwt_result.t
@@ -355,11 +361,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
               Lwt.return_ok x
             | x, _ (* when x = y *) -> Lwt.return_ok x
           in
-          AuthorizableTarget.make
-            ~typ:ent.typ
-            ~owner
-            ~entity:ent.entity
-            ent.uuid
+          AuthorizableTarget.make ent.uuid owner ent.typ ent.entity
           |> Lwt.return_ok
         else
           let* () = create ?ctx ~id:ent.uuid ~owner:ent.owner ent.entity in
@@ -421,7 +423,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
                      "Entity %s does not have permission to %s target %s."
                      (Authorizable.to_string actor)
                      (Action.to_string action)
-                     (Authorizer.target_value target)
+                     (Authorizer.Target.value target)
                   |> error)
             in
             Lwt.return_ok can)
@@ -547,7 +549,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
                   message: %s"
                  (Authorizable.to_string actor)
                  (Action.show (fst effect))
-                 ([%show: Authorizer.target_spec] (snd effect))
+                 ([%show: Authorizer.Target.spec] (snd effect))
                  err)
           |> Lwt_result.lift)
         (Ok ())
