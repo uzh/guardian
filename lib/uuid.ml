@@ -6,13 +6,12 @@ module UuidBase = struct
   let of_yojson = function
     | `String s ->
       of_string s |> CCOption.to_result (Format.asprintf "Invalid UUID: %s" s)
-    | _ -> raise (Invalid_argument "")
+    | _ -> CCResult.Error "Invalid argument"
   ;;
 
   let of_string_exn s =
-    match of_string s with
-    | Some x -> x
-    | None -> failwith @@ Format.asprintf "'%10s' is not a valid uuid" s
+    of_string s
+    |> CCOption.get_exn_or (Format.asprintf "'%10s' is not a valid uuid" s)
   ;;
 
   let create () = v `V4
