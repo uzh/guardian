@@ -35,8 +35,11 @@ module MakeTarget (P : Guard.Persistence_s) = struct
   let to_authorizable ?ctx =
     let open Guard in
     P.Target.decorate ?ctx (fun t ->
+      let of_actor =
+        CCFun.(Uuid.(snd %> Actor.to_string %> Target.of_string_exn))
+      in
       AuthorizableTarget.make
-        (snd t |> Uuid.target_of_actor)
+        (of_actor t)
         (Some (snd t))
         `User
         (TargetRoleSet.singleton `User))

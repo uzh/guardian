@@ -215,11 +215,14 @@ module Tests (Backend : Guard.Persistence_s) = struct
      let%lwt thomas_auth = User.to_authorizable ?ctx thomas in
      match thomas_auth with
      | Ok thomas_user ->
+       let as_target =
+         Guard.Uuid.(thomas |> snd |> Actor.to_string |> Target.of_string_exn)
+       in
        let%lwt res =
          User.update_name
            ?ctx
            thomas_user
-           (thomas |> fun t -> fst t, snd t |> Guard.Uuid.target_of_actor)
+           (fst thomas, as_target)
            "Updated Title"
        in
        Lwt.return (CCResult.is_ok res)

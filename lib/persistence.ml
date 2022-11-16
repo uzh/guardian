@@ -137,11 +137,6 @@ module type Contract = sig
       -> ('a -> 'kind authorizable)
       -> 'a
       -> ('kind authorizable, string) Lwt_result.t
-
-    val find_role_checker
-      :  ?ctx:context
-      -> actor_role_set
-      -> ('b authorizable -> Action.t -> bool, string) Lwt_result.t
   end
 
   module Target : sig
@@ -156,6 +151,11 @@ module type Contract = sig
     val find_checker
       :  ?ctx:context
       -> 'a authorizable_target
+      -> ('b authorizable -> Action.t -> bool, string) Lwt_result.t
+
+    val find_role_checker
+      :  ?ctx:context
+      -> target_role_set
       -> ('b authorizable -> Action.t -> bool, string) Lwt_result.t
   end
 

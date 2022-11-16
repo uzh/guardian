@@ -25,6 +25,3 @@ end
 module Target = struct
   include UuidBase
 end
-
-let actor_of_target = CCFun.(Target.to_string %> Actor.of_string_exn)
-let target_of_actor = CCFun.(Actor.to_string %> Target.of_string_exn)

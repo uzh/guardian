@@ -168,7 +168,7 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
                 Data.
                   [ TEXT (Uuid.Actor.to_string aid)
                   ; TEXT action'
-                  ; TEXT (trole |> Guardian.to_actor |> A.show)
+                  ; TEXT (T.show trole)
                   ]
             in
             stmt
@@ -248,7 +248,7 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
                  Data.
                    [ TEXT (Uuid.Actor.to_string aid)
                    ; TEXT (Guardian.Action.to_string action)
-                   ; TEXT (trole |> Guardian.to_actor |> A.show)
+                   ; TEXT (T.show trole)
                    ])
           in
           lwt_return_rc (step stmt)
