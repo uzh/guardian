@@ -34,7 +34,7 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
 
     module Actor = struct
       module Authorizable = struct
-        let create ?ctx ~id ?(owner : Uuid.Actor.t option) roles
+        let create ?ctx ?(owner : Uuid.Actor.t option) roles id
           : (unit, string) Lwt_result.t
           =
           let open Lwt_result.Syntax in
@@ -45,7 +45,7 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
               db
               {sql|INSERT INTO guardian_actors (id, roles, parent) VALUES (?, ?, ?)|sql}
           in
-          let roles' = ActorSet.to_yojson roles |> Yojson.Safe.to_string in
+          let roles' = roles |> ActorSet.to_yojson |> Yojson.Safe.to_string in
           let* () =
             bind_values
               stmt
@@ -74,7 +74,7 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
         ;;
       end
 
-      let find ?ctx ~typ id =
+      let find ?ctx typ id =
         let open Lwt_result.Syntax in
         let open Sqlite3 in
         let (_ : (string * string) list option) = ctx in
@@ -93,7 +93,7 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
           |> CCResult.get_or_failwith
         in
         let owner = column_text stmt 1 |> Uuid.Actor.of_string in
-        Guardian.Authorizable.make ~roles ~typ ?owner id |> Lwt.return_ok
+        Guardian.Authorizable.make ?owner roles typ id |> Lwt.return_ok
       ;;
 
       let find_roles ?ctx id =
@@ -401,23 +401,64 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
         lwt_return_rc (step stmt)
       ;;
 
-      let save_owner ?ctx id ~owner =
+      let save_owner ?ctx ?owner id =
         let open Sqlite3 in
         let (_ : (string * string) list option) = ctx in
         let id' = Uuid.Actor.to_string id in
-        let owner' = Uuid.Actor.to_string owner in
+        let owner' = owner |> CCOption.map Uuid.Actor.to_string in
         let stmt =
           prepare
             db
             {sql|UPDATE guardian_actors SET parent = ? WHERE id = ?|sql}
         in
-        let () = ignore (bind_values stmt Data.[ TEXT owner'; TEXT id' ]) in
+        let () = ignore (bind_values stmt Data.[ opt_text owner'; TEXT id' ]) in
         lwt_return_rc (step stmt)
       ;;
     end
 
     module Target = struct
-      let find ?ctx ~typ id =
+      module Authorizable = struct
+        let create ?ctx ?owner roles id =
+          let open Lwt_result.Syntax in
+          let open Sqlite3 in
+          let (_ : (string * string) list option) = ctx in
+          let stmt =
+            prepare
+              db
+              {sql|INSERT INTO guardian_targets (id, roles, parent) VALUES (?, ?, ?)|sql}
+          in
+          let roles' =
+            Guardian.TargetRoleSet.to_yojson roles |> Yojson.Safe.to_string
+          in
+          let* () =
+            bind_values
+              stmt
+              [ Data.TEXT (Uuid.Target.to_string id)
+              ; Data.TEXT roles'
+              ; Data.opt_text (owner |> CCOption.map Uuid.Actor.to_string)
+              ]
+            |> lwt_return_rc
+          in
+          lwt_return_rc (step stmt)
+        ;;
+
+        let mem ?ctx id =
+          let open Sqlite3 in
+          let (_ : (string * string) list option) = ctx in
+          let stmt =
+            prepare db {sql|SELECT * FROM guardian_targets WHERE id = ?|sql}
+          in
+          let (_ : Rc.t) =
+            bind_values stmt [ Data.TEXT (Uuid.Target.to_string id) ]
+          in
+          let (_ : Rc.t), rv =
+            fold stmt ~f:(fun _acc _row -> Some true) ~init:None
+          in
+          rv |> CCOption.get_or ~default:false |> Lwt.return_ok
+        ;;
+      end
+
+      let find ?ctx typ id =
         let open Lwt_result.Syntax in
         let open Sqlite3 in
         let (_ : (string * string) list option) = ctx in
@@ -435,11 +476,7 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
           |> TargetSet.of_yojson
           |> CCResult.get_or_failwith
         in
-        let owner =
-          column_text stmt 1
-          |> Uuid.Actor.of_string
-          |> CCOption.get_exn_or "Invalid Owner"
-        in
+        let owner = column_text stmt 1 |> Uuid.Actor.of_string in
         Guardian.AuthorizableTarget.make id owner typ entity |> Lwt.return_ok
       ;;
 
@@ -461,45 +498,6 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
           |> Lwt.return
       ;;
 
-      let create ?ctx ~id ~owner roles : (unit, string) Lwt_result.t =
-        let open Lwt_result.Syntax in
-        let open Sqlite3 in
-        let (_ : (string * string) list option) = ctx in
-        let stmt =
-          prepare
-            db
-            {sql|INSERT INTO guardian_targets (id, roles, parent) VALUES (?, ?, ?)|sql}
-        in
-        let roles' =
-          Guardian.TargetRoleSet.to_yojson roles |> Yojson.Safe.to_string
-        in
-        let* () =
-          bind_values
-            stmt
-            [ Data.TEXT (Uuid.Target.to_string id)
-            ; Data.TEXT roles'
-            ; Data.TEXT (Uuid.Actor.to_string owner)
-            ]
-          |> lwt_return_rc
-        in
-        lwt_return_rc (step stmt)
-      ;;
-
-      let mem ?ctx id =
-        let open Sqlite3 in
-        let (_ : (string * string) list option) = ctx in
-        let stmt =
-          prepare db {sql|SELECT * FROM guardian_targets WHERE id = ?|sql}
-        in
-        let (_ : Rc.t) =
-          bind_values stmt [ Data.TEXT (Uuid.Target.to_string id) ]
-        in
-        let (_ : Rc.t), rv =
-          fold stmt ~f:(fun _acc _row -> Some true) ~init:None
-        in
-        rv |> CCOption.get_or ~default:false |> Lwt.return_ok
-      ;;
-
       let find_owner ?ctx id =
         let open Lwt_result.Syntax in
         let open Sqlite3 in
@@ -518,17 +516,17 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
         | None -> Lwt.return_ok None
       ;;
 
-      let save_owner ?ctx id ~owner =
+      let save_owner ?ctx ?owner id =
         let open Sqlite3 in
         let (_ : (string * string) list option) = ctx in
         let id' = Uuid.Target.to_string id in
-        let owner' = Uuid.Actor.to_string owner in
+        let owner' = owner |> CCOption.map Uuid.Actor.to_string in
         let stmt =
           prepare
             db
             {sql|UPDATE guardian_targets SET parent = ? WHERE id = ?|sql}
         in
-        let () = ignore (bind_values stmt Data.[ TEXT owner'; TEXT id' ]) in
+        let () = ignore (bind_values stmt Data.[ opt_text owner'; TEXT id' ]) in
         lwt_return_rc (step stmt)
       ;;
     end

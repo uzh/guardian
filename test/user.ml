@@ -10,7 +10,7 @@ module MakeActor (P : Guard.Persistence_s) = struct
   let to_authorizable ?ctx =
     let open Guard in
     P.Actor.decorate ?ctx (fun (t : t) : [> `User ] Authorizable.t ->
-      Authorizable.make ~roles:(ActorRoleSet.singleton `User) ~typ:`User (snd t))
+      Authorizable.make (ActorRoleSet.singleton `User) `User (snd t))
   ;;
 
   let update_name
@@ -22,11 +22,7 @@ module MakeActor (P : Guard.Persistence_s) = struct
     let open Lwt_result.Syntax in
     let f new_name = Lwt.return_ok (new_name, snd t) in
     let* wrapped =
-      P.wrap_function
-        ?ctx
-        ~error:CCFun.id
-        ~effects:[ `Update, `Target (snd t) ]
-        f
+      P.wrap_function ?ctx CCFun.id [ `Update, `Target (snd t) ] f
     in
     wrapped ~actor new_name
   ;;
@@ -41,7 +37,7 @@ module MakeTarget (P : Guard.Persistence_s) = struct
     P.Target.decorate ?ctx (fun t ->
       AuthorizableTarget.make
         (snd t |> Uuid.target_of_actor)
-        (snd t)
+        (Some (snd t))
         `User
         (TargetRoleSet.singleton `User))
   ;;

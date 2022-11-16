@@ -38,7 +38,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
     [@@deriving eq, ord, show, yojson]
 
     let to_string t = show (fun f _x -> Format.pp_print_string f "") t
-    let make ~roles ~typ ?owner uuid = { roles; owner; uuid; typ }
+    let make ?owner roles typ uuid = { roles; owner; uuid; typ }
 
     let a_owns_b a b =
       CCOption.map_or ~default:false (fun b' -> a.uuid = b') b.owner
@@ -50,7 +50,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
   module AuthorizableTarget = struct
     type 'a t =
       { uuid : Uuid.Target.t
-      ; owner : Uuid.Actor.t
+      ; owner : Uuid.Actor.t option
       ; entity : TargetRoleSet.t
       ; typ : 'a
       }
@@ -241,20 +241,18 @@ module Make (A : RoleSig) (T : RoleSig) = struct
     ;;
 
     module Actor = struct
-      (* include Actor *)
-
       let revoke_role ?ctx id role =
         Actor.revoke_roles ?ctx id (ActorRoleSet.singleton role)
       ;;
 
-      let find_authorizable ?ctx ~(typ : 'kind) (id : Uuid.Actor.t) =
+      let find_authorizable ?ctx (typ : 'kind) (id : Uuid.Actor.t) =
         let open Lwt_result.Syntax in
         let* mem = Actor.Authorizable.mem ?ctx id in
         if mem
         then
           let* roles = Actor.find_roles ?ctx id in
           let* owner = Actor.find_owner ?ctx id in
-          Lwt.return (Ok (Authorizable.make ~roles ~typ ?owner id))
+          Lwt.return (Ok (Authorizable.make ?owner roles typ id))
         else
           Lwt.return
             (Error
@@ -294,13 +292,13 @@ module Make (A : RoleSig) (T : RoleSig) = struct
         let* mem = Actor.Authorizable.mem ?ctx ent.uuid in
         if mem
         then
-          let* ent' = find_authorizable ?ctx ~typ:ent.typ ent.uuid in
+          let* ent' = find_authorizable ?ctx ent.typ ent.uuid in
           let roles = ActorRoleSet.union ent.roles ent'.roles in
           let* () = Actor.grant_roles ?ctx uuid roles in
           let* owner =
             match ent.owner, ent'.owner with
             | Some owner, None ->
-              let* () = Actor.save_owner ?ctx ent.uuid ~owner in
+              let* () = Actor.save_owner ?ctx ~owner ent.uuid in
               Lwt.return_ok (Some owner)
             | None, Some owner -> Lwt.return_ok (Some owner)
             | None, None -> Lwt.return_ok None
@@ -309,14 +307,14 @@ module Make (A : RoleSig) (T : RoleSig) = struct
               (* Lwt_result.fail( "decorate: both the database and the decorated
                  function \ returned distinct values for the owner of
                  authorizable " ^ Uuid.to_string ent.uuid) *)
-              let* () = Actor.save_owner ?ctx ent.uuid ~owner:x in
+              let* () = Actor.save_owner ?ctx ~owner:x ent.uuid in
               Lwt.return_ok (Some x)
             | Some x, Some _ (* when x = y *) -> Lwt.return_ok (Some x)
           in
           Lwt.return_ok Authorizable.{ uuid; roles; owner; typ = ent.typ }
         else
           let* () =
-            Actor.Authorizable.create ?ctx ~id:uuid ?owner:ent.owner ent.roles
+            Actor.Authorizable.create ?ctx ?owner:ent.owner ent.roles uuid
           in
           Lwt.return_ok ent
      ;;
@@ -338,33 +336,38 @@ module Make (A : RoleSig) (T : RoleSig) = struct
     end
 
     module Target = struct
-      include Target
-
       let decorate ?ctx (to_authorizable : 'a -> 'kind AuthorizableTarget.t)
         : 'a -> ('kind AuthorizableTarget.t, string) Lwt_result.t
         =
        fun x ->
         let open Lwt_result.Syntax in
         let (ent : 'kind AuthorizableTarget.t) = to_authorizable x in
-        let* mem = mem ?ctx ent.uuid in
+        let* mem = Target.Authorizable.mem ?ctx ent.uuid in
         if mem
         then
-          let* ent' = find ?ctx ~typ:ent.typ ent.uuid in
+          let* ent' = Target.find ?ctx ent.typ ent.uuid in
           let* owner =
             match ent.owner, ent'.owner with
-            | x, y when x <> y ->
+            | Some owner, None ->
+              let* () = Target.save_owner ?ctx ~owner ent.uuid in
+              Lwt.return_ok (Some owner)
+            | None, Some owner -> Lwt.return_ok (Some owner)
+            | None, None -> Lwt.return_ok None
+            | Some x, Some y when x <> y ->
               (* Still unclear what the desirable behaviour is in this case. *)
               (* Lwt_result.fail( "decorate: both the database and the decorated
                  function \ returned distinct values for the owner of
                  authorizable " ^ Uuid.to_string ent.uuid) *)
-              let* () = save_owner ?ctx ent.uuid ~owner:x in
-              Lwt.return_ok x
-            | x, _ (* when x = y *) -> Lwt.return_ok x
+              let* () = Target.save_owner ?ctx ~owner:x ent.uuid in
+              Lwt.return_ok (Some x)
+            | Some x, Some _ (* when x = y *) -> Lwt.return_ok (Some x)
           in
           AuthorizableTarget.make ent.uuid owner ent.typ ent.entity
           |> Lwt.return_ok
         else
-          let* () = create ?ctx ~id:ent.uuid ~owner:ent.owner ent.entity in
+          let* () =
+            Target.Authorizable.create ?ctx ?owner:ent.owner ent.entity ent.uuid
+          in
           Lwt.return_ok ent
      ;;
 
@@ -382,7 +385,9 @@ module Make (A : RoleSig) (T : RoleSig) = struct
         @@ fun actor action ->
         let is_owner =
           target.AuthorizableTarget.owner
-          |> Uuid.Actor.equal actor.Authorizable.uuid
+          |> CCOption.map_or
+               ~default:false
+               (Uuid.Actor.equal actor.Authorizable.uuid)
         in
         let is_self =
           target.AuthorizableTarget.uuid
@@ -390,14 +395,16 @@ module Make (A : RoleSig) (T : RoleSig) = struct
         in
         if is_self || is_owner then true else exists_in auth_rules actor action
       ;;
+
+      include Target
     end
 
     (** [wrap_function ?error ~effects f] produces a wrapped version of [f]
         which checks permissions and gracefully reports authorization errors. *)
     let wrap_function
       ?ctx
-      ~(error : string -> 'etyp)
-      ~(effects : Authorizer.effect list)
+      (error : string -> 'etyp)
+      (effects : Authorizer.effect list)
       (f : 'param -> ('rval, 'etyp) Lwt_result.t)
       =
       let open Lwt_result.Syntax in
@@ -407,7 +414,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
             let* can =
               match target with
               | `Target uuid ->
-                let* auth = Target.find ?ctx ~typ:() uuid in
+                let* auth = Target.find ?ctx () uuid in
                 Target.find_checker ?ctx auth
               | `TargetEntity role ->
                 Actor.find_role_checker

@@ -61,7 +61,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
   ;;
 
   let test_find_authorizable ?ctx _ () =
-    (match%lwt Backend.Actor.find_authorizable ?ctx ~typ:`User (snd aron) with
+    (match%lwt Backend.Actor.find_authorizable ?ctx `User (snd aron) with
      | Ok _ -> Lwt.return_true
      | Error err -> failwith err)
     >|= Alcotest.(check bool) "Fetch an authorizable." true

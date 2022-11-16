@@ -15,9 +15,9 @@ module type Backend = sig
     module Authorizable : sig
       val create
         :  ?ctx:context
-        -> id:Uuid.Actor.t
         -> ?owner:Uuid.Actor.t
         -> actor_role_set
+        -> Uuid.Actor.t
         -> (unit, string) monad
 
       val mem : ?ctx:context -> Uuid.Actor.t -> (bool, string) monad
@@ -25,7 +25,7 @@ module type Backend = sig
 
     val find
       :  ?ctx:context
-      -> typ:'kind
+      -> 'kind
       -> Uuid.Actor.t
       -> ('kind authorizable, string) monad
 
@@ -61,15 +61,26 @@ module type Backend = sig
 
     val save_owner
       :  ?ctx:context
+      -> ?owner:Uuid.Actor.t
       -> Uuid.Actor.t
-      -> owner:Uuid.Actor.t
       -> (unit, string) monad
   end
 
   module Target : sig
+    module Authorizable : sig
+      val create
+        :  ?ctx:context
+        -> ?owner:Uuid.Actor.t
+        -> target_role_set
+        -> Uuid.Target.t
+        -> (unit, string) monad
+
+      val mem : ?ctx:context -> Uuid.Target.t -> (bool, string) monad
+    end
+
     val find
       :  ?ctx:context
-      -> typ:'kind
+      -> 'kind
       -> Uuid.Target.t
       -> ('kind authorizable_target, string) monad
 
@@ -78,15 +89,6 @@ module type Backend = sig
       -> Uuid.Target.t
       -> (target_role_set, string) monad
 
-    val create
-      :  ?ctx:context
-      -> id:Uuid.Target.t
-      -> owner:Uuid.Actor.t
-      -> target_role_set
-      -> (unit, string) monad
-
-    val mem : ?ctx:context -> Uuid.Target.t -> (bool, string) monad
-
     val find_owner
       :  ?ctx:context
       -> Uuid.Target.t
@@ -94,8 +96,8 @@ module type Backend = sig
 
     val save_owner
       :  ?ctx:context
+      -> ?owner:Uuid.Actor.t
       -> Uuid.Target.t
-      -> owner:Uuid.Actor.t
       -> (unit, string) monad
   end
 
@@ -126,7 +128,7 @@ module type Contract = sig
 
     val find_authorizable
       :  ?ctx:context
-      -> typ:'kind
+      -> 'kind
       -> Uuid.Actor.t
       -> ('kind authorizable, string) Lwt_result.t
 
@@ -159,8 +161,8 @@ module type Contract = sig
 
   val wrap_function
     :  ?ctx:context
-    -> error:(string -> 'etyp)
-    -> effects:(Action.t * target_spec) list
+    -> (string -> 'etyp)
+    -> (Action.t * target_spec) list
     -> ('param -> ('rval, 'etyp) monad)
     -> (actor:'a authorizable -> 'param -> ('rval, 'etyp) monad, string) monad
 

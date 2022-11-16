@@ -25,7 +25,7 @@ struct
 
     module Actor = struct
       module Authorizable = struct
-        let create ?ctx ~id ?owner roles =
+        let create ?ctx ?owner roles id =
           let caqti =
             Caqti_type.(tup3 string string (option string) ->. unit)
               {sql|INSERT INTO guardian_actors (id, roles, parent) VALUES (?, ?, ?)|sql}
@@ -47,7 +47,7 @@ struct
         ;;
       end
 
-      let find ?ctx ~typ id =
+      let find ?ctx typ id =
         let open Lwt_result.Syntax in
         let caqti =
           {sql|SELECT roles, parent FROM guardian_actors WHERE id = ?|sql}
@@ -61,7 +61,7 @@ struct
           |> Lwt_result.lift
         in
         let owner = owner |> CCFun.flip CCOption.bind Uuid.Actor.of_string in
-        Guardian.Authorizable.make ~roles ~typ ?owner id |> Lwt.return_ok
+        Guardian.Authorizable.make ?owner roles typ id |> Lwt.return_ok
       ;;
 
       let find_roles ?ctx id =
@@ -193,18 +193,44 @@ struct
         |> Lwt_result.ok
       ;;
 
-      let save_owner ?ctx id ~owner =
+      let save_owner ?ctx ?owner id =
         let caqti =
-          Caqti_type.(tup2 string string ->. unit)
+          Caqti_type.(tup2 (option string) string ->. unit)
             {sql|UPDATE guardian_actors SET parent = ? WHERE id = ?|sql}
         in
-        Db.exec ?ctx caqti Uuid.Actor.(to_string owner, to_string id)
+        Db.exec
+          ?ctx
+          caqti
+          Uuid.Actor.(owner |> CCOption.map to_string, to_string id)
         |> Lwt_result.ok
       ;;
     end
 
     module Target = struct
-      let find ?ctx ~typ id =
+      module Authorizable = struct
+        let create ?ctx ?owner roles id =
+          let caqti =
+            Caqti_type.(tup3 string string (option string) ->. unit)
+              {sql|INSERT INTO guardian_targets (id, roles, parent) VALUES (?, ?, ?)|sql}
+          in
+          let roles' = TargetSet.to_yojson roles |> Yojson.Safe.to_string in
+          let owner' = owner |> CCOption.map Uuid.Actor.to_string in
+          Db.exec ?ctx caqti (Uuid.Target.to_string id, roles', owner')
+          |> Lwt_result.ok
+        ;;
+
+        let mem ?ctx id =
+          let caqti =
+            Caqti_type.(string ->? string)
+              {sql|SELECT roles FROM guardian_targets WHERE id = ?|sql}
+          in
+          Db.find_opt ?ctx caqti (Uuid.Target.to_string id)
+          >|= CCOption.is_some
+          |> Lwt_result.ok
+        ;;
+      end
+
+      let find ?ctx typ id =
         let open Lwt_result.Syntax in
         let caqti =
           {sql|SELECT roles, parent FROM guardian_targets WHERE id = ?|sql}
@@ -217,12 +243,7 @@ struct
           |> TargetSet.of_yojson
           |> Lwt_result.lift
         in
-        let* owner =
-          owner
-          |> Uuid.Actor.of_string
-          |> CCOption.to_result (Format.asprintf "Invalid Owner UUID: %s" owner)
-          |> Lwt_result.lift
-        in
+        let owner = owner |> Uuid.Actor.of_string in
         Guardian.AuthorizableTarget.make id owner typ entity |> Lwt.return_ok
       ;;
 
@@ -235,27 +256,6 @@ struct
         roles |> Yojson.Safe.from_string |> TargetSet.of_yojson |> Lwt.return
       ;;
 
-      let create ?ctx ~id ~owner roles =
-        let caqti =
-          Caqti_type.(tup3 string string string ->. unit)
-            {sql|INSERT INTO guardian_targets (id, roles, parent) VALUES (?, ?, ?)|sql}
-        in
-        let roles' = TargetSet.to_yojson roles |> Yojson.Safe.to_string in
-        let owner' = Uuid.Actor.to_string owner in
-        Db.exec ?ctx caqti (Uuid.Target.to_string id, roles', owner')
-        |> Lwt_result.ok
-      ;;
-
-      let mem ?ctx id =
-        let caqti =
-          Caqti_type.(string ->? string)
-            {sql|SELECT roles FROM guardian_targets WHERE id = ?|sql}
-        in
-        Db.find_opt ?ctx caqti (Uuid.Target.to_string id)
-        >|= CCOption.is_some
-        |> Lwt_result.ok
-      ;;
-
       let find_owner ?ctx id =
         let caqti =
           Caqti_type.(string ->! option string)
@@ -266,12 +266,15 @@ struct
         |> Lwt_result.ok
       ;;
 
-      let save_owner ?ctx id ~owner =
+      let save_owner ?ctx ?owner id =
         let caqti =
-          Caqti_type.(tup2 string string ->. unit)
+          Caqti_type.(tup2 (option string) string ->. unit)
             {sql|UPDATE guardian_targets SET parent = ? WHERE id = ?|sql}
         in
-        Db.exec ?ctx caqti Uuid.(Actor.to_string owner, Target.to_string id)
+        Db.exec
+          ?ctx
+          caqti
+          Uuid.(owner |> CCOption.map Actor.to_string, Target.to_string id)
         |> Lwt_result.ok
       ;;
     end

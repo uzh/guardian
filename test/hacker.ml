@@ -6,8 +6,8 @@ module Make (P : Guard.Persistence_s) = struct
   let to_authorizable ?ctx =
     P.Actor.decorate ?ctx (fun (t : t) : [ `Hacker ] Guard.Authorizable.t ->
       Guard.Authorizable.make
-        ~roles:(Guard.ActorRoleSet.of_list [ `Hacker ])
-        ~typ:`Hacker
+        (Guard.ActorRoleSet.of_list [ `Hacker ])
+        `Hacker
         (snd t))
   ;;
 end

@@ -22,7 +22,7 @@ module Make (P : Guard.Persistence_s) = struct
     P.Target.decorate ?ctx (fun t ->
       AuthorizableTarget.make
         t.uuid
-        (snd t.author)
+        (Some (snd t.author))
         `Article
         (TargetRoleSet.singleton `Article))
   ;;
@@ -34,11 +34,7 @@ module Make (P : Guard.Persistence_s) = struct
       Lwt.return_ok t
     in
     let* wrapped =
-      P.wrap_function
-        ?ctx
-        ~error:CCFun.id
-        ~effects:[ `Update, `Target t.uuid ]
-        f
+      P.wrap_function ?ctx CCFun.id [ `Update, `Target t.uuid ] f
     in
     wrapped ~actor new_title
   ;;
@@ -48,15 +44,11 @@ module Make (P : Guard.Persistence_s) = struct
     let f new_author =
       let () = t.author <- new_author in
       let* ent = to_authorizable ?ctx t in
-      let* () = P.Target.save_owner ?ctx ent.uuid ~owner:(snd new_author) in
+      let* () = P.Target.save_owner ?ctx ~owner:(snd new_author) ent.uuid in
       Lwt.return_ok t
     in
     let* wrapped =
-      P.wrap_function
-        ?ctx
-        ~error:CCFun.id
-        ~effects:[ `Manage, `Target t.uuid ]
-        f
+      P.wrap_function ?ctx CCFun.id [ `Manage, `Target t.uuid ] f
     in
     wrapped ~actor new_author
   ;;
