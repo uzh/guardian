@@ -38,10 +38,6 @@ module MakeTarget (P : Guard.Persistence_s) = struct
       let of_actor =
         CCFun.(Uuid.(snd %> Actor.to_string %> Target.of_string_exn))
       in
-      AuthorizableTarget.make
-        ~owner:(snd t)
-        (TargetRoleSet.singleton `User)
-        `User
-        (of_actor t))
+      AuthorizableTarget.make (TargetRoleSet.singleton `User) `User (of_actor t))
   ;;
 end

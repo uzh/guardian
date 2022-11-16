@@ -8,12 +8,7 @@ module Actor = struct
     ]
   [@@deriving show, eq, ord, yojson]
 
-  let name = function
-    | `User -> "user"
-    | `Admin -> "admin"
-    | `Hacker -> "hacker"
-    | `Editor _ -> "editor"
-  ;;
+  let name t = show t |> Guardian.Util.decompose_variant_string |> fst
 
   let find_target = function
     | `User | `Admin | `Hacker -> None
@@ -42,10 +37,7 @@ module Target = struct
     ]
   [@@deriving show, eq, ord, yojson]
 
-  let name = function
-    | `User -> "user"
-    | `Article -> "article"
-  ;;
+  let name t = show t |> Guardian.Util.decompose_variant_string |> fst
 
   let find_target = function
     | `User | `Article -> None

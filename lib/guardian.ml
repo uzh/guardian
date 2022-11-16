@@ -475,7 +475,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
                   (fun role ->
                     expand_effects
                       ?ctx
-                      [ action, `TargetEntity (role |> A.name |> T.of_string) ])
+                      [ action, `TargetEntity (role |> A.show |> T.of_string) ])
                   (ActorRoleSet.elements roles)
                 |> CCList.fold_left
                      (fun rv effect ->
