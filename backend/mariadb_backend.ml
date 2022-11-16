@@ -234,7 +234,7 @@ struct
         let open Lwt_result.Syntax in
         let caqti =
           {sql|SELECT roles, parent FROM guardian_targets WHERE id = ?|sql}
-          |> Caqti_type.(string ->! tup2 string string)
+          |> Caqti_type.(string ->! tup2 string (option string))
         in
         let%lwt entity, owner = Db.find ?ctx caqti (Uuid.Target.to_string id) in
         let* entity =
@@ -243,8 +243,8 @@ struct
           |> TargetSet.of_yojson
           |> Lwt_result.lift
         in
-        let owner = owner |> Uuid.Actor.of_string in
-        Guardian.AuthorizableTarget.make id owner typ entity |> Lwt.return_ok
+        let owner = owner |> CCFun.flip CCOption.bind Uuid.Actor.of_string in
+        Guardian.AuthorizableTarget.make ?owner entity typ id |> Lwt.return_ok
       ;;
 
       let find_roles ?ctx id =

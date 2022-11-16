@@ -477,7 +477,7 @@ module Make (A : Guardian.RoleSig) (T : Guardian.RoleSig) = struct
           |> CCResult.get_or_failwith
         in
         let owner = column_text stmt 1 |> Uuid.Actor.of_string in
-        Guardian.AuthorizableTarget.make id owner typ entity |> Lwt.return_ok
+        Guardian.AuthorizableTarget.make ?owner entity typ id |> Lwt.return_ok
       ;;
 
       let find_roles ?ctx (id : Uuid.Target.t) =

@@ -54,7 +54,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
     [@@deriving eq, ord, show, yojson]
 
     let to_string t = show (fun f _x -> Format.pp_print_string f "") t
-    let make uuid owner typ entity = { owner; uuid; typ; entity }
+    let make ?owner entity typ uuid = { owner; uuid; typ; entity }
   end
 
   module Authorizer = struct
@@ -350,7 +350,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
               Lwt.return_ok (Some x)
             | Some x, Some _ (* when x = y *) -> Lwt.return_ok (Some x)
           in
-          AuthorizableTarget.make ent.uuid owner ent.typ ent.entity
+          AuthorizableTarget.make ?owner ent.entity ent.typ ent.uuid
           |> Lwt.return_ok
         else
           let* () =
