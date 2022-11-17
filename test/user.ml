@@ -24,7 +24,7 @@ module MakeActor (P : Guard.Persistence_s) = struct
     let* wrapped =
       P.wrap_function ?ctx CCFun.id [ `Update, `Target (snd t) ] f
     in
-    wrapped ~actor new_name
+    wrapped actor new_name
   ;;
 end
 
