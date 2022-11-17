@@ -16,6 +16,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
   let aron = "Aron", Guardian.Uuid.Actor.create ()
   let ben : Hacker.t = "Ben Hackerman", Guardian.Uuid.Actor.create ()
   let thomas = "Thomas", Guardian.Uuid.Actor.create ()
+  let hugo = "Hugo", Guardian.Uuid.Actor.create ()
   let chris_article = Article.make "Foo" "Bar" chris
   let aron_article = Article.make "Fizz" "Buzz" aron
   let bad_rule = `Actor (snd chris), `Update, `Target aron_article.uuid
@@ -276,6 +277,42 @@ module Tests (Backend : Guard.Persistence_s) = struct
           (Ok true)
   ;;
 
+  let operator_works ?ctx _ () =
+    let%lwt actual =
+      let open Lwt_result.Syntax in
+      (* Note: a user can be an actor or a target, so 'to_authorizable' has to
+         be called for both roles *)
+      let* _ = User.to_authorizable ?ctx hugo in
+      let* target' = UserTarget.to_authorizable ?ctx hugo in
+      let* actor = User.to_authorizable ?ctx thomas in
+      let* () =
+        Backend.Actor.grant_roles
+          ?ctx
+          actor.Guard.Authorizable.uuid
+          (Guard.ActorRoleSet.singleton
+             (`Editor target'.Guard.AuthorizableTarget.uuid))
+      in
+      let* actor = User.to_authorizable ?ctx thomas in
+      let* () =
+        Backend.Actor.save_rule
+          ?ctx
+          ( `ActorEntity (`Editor target'.Guard.AuthorizableTarget.uuid)
+          , `Manage
+          , `Target target'.Guard.AuthorizableTarget.uuid )
+      in
+      let effects =
+        [ `Manage, `Target target'.Guard.AuthorizableTarget.uuid ]
+      in
+      let* () = Backend.checker_of_effects ?ctx effects actor in
+      Lwt_result.return ()
+    in
+    Alcotest.(check (result unit string))
+      "Parametric roles work."
+      (Ok ())
+      actual
+    |> Lwt.return
+  ;;
+
   (** IMPORTANT: the following tests should not compile! *)
   (* let hacker_cannot_update_article () = let () = print_endline "about to run
      a test" in Alcotest.(check bool) "Article cannot update another article."
@@ -356,6 +393,12 @@ let () =
         ] )
     ; ( Format.asprintf "(%s) Managing ownership." name
       , [ Alcotest_lwt.test_case "Set owner" `Quick (T.set_owner ?ctx) ] )
+    ; ( Format.asprintf "(%s) Use parametric roles." name
+      , [ Alcotest_lwt.test_case
+            "Parametric editor role"
+            `Quick
+            (T.operator_works ?ctx)
+        ] )
     ]
   in
   let open Guardian_backend.Pools in
