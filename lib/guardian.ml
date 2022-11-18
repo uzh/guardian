@@ -403,7 +403,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
       let can actor =
         CCList.map (fun can -> can actor) collect_cans
         |> CCResult.flatten_l
-        |> CCResult.map (CCFun.const ())
+        |> CCResult.map (fun (_ : unit list) -> ())
         |> Lwt_result.lift
       in
       Lwt.return_ok (fun actor param ->

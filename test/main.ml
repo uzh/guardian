@@ -303,8 +303,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
       let effects =
         [ `Manage, `Target target'.Guard.AuthorizableTarget.uuid ]
       in
-      let* () = Backend.checker_of_effects ?ctx effects actor in
-      Lwt_result.return ()
+      Backend.checker_of_effects ?ctx effects actor
     in
     Alcotest.(check (result unit string))
       "Parametric roles work."
