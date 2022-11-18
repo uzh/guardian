@@ -104,49 +104,39 @@ module Make (A : RoleSig) (T : RoleSig) = struct
         the list is satisfied. The default behaviour is to only pass if all
         rules are.
         [val can : actor:\[ whatever \] Guard.Authorizable.t -> (unit, string) result] *)
-    let checker_of_rules ?(any_of = false) (rules : auth_rule list) =
+    let checker_of_rules ?(any_of = false) actor (rules : auth_rule list) =
       let open CCResult in
-      fun ~actor ->
-        let results =
-          CCList.map
-            (fun (actor', action, target) ->
-              let is_matched =
-                match actor' with
-                | `Actor uuid ->
-                  uuid == actor.Authorizable.uuid
-                  && (action == action || action == `Manage)
-                | `ActorEntity role ->
-                  ActorRoleSet.mem role actor.Authorizable.roles
-                  && (action == action || action == `Manage)
-              in
-              if is_matched
-              then Ok ()
-              else
-                Error
-                  (Format.asprintf
-                     "Actor %s does not have permission to %s"
-                     (Authorizable.to_string actor)
-                     (show_effect (action, target))))
-            rules
-        in
-        if any_of
-        then
-          if CCList.exists (( = ) (Ok ())) results
-          then Ok ()
-          else
-            Error
-              (Format.asprintf
-                 "Actor %s does not satisfy any of the following rules: %s"
-                 (Authorizable.to_string actor)
-                 ([%show: auth_rule list] rules))
+      let results =
+        rules
+        |> CCList.map (fun (actor', action, target) ->
+             let is_matched = function
+               | `Actor uuid -> uuid = actor.Authorizable.uuid
+               | `ActorEntity role ->
+                 ActorRoleSet.mem role actor.Authorizable.roles
+             in
+             if is_matched actor'
+             then Ok ()
+             else
+               Error
+                 (Format.asprintf
+                    "Actor %s does not have permission to %s"
+                    (Authorizable.to_string actor)
+                    (show_effect (action, target))))
+      in
+      if any_of
+      then
+        if CCList.exists (( = ) (Ok ())) results
+        then Ok ()
         else
-          CCList.fold_left
-            (fun acc x ->
-              let* _acc = acc in
-              let* _x = x in
-              Ok ())
-            (Ok ())
-            results
+          Error
+            (Format.asprintf
+               "Actor %s does not satisfy any of the following rules: %s"
+               (Authorizable.to_string actor)
+               ([%show: auth_rule list] rules))
+      else
+        results
+        |> CCResult.flatten_l
+        |> CCResult.map (fun (_ : unit list) -> ())
     ;;
 
     module Auth_rule_set = Set.Make (struct
@@ -213,28 +203,14 @@ module Make (A : RoleSig) (T : RoleSig) = struct
     ;;
 
     let exists_in (auth_rules : auth_rule list) actor action =
-      let actor_roles = actor.Authorizable.roles in
       CCList.exists
         (fun (actor', action', _) ->
           match actor' with
-          | `Actor id -> actor.uuid = id && action = action'
+          | `Actor id -> actor.Authorizable.uuid = id && action = action'
           | `ActorEntity role ->
-            ActorRoleSet.mem role actor_roles
+            ActorRoleSet.mem role actor.Authorizable.roles
             && (action = action' || action' = `Manage))
         auth_rules
-    ;;
-
-    let fold_auth_rules
-      :  (auth_rule list, string) result list
-      -> (auth_rule list, string) Lwt_result.t
-      =
-      CCList.fold_left
-        (fun acc x ->
-          let%lwt acc = acc in
-          match acc, x with
-          | Ok acc, Ok perms -> Lwt.return_ok (perms @ acc)
-          | Error err, _ | _, Error err -> Lwt.return_error err)
-        (Lwt.return_ok [])
     ;;
 
     module Actor = struct
@@ -246,35 +222,28 @@ module Make (A : RoleSig) (T : RoleSig) = struct
       ;;
 
       let find_authorizable ?ctx (typ : 'kind) (id : Uuid.Actor.t) =
-        let open Lwt_result.Syntax in
-        let* mem = Authorizable.mem ?ctx id in
-        if mem
-        then
-          let* roles = find_roles ?ctx id in
-          let* owner = find_owner ?ctx id in
-          Lwt.return (Ok (AuthorizableActor.make ?owner roles typ id))
+        let open Lwt_result.Infix in
+        Authorizable.mem ?ctx id
+        >>= fun exists ->
+        if exists
+        then find ?ctx typ id
         else
-          Lwt.return
-            (Error
-               (Format.asprintf
-                  "Authorizable %s doesn't exist."
-                  (Uuid.Actor.to_string id)))
+          Lwt_result.fail
+            (Format.asprintf
+               "Authorizable %s doesn't exist."
+               (Uuid.Actor.to_string id))
       ;;
 
       (** [save_rules rules] adds all the permissions [rules] to the backend. If
           there is an error at any point, it returns a `result` containing all
           of the items that were not added. *)
-      let save_rules ?ctx rules =
-        CCList.fold_left
+      let save_rules ?ctx =
+        Lwt_list.fold_left_s
           (fun acc x ->
-            match%lwt acc with
-            | Ok acc' ->
-              (match%lwt save_rule ?ctx x with
-               | Ok () -> Lwt.return_ok (x :: acc')
-               | Error _ -> Lwt.return_error [ x ])
-            | Error xs -> Lwt.return_error (x :: xs))
-          (Lwt.return_ok [])
-          rules
+            match%lwt save_rule ?ctx x with
+            | Ok () -> CCResult.map (CCList.cons x) acc |> Lwt_result.lift
+            | Error _ -> CCResult.map_err (CCList.cons x) acc |> Lwt_result.lift)
+          (Ok [])
       ;;
 
       (** This convenience function should be used to decorate the
@@ -289,16 +258,16 @@ module Make (A : RoleSig) (T : RoleSig) = struct
         let open Lwt_result.Syntax in
         let ent = to_authorizable x in
         let uuid = ent.uuid in
-        let* mem = Authorizable.mem ?ctx ent.uuid in
+        let* mem = Authorizable.mem ?ctx uuid in
         if mem
         then
-          let* ent' = find_authorizable ?ctx ent.typ ent.uuid in
+          let* ent' = find_authorizable ?ctx ent.typ uuid in
           let roles = ActorRoleSet.union ent.roles ent'.roles in
           let* () = grant_roles ?ctx uuid roles in
           let* owner =
             match ent.owner, ent'.owner with
             | Some owner, None ->
-              let* () = save_owner ?ctx ~owner ent.uuid in
+              let* () = save_owner ?ctx ~owner uuid in
               Lwt.return_ok (Some owner)
             | None, Some owner -> Lwt.return_ok (Some owner)
             | None, None -> Lwt.return_ok None
@@ -306,8 +275,8 @@ module Make (A : RoleSig) (T : RoleSig) = struct
               (* Still unclear what the desirable behaviour is in this case. *)
               (* Lwt_result.fail( "decorate: both the database and the decorated
                  function \ returned distinct values for the owner of
-                 authorizable " ^ Uuid.to_string ent.uuid) *)
-              let* () = save_owner ?ctx ~owner:x ent.uuid in
+                 authorizable " ^ Uuid.to_string uuid) *)
+              let* () = save_owner ?ctx ~owner:x uuid in
               Lwt.return_ok (Some x)
             | Some x, Some _ (* when x = y *) -> Lwt.return_ok (Some x)
           in
@@ -323,6 +292,8 @@ module Make (A : RoleSig) (T : RoleSig) = struct
     module Target = struct
       module AuthorizableActor = Authorizable
       include Target
+
+      let flatten = CCFun.(CCResult.flatten_l %> CCResult.map CCList.flatten)
 
       let decorate ?ctx (to_authorizable : 'a -> 'kind AuthorizableTarget.t)
         : 'a -> ('kind AuthorizableTarget.t, string) Lwt_result.t
@@ -368,7 +339,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
           |> CCList.cons (`Target target.AuthorizableTarget.uuid)
           |> Lwt_list.map_s (Actor.find_rules ?ctx)
         in
-        let* auth_rules = fold_auth_rules auth_rules in
+        let* auth_rules = auth_rules |> flatten |> Lwt_result.lift in
         Lwt.return_ok
         @@ fun actor action ->
         let is_owner =
@@ -392,7 +363,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
           |> CCList.map (fun r -> `TargetEntity r)
           |> Lwt_list.map_s (Actor.find_rules ?ctx)
         in
-        let* auth_rules = fold_auth_rules auth_rules in
+        let* auth_rules = auth_rules |> flatten |> Lwt_result.lift in
         Lwt.return_ok @@ exists_in auth_rules
       ;;
     end
@@ -403,53 +374,41 @@ module Make (A : RoleSig) (T : RoleSig) = struct
       ?ctx
       (error : string -> 'etyp)
       (effects : Authorizer.effect list)
-      (f : 'param -> ('rval, 'etyp) Lwt_result.t)
+      (fcn : 'param -> ('rval, 'etyp) Lwt_result.t)
       =
+      let open Lwt_result.Infix in
       let open Lwt_result.Syntax in
-      let* cans =
-        CCList.map
-          (fun (action, (target : target_spec)) ->
-            let* can =
-              match target with
-              | `Target uuid ->
-                let* auth = Target.find ?ctx () uuid in
-                Target.find_checker ?ctx auth
+      let* (collect_cans : ('a authorizable -> (unit, 'etyp) result) list) =
+        effects
+        |> Lwt_list.map_s (fun (action, target) ->
+             (match target with
+              | `Target uuid -> Target.(find ?ctx () uuid >>= find_checker ?ctx)
               | `TargetEntity role ->
-                Target.find_role_checker ?ctx (TargetRoleSet.singleton role)
-            in
-            let can actor =
-              if can actor action
-              then Ok ()
-              else
-                Error
-                  (Format.asprintf
-                     "Entity %s does not have permission to %s target %s."
-                     (Authorizable.to_string actor)
-                     (Action.to_string action)
-                     (Authorizer.Target.value target)
-                  |> error)
-            in
-            Lwt.return_ok can)
-          effects
-        |> CCList.fold_left
-             (fun acc x ->
-               let* x' = x in
-               let* acc' = acc in
-               Lwt.return_ok (x' :: acc'))
-             (Lwt.return_ok [])
+                Target.find_role_checker ?ctx (TargetRoleSet.singleton role))
+             |> Lwt_result.map (fun can actor ->
+                  CCFun.(
+                    can actor action
+                    |> function
+                    | true -> Ok ()
+                    | false ->
+                      Error
+                        (Format.asprintf
+                           "Entity %s does not have permission to %s target %s."
+                           (Authorizable.to_string actor)
+                           (Action.to_string action)
+                           (Authorizer.Target.value target)
+                        |> error))))
+        |> Lwt.map CCResult.flatten_l
       in
-      Lwt.return_ok (fun ~actor param ->
-        let* _can =
-          CCList.fold_left
-            (fun acc can ->
-              match acc with
-              | Ok _ -> can actor
-              | Error _ -> acc)
-            (Ok ())
-            cans
-          |> Lwt.return
-        in
-        f param)
+      let can actor =
+        CCList.map (fun can -> can actor) collect_cans
+        |> CCResult.flatten_l
+        |> CCResult.map (fun (_ : unit list) -> ())
+        |> Lwt_result.lift
+      in
+      Lwt.return_ok (fun actor param ->
+        let* () = can actor in
+        fcn param)
     ;;
 
     (* Because of effects that look like [`Action A, `Target X] we need to make
@@ -459,108 +418,64 @@ module Make (A : RoleSig) (T : RoleSig) = struct
     let rec expand_effects ?ctx (effects : Authorizer.effect list)
       : (Authorizer.effect list, string) result Lwt.t
       =
-      let open Lwt_result.Syntax in
-      let%lwt lsls =
-        Lwt_list.map_s
-          (fun effect ->
-            match effect with
-            | action, `Target (x : Uuid.Target.t) ->
-              let* roles =
-                Actor.find_roles
-                  ?ctx
-                  (x |> Uuid.Target.to_string |> Uuid.Actor.of_string_exn)
-              in
-              let* set =
-                CCList.map
-                  (fun role ->
-                    expand_effects
-                      ?ctx
-                      [ action, `TargetEntity (role |> A.show |> T.of_string) ])
-                  (ActorRoleSet.elements roles)
-                |> CCList.fold_left
-                     (fun rv effect ->
-                       let* rv = rv in
-                       let* effect = effect in
-                       let set' =
-                         CCList.fold_left
-                           (fun acc x -> Authorizer.Effect_set.add x acc)
-                           rv
-                           effect
-                       in
-                       Lwt.return_ok set')
-                     (Lwt.return_ok (Authorizer.Effect_set.singleton effect))
-              in
-              Lwt_result.return (Authorizer.Effect_set.elements set)
-            | x -> Lwt.return_ok [ x ])
-          effects
+      let open CCFun in
+      let open Lwt.Infix in
+      let open Authorizer.Effect_set in
+      let actor_of = Uuid.(Target.to_string %> Actor.of_string_exn) in
+      let flatten = CCResult.flatten_l %> CCResult.map CCList.flatten in
+      let expand =
+        Lwt_list.map_s (fun effect ->
+          match effect with
+          | action, `Target (x : Uuid.Target.t) ->
+            actor_of x
+            |> Actor.find_roles ?ctx
+            (* search for roles if target would be an actor, default: empty *)
+            >|= CCResult.get_or ~default:ActorRoleSet.empty
+            >|= ActorRoleSet.elements
+            >>= Lwt_list.map_s (fun role ->
+                  expand_effects
+                    ?ctx
+                    [ action, `TargetEntity (role |> A.show |> T.of_string) ])
+            >|= flatten
+            |> Lwt_result.map
+                 (CCList.fold_left (flip add) (singleton effect) %> elements)
+          | x -> Lwt.return_ok [ x ])
       in
-      CCList.fold_left
-        (fun x acc ->
-          match acc, x with
-          | Error _, _ -> acc
-          | Ok _, Error _ -> x
-          | Ok acc', Ok x' -> Ok (x' @ acc'))
-        (Ok [])
-        lsls
-      |> Lwt.return
+      effects
+      |> expand
+      >|= flatten
+      |> Lwt_result.map_error
+           (Format.asprintf
+              "Failed to expand the effects of the target. Error message: %s")
     ;;
 
     (** [collect_rules e] Query the database for a list of rules pertaining to
         the effects [e]. *)
     let collect_rules ?ctx (effects : Authorizer.effect list) =
+      let open CCFun in
+      let flatten = CCResult.flatten_l %> CCResult.map CCList.flatten in
       Lwt_result.map_error
         (Format.asprintf
            "Failed to collect rules for effects list %s. Error message: %s"
            ([%show: Authorizer.effect list] effects))
       @@
-      let open Lwt_result.Syntax in
-      let* effects = expand_effects ?ctx effects in
-      let%lwt results =
-        Lwt_list.map_s
-          (fun (action, target) ->
-            let* rules = Actor.find_rules ?ctx target in
-            CCList.filter
-              (fun (_actor, action', _target) ->
-                action = action' || action' = `Manage)
-              rules
-            |> Lwt_result.return)
-          effects
-      in
-      let* rules =
-        CCList.fold_left
-          (fun acc (x : (auth_rule list, string) result) ->
-            let open CCResult in
-            both acc x >|= CCFun.uncurry CCList.append)
-          (Ok [])
-          results
-        |> Lwt_result.lift
-      in
-      CCList.fold_right
-        Authorizer.Auth_rule_set.add
-        rules
-        Authorizer.Auth_rule_set.empty
-      |> Authorizer.Auth_rule_set.elements
-      |> Lwt_result.return
+      let open Lwt_result.Infix in
+      let open Authorizer.Auth_rule_set in
+      effects
+      |> expand_effects ?ctx
+      >>= Lwt_list.map_s (fun (action, target) ->
+            Actor.find_rules ?ctx target
+            >|= CCList.filter (fun (_, rule_action, _) ->
+                  action = rule_action || rule_action = `Manage))
+          %> Lwt.map flatten
+      >|= flip (CCList.fold_right add) empty
+      >|= elements
     ;;
 
-    let checker_of_effects ?ctx effects ~actor =
-      Lwt_list.fold_left_s
-        (fun acc effect ->
-          let open Lwt_result.Syntax in
-          let* () = Lwt_result.lift acc in
-          let* rules = collect_rules ?ctx [ effect ] in
-          Authorizer.checker_of_rules ~any_of:true rules ~actor
-          |> CCResult.map_err (fun err ->
-               Format.asprintf
-                 "Actor %s does not have permission to %s target %s. Error \
-                  message: %s"
-                 (Authorizable.to_string actor)
-                 (Action.show (fst effect))
-                 ([%show: Authorizer.Target.spec] (snd effect))
-                 err)
-          |> Lwt_result.lift)
-        (Ok ())
-        effects
+    let checker_of_effects ?ctx effects actor : (unit, string) result Lwt.t =
+      let ( >>> ) = Lwt_result.bind_result in
+      collect_rules ?ctx effects
+      >>> Authorizer.checker_of_rules ~any_of:true actor
     ;;
 
     let find_rules_exn ?ctx = with_exn Actor.find_rules ?ctx "find_rules_exn"

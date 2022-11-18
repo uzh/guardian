@@ -164,7 +164,7 @@ module type Contract = sig
     -> (string -> 'etyp)
     -> (Action.t * target_spec) list
     -> ('param -> ('rval, 'etyp) monad)
-    -> (actor:'a authorizable -> 'param -> ('rval, 'etyp) monad, string) monad
+    -> ('a authorizable -> 'param -> ('rval, 'etyp) monad, string) monad
 
   val collect_rules
     :  ?ctx:context
@@ -174,7 +174,7 @@ module type Contract = sig
   val checker_of_effects
     :  ?ctx:context
     -> (Action.t * target_spec) list
-    -> actor:'a authorizable
+    -> 'a authorizable
     -> (unit, string) monad
 
   val find_rules_exn : ?ctx:context -> target_spec -> auth_rule list Lwt.t

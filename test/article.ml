@@ -36,7 +36,7 @@ module Make (P : Guard.Persistence_s) = struct
     let* wrapped =
       P.wrap_function ?ctx CCFun.id [ `Update, `Target t.uuid ] f
     in
-    wrapped ~actor new_title
+    wrapped actor new_title
   ;;
 
   let update_author ?ctx (actor : [ `User ] Guard.Authorizable.t) t new_author =
@@ -50,6 +50,6 @@ module Make (P : Guard.Persistence_s) = struct
     let* wrapped =
       P.wrap_function ?ctx CCFun.id [ `Manage, `Target t.uuid ] f
     in
-    wrapped ~actor new_author
+    wrapped actor new_author
   ;;
 end
