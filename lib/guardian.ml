@@ -109,13 +109,12 @@ module Make (A : RoleSig) (T : RoleSig) = struct
       let results =
         rules
         |> CCList.map (fun (actor', action, target) ->
-             let is_matched =
-               match actor' with
+             let is_matched = function
                | `Actor uuid -> uuid = actor.Authorizable.uuid
                | `ActorEntity role ->
                  ActorRoleSet.mem role actor.Authorizable.roles
              in
-             if is_matched
+             if is_matched actor'
              then Ok ()
              else
                Error
