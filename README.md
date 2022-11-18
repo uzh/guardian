@@ -59,8 +59,8 @@ Example usage:
     let* (_: [> `User ] MariaDb.authorizable) = User.to_authorizable ?ctx mike in
     let* (_: [> `User ] MariaDb.authorizable_target) = UserTarget.to_authorizable ?ctx thomas in
     let* (_: [> `User ] MariaDb.authorizable_target) = UserTarget.to_authorizable ?ctx mike in
-    let* (_: [> `Article ] MariaDb.authorizable_target) = Article.to_authorizable ?ctx chris_article in
-    let* (_: [> `Article ] MariaDb.authorizable_target) = Article.to_authorizable ?ctx aron_article in
+    let* (_: [> `Article ] MariaDb.authorizable_target) = Article.to_authorizable ?ctx thomas_article in
+    let* (_: [> `Article ] MariaDb.authorizable_target) = Article.to_authorizable ?ctx mike_article in
     let* () = MariaDb.Actor.save_rule ?ctx example_role in
     Lwt.return_unit
 

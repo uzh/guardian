@@ -292,7 +292,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
           (Guard.ActorRoleSet.singleton
              (`Editor target'.Guard.AuthorizableTarget.uuid))
       in
-      let* actor = User.to_authorizable ?ctx thomas in
+      let* actor = Backend.Actor.find_authorizable ?ctx `User (snd thomas) in
       let* () =
         Backend.Actor.save_rule
           ?ctx
