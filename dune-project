@@ -23,7 +23,8 @@
 (package
  (name guardian)
  (synopsis "Role-based access control for OCaml")
- (description "\nTODO\n")
+ (description
+  "Defined actors can access targets according to specified rules (allowed actions: CRUD).")
  (depends
   (base64
    (>= 3.5.0))
