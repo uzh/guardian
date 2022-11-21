@@ -16,6 +16,9 @@
 
 (homepage "https://github.com/uzh/guardian")
 
+(source
+ (github uzh/guardian))
+
 (bug_reports "https://github.com/uzh/guardian/issues")
 
 (documentation "https://github.com/uzh/guardian")
