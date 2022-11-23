@@ -3,18 +3,7 @@
  (inline_tests)
  (name guardian)
  (wrapped true)
- (libraries
-  base64
-  conformist
-  containers
-  fmt
-  fmt.tty
-  logs
-  logs.fmt
-  lwt
-  lwt.unix
-  uuidm
-  yojson)
+ (libraries containers lwt uuidm)
  (preprocess
   (pps
    lwt_ppx
