@@ -4,7 +4,7 @@
 
 (name guardian)
 
-(version 0.0.4)
+(version 0.0.5)
 
 (license GPL-2.0-or-later)
 
@@ -29,20 +29,14 @@
  (description
   "Defined actors can access targets according to specified rules (allowed actions: CRUD).")
  (depends
-  (base64
-   (>= 3.5.0))
   (caqti-driver-mariadb
    (>= 1.8.0))
   (caqti-lwt
    (>= 1.8.0))
-  (conformist
-   (>= 0.8.1))
   (containers
    (>= 3.6))
   (dune
-   (and
-    (> 2.9.0)
-    (< 3.0.0)))
+   (>= 2.9.0))
   (logs
    (>= 0.7.0))
   (lwt
@@ -50,7 +44,7 @@
   (lwt_ppx
    (>= 2.1.0))
   (mariadb
-   (= 1.1.4))
+   (>= 1.1.4))
   (ocaml
    (>= 4.12.0))
   (ocamlformat
@@ -59,7 +53,8 @@
    (>= 5.2.1))
   (ppx_deriving_yojson
    (>= 3.6.1))
-  ppx_inline_test
+  (ppx_inline_test
+   (>= v0.15.0))
   (sqlite3
    (>= 5.1.0))
   (uri
