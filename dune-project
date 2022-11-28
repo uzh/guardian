@@ -53,8 +53,7 @@
    (>= 5.2.1))
   (ppx_deriving_yojson
    (>= 3.6.1))
-  (ppx_inline_test
-   (>= v0.15.0))
+  ppx_inline_test
   (sqlite3
    (>= 5.1.0))
   (uri
