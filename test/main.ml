@@ -282,7 +282,6 @@ module Tests (Backend : Guard.Persistence_s) = struct
       let open Lwt_result.Syntax in
       (* Note: a user can be an actor or a target, so 'to_authorizable' has to
          be called for both roles *)
-      let* _ = User.to_authorizable ?ctx hugo in
       let* target' = UserTarget.to_authorizable ?ctx hugo in
       let* actor = User.to_authorizable ?ctx thomas in
       let* () =

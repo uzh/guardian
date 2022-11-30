@@ -65,12 +65,17 @@ struct
       ;;
 
       let find_roles ?ctx id =
+        let open CCResult.Infix in
         let caqti =
           {sql|SELECT roles FROM guardian_actors WHERE id = ?|sql}
-          |> Caqti_type.(string ->! string)
+          |> Caqti_type.(string ->? string)
         in
-        let%lwt roles = Db.find ?ctx caqti (Uuid.Actor.to_string id) in
-        roles |> Yojson.Safe.from_string |> ActorSet.of_yojson |> Lwt.return
+        let%lwt roles = Db.find_opt ?ctx caqti (Uuid.Actor.to_string id) in
+        roles
+        |> CCOption.to_result "No actor roles found."
+        >|= Yojson.Safe.from_string
+        >>= ActorSet.of_yojson
+        |> Lwt.return
       ;;
 
       let find_rules ?ctx target_spec =
@@ -248,12 +253,17 @@ struct
       ;;
 
       let find_roles ?ctx id =
+        let open CCResult.Infix in
         let caqti =
           {sql|SELECT roles FROM guardian_targets WHERE id = ?|sql}
-          |> Caqti_type.(string ->! string)
+          |> Caqti_type.(string ->? string)
         in
-        let%lwt roles = Db.find ?ctx caqti (Uuid.Target.to_string id) in
-        roles |> Yojson.Safe.from_string |> TargetSet.of_yojson |> Lwt.return
+        let%lwt roles = Db.find_opt ?ctx caqti (Uuid.Target.to_string id) in
+        roles
+        |> CCOption.to_result "No target roles found."
+        >|= Yojson.Safe.from_string
+        >>= TargetSet.of_yojson
+        |> Lwt.return
       ;;
 
       let find_owner ?ctx id =
