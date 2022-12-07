@@ -415,31 +415,18 @@ module Make (A : RoleSig) (T : RoleSig) = struct
        an extra pass to get all of entity X's roles, because if you have
        permission to do A to one of X's roles, then you should be able to do A
        to X. *)
-    let rec expand_effects ?ctx (effects : Authorizer.effect list)
+    let expand_effects ?ctx (effects : Authorizer.effect list)
       : (Authorizer.effect list, string) result Lwt.t
       =
       let open CCFun in
       let open Lwt.Infix in
-      let open Authorizer.Effect_set in
-      let actor_of = Uuid.(Target.to_string %> Actor.of_string_exn) in
+      (* let open Authorizer.Effect_set in *)
+      (* let actor_of = Uuid.(Target.to_string %> Actor.of_string_exn) in *)
       let flatten = CCResult.flatten_l %> CCResult.map CCList.flatten in
-      let expand =
-        Lwt_list.map_s (fun effect ->
-          match effect with
-          | action, `Target (x : Uuid.Target.t) ->
-            actor_of x
-            |> Actor.find_roles ?ctx
-            (* search for roles if target would be an actor, default: empty *)
-            >|= CCResult.get_or ~default:ActorRoleSet.empty
-            >|= ActorRoleSet.elements
-            >>= Lwt_list.map_s (fun role ->
-                  expand_effects
-                    ?ctx
-                    [ action, `TargetEntity (role |> A.show |> T.of_string) ])
-            >|= flatten
-            |> Lwt_result.map
-                 (CCList.fold_left (flip add) (singleton effect) %> elements)
-          | x -> Lwt.return_ok [ x ])
+      let expand effects =
+        (* TODO: reimplement transition for actor/target solution *)
+        let _ = ctx in
+        CCList.map (fun m -> Ok [ m ]) effects |> Lwt.return
       in
       effects
       |> expand
