@@ -1,6 +1,6 @@
 (test
  (name main)
- (libraries alcotest alcotest-lwt guardian guardian.backend sqlite3)
+ (libraries alcotest alcotest-lwt guardian guardian.backend)
  (preprocess
   (pps
    lwt_ppx

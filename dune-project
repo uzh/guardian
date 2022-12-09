@@ -55,8 +55,6 @@
    (>= 3.6.1))
   (ppx_inline_test
    (= v0.14.2))
-  (sqlite3
-   (>= 5.1.0))
   (uri
    (>= 4.2.0))
   (uuidm
