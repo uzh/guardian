@@ -34,7 +34,7 @@ module Make (P : Guard.Persistence_s) = struct
       Lwt.return_ok t
     in
     let* wrapped =
-      P.wrap_function ?ctx CCFun.id [ `Update, `Target t.uuid ] f
+      P.wrap_function ?ctx CCFun.id [ `Update, `Target (`Article, t.uuid) ] f
     in
     wrapped actor new_title
   ;;
@@ -48,7 +48,7 @@ module Make (P : Guard.Persistence_s) = struct
       Lwt.return_ok t
     in
     let* wrapped =
-      P.wrap_function ?ctx CCFun.id [ `Manage, `Target t.uuid ] f
+      P.wrap_function ?ctx CCFun.id [ `Manage, `Target (`Article, t.uuid) ] f
     in
     wrapped actor new_author
   ;;
