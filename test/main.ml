@@ -19,14 +19,17 @@ module Tests (Backend : Guard.Persistence_s) = struct
   let hugo = "Hugo", Guardian.Uuid.Actor.create ()
   let chris_article = Article.make "Foo" "Bar" chris
   let aron_article = Article.make "Fizz" "Buzz" aron
-  let bad_rule = `Actor (snd chris), `Update, `Target aron_article.uuid
+
+  let bad_rule =
+    `Actor (`User, snd chris), `Update, `Target (`Article, aron_article.uuid)
+  ;;
 
   let global_rules : Guardian.Authorizer.auth_rule list =
     [ `ActorEntity `User, `Read, `TargetEntity `Article
     ; `ActorEntity `Admin, `Manage, `TargetEntity `Article
     ; ( `ActorEntity (`Editor chris_article.uuid)
       , `Update
-      , `Target chris_article.uuid )
+      , `Target (`Article, chris_article.uuid) )
       (* Explanation: Someone with actor rule "Editor of uuid X" has the
          permission to update the "Target with uuid X" *)
     ]
@@ -137,7 +140,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
        Backend.Actor.find_rules ?ctx (`TargetEntity `Article)
      in
      let* editor_rules =
-       Backend.Actor.find_rules ?ctx (`Target chris_article.uuid)
+       Backend.Actor.find_rules ?ctx (`Target (`Article, chris_article.uuid))
      in
      let perms = article_rules @ editor_rules in
      let global_set = Auth_rule_set.of_list global_rules in
@@ -154,7 +157,9 @@ module Tests (Backend : Guard.Persistence_s) = struct
 
   let test_drop_rules ?ctx _ () =
     (let* () = Backend.Actor.save_rule ?ctx bad_rule in
-     let* perms = Backend.Actor.find_rules ?ctx (`Target aron_article.uuid) in
+     let* perms =
+       Backend.Actor.find_rules ?ctx (`Target (`Article, aron_article.uuid))
+     in
      let* () =
        match perms with
        | [ perm ] when perm = bad_rule -> Lwt.return_ok ()
@@ -163,7 +168,9 @@ module Tests (Backend : Guard.Persistence_s) = struct
        | _ -> Lwt.return_error "Invalid permissions."
      in
      let* () = Backend.Actor.delete_rule ?ctx bad_rule in
-     let* perms' = Backend.Actor.find_rules ?ctx (`Target aron_article.uuid) in
+     let* perms' =
+       Backend.Actor.find_rules ?ctx (`Target (`Article, aron_article.uuid))
+     in
      match perms' with
      | [] -> Lwt.return_ok ()
      | _ -> Lwt.return_error "Failed to remove bad perm.")
@@ -217,7 +224,9 @@ module Tests (Backend : Guard.Persistence_s) = struct
      match thomas_auth with
      | Ok thomas_user ->
        let as_target =
-         Guard.Uuid.(thomas |> snd |> Actor.to_string |> Target.of_string_exn)
+         ( `User
+         , Guard.Uuid.(thomas |> snd |> Actor.to_string |> Target.of_string_exn)
+         )
        in
        let%lwt res =
          User.update_name
@@ -297,10 +306,10 @@ module Tests (Backend : Guard.Persistence_s) = struct
           ?ctx
           ( `ActorEntity (`Editor target'.Guard.AuthorizableTarget.uuid)
           , `Manage
-          , `Target target'.Guard.AuthorizableTarget.uuid )
+          , `Target (`User, target'.Guard.AuthorizableTarget.uuid) )
       in
       let effects =
-        [ `Manage, `Target target'.Guard.AuthorizableTarget.uuid ]
+        [ `Manage, `Target (`User, target'.Guard.AuthorizableTarget.uuid) ]
       in
       Backend.checker_of_effects ?ctx effects actor
     in
@@ -417,16 +426,12 @@ let () =
     Guardian_backend.MariaDb.Make (Role.Actor) (Role.Target)
       (Make (MariaConfig))
   in
-  let module Sqlite = Guardian_backend.Sqlite.Make (Role.Actor) (Role.Target) in
   Lwt_main.run
   @@ let%lwt () = Maria.migrate ~ctx:[ "pool", test_database ] () in
      let%lwt () = Maria.clean ~ctx:[ "pool", test_database ] () in
-     let%lwt () = Sqlite.migrate () in
-     (* let%lwt () = Sqlite.clean () in *)
      make_test_cases
        ~ctx:[ "pool", test_database ]
        (module Maria)
        "MariadDB Backend"
-     @ make_test_cases (module Sqlite) "SQLite3 Backend"
      |> Alcotest_lwt.run "Authorization"
 ;;

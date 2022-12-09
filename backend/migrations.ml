@@ -29,19 +29,16 @@ let create_guardian_rules_table_sql =
       -- These constraints are necessary to prevent rules that cannot be
       -- represented within OCaml.
       CONSTRAINT only_one_actor
-          CHECK(
-              (actor_id IS NULL OR actor_role IS NULL)
-              and (actor_id IS NOT NULL OR actor_role IS NOT NULL)
-          ),
+        CHECK(
+          (actor_id IS NULL AND actor_role IS NOT NULL)
+          OR (actor_id IS NOT NULL AND actor_role IS NOT NULL)
+        ),
       CONSTRAINT only_one_target
-          CHECK(
-              (target_id IS NULL OR target_role IS NULL)
-              and (target_id IS NOT NULL OR target_role IS NOT NULL)
-          ),
-      UNIQUE(actor_role, act, target_role),
-      UNIQUE(actor_role, act, target_id),
-      UNIQUE(actor_id, act, target_role),
-      UNIQUE(actor_id, act, target_id)
+        CHECK(
+          (target_id IS NULL AND target_role IS NOT NULL)
+          OR (target_id IS NOT NULL AND target_role IS NOT NULL)
+        ),
+      CONSTRAINT actor_act_target UNIQUE (actor_role, actor_id, act, target_role, target_id)
     )
   |sql}
 ;;

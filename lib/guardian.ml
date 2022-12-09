@@ -34,14 +34,14 @@ module Make (A : RoleSig) (T : RoleSig) = struct
       }
     [@@deriving eq, ord, show, yojson]
 
-    let to_string t = show (fun f _x -> Format.pp_print_string f "") t
+    let to_string t = show (fun f _ -> Format.pp_print_string f "") t
     let make ?owner roles typ uuid = { roles; owner; uuid; typ }
 
     let a_owns_b a b =
       CCOption.map_or ~default:false (fun b' -> a.uuid = b') b.owner
     ;;
 
-    let has_role t role = ActorRoleSet.mem role t.roles
+    let has_role { roles; _ } = CCFun.flip ActorRoleSet.mem roles
   end
 
   module AuthorizableTarget = struct
@@ -53,7 +53,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
       }
     [@@deriving eq, ord, show, yojson]
 
-    let to_string t = show (fun f _x -> Format.pp_print_string f "") t
+    let to_string t = show (fun f _ -> Format.pp_print_string f "") t
     let make ?owner entity typ uuid = { owner; uuid; typ; entity }
   end
 
@@ -61,27 +61,21 @@ module Make (A : RoleSig) (T : RoleSig) = struct
     module Actor = struct
       type spec =
         [ `ActorEntity of A.t
-        | `Actor of Uuid.Actor.t
+        | `Actor of A.t * Uuid.Actor.t
         ]
       [@@deriving eq, show, ord]
 
-      let value = function
-        | `ActorEntity x -> A.show x
-        | `Actor x -> Uuid.Actor.to_string x
-      ;;
+      let value = A.show
     end
 
     module Target = struct
       type spec =
         [ `TargetEntity of T.t
-        | `Target of Uuid.Target.t
+        | `Target of T.t * Uuid.Target.t
         ]
       [@@deriving eq, show, ord]
 
-      let value = function
-        | `TargetEntity x -> T.show x
-        | `Target x -> Uuid.Target.to_string x
-      ;;
+      let value = T.show
     end
 
     type auth_rule = Actor.spec * Action.t * Target.spec
@@ -91,7 +85,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
         which permissions an actor needs to invoke it. *)
     type effect = Action.t * Target.spec [@@deriving eq, show, ord]
 
-    module Effect_set = Set.Make (struct
+    module EffectSet = Set.Make (struct
       type t = effect [@@deriving ord]
     end)
 
@@ -110,7 +104,9 @@ module Make (A : RoleSig) (T : RoleSig) = struct
         rules
         |> CCList.map (fun (actor', action, target) ->
              let is_matched = function
-               | `Actor uuid -> uuid = actor.Authorizable.uuid
+               | `Actor (role, uuid) ->
+                 uuid = actor.Authorizable.uuid
+                 && ActorRoleSet.mem role actor.Authorizable.roles
                | `ActorEntity role ->
                  ActorRoleSet.mem role actor.Authorizable.roles
              in
@@ -206,7 +202,10 @@ module Make (A : RoleSig) (T : RoleSig) = struct
       CCList.exists
         (fun (actor', action', _) ->
           match actor' with
-          | `Actor id -> actor.Authorizable.uuid = id && action = action'
+          | `Actor (role, id) ->
+            actor.Authorizable.uuid = id
+            && action = action'
+            && ActorRoleSet.mem role actor.Authorizable.roles
           | `ActorEntity role ->
             ActorRoleSet.mem role actor.Authorizable.roles
             && (action = action' || action' = `Manage))
@@ -330,27 +329,26 @@ module Make (A : RoleSig) (T : RoleSig) = struct
           Lwt.return_ok ent
      ;;
 
-      let find_checker ?ctx target =
+      let find_checker ?ctx { AuthorizableTarget.uuid; owner; _ } =
         let open Lwt_result.Syntax in
-        let* roles = find_roles ?ctx target.AuthorizableTarget.uuid in
+        let* roles = find_roles ?ctx uuid in
         let%lwt auth_rules =
           TargetRoleSet.elements roles
-          |> CCList.map (fun m -> `TargetEntity m)
-          |> CCList.cons (`Target target.AuthorizableTarget.uuid)
+          |> CCList.flat_map (fun m -> [ `TargetEntity m; `Target (m, uuid) ])
           |> Lwt_list.map_s (Actor.find_rules ?ctx)
         in
         let* auth_rules = auth_rules |> flatten |> Lwt_result.lift in
         Lwt.return_ok
         @@ fun actor action ->
+        let open Uuid in
         let is_owner =
-          target.AuthorizableTarget.owner
+          owner
           |> CCOption.map_or
                ~default:false
-               (Uuid.Actor.equal actor.AuthorizableActor.uuid)
+               (Actor.equal actor.AuthorizableActor.uuid)
         in
         let is_self =
-          let open Uuid in
-          target.AuthorizableTarget.uuid
+          uuid
           |> Target.equal (actor.uuid |> Actor.to_string |> Target.of_string_exn)
         in
         if is_self || is_owner then true else exists_in auth_rules actor action
@@ -382,7 +380,8 @@ module Make (A : RoleSig) (T : RoleSig) = struct
         effects
         |> Lwt_list.map_s (fun (action, target) ->
              (match target with
-              | `Target uuid -> Target.(find ?ctx () uuid >>= find_checker ?ctx)
+              | `Target (_, uuid) ->
+                Target.(find ?ctx () uuid >>= find_checker ?ctx)
               | `TargetEntity role ->
                 Target.find_role_checker ?ctx (TargetRoleSet.singleton role))
              |> Lwt_result.map (fun can actor ->
@@ -396,7 +395,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
                            "Entity %s does not have permission to %s target %s."
                            (Authorizable.to_string actor)
                            (Action.to_string action)
-                           (Authorizer.Target.value target)
+                           ([%show: Authorizer.Target.spec] target)
                         |> error))))
         |> Lwt.map CCResult.flatten_l
       in
