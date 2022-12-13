@@ -5,6 +5,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
   module Hacker = Hacker.Make (Backend)
   module UserTarget = User.MakeTarget (Backend)
   module User = User.MakeActor (Backend)
+  module Post = Post.Make (Backend)
   module Set = Guardian.ActorRoleSet
 
   (* ensure that the `User` module conforms to the `Actor_module` module type
@@ -19,6 +20,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
   let hugo = "Hugo", Guardian.Uuid.Actor.create ()
   let chris_article = Article.make "Foo" "Bar" chris
   let aron_article = Article.make "Fizz" "Buzz" aron
+  let thomas_aron_post = Post.make thomas chris_article "A first reaction"
 
   let bad_rule =
     `Actor (`User, snd chris), `Update, `Target (`Article, aron_article.uuid)
@@ -125,7 +127,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
 
   let test_push_rules ?ctx _ () =
     (let* put =
-       Backend.Actor.save_rules ?ctx global_rules
+       Backend.Rule.save_all ?ctx global_rules
        |> Lwt_result.map_error [%show: Guard.Authorizer.auth_rule list]
      in
      Lwt.return_ok (CCList.map Guard.Authorizer.show_auth_rule put))
@@ -136,11 +138,9 @@ module Tests (Backend : Guard.Persistence_s) = struct
 
   let test_read_rules ?ctx _ () =
     let open Guardian.Authorizer in
-    (let* article_rules =
-       Backend.Actor.find_rules ?ctx (`TargetEntity `Article)
-     in
+    (let* article_rules = Backend.Rule.find_all ?ctx (`TargetEntity `Article) in
      let* editor_rules =
-       Backend.Actor.find_rules ?ctx (`Target (`Article, chris_article.uuid))
+       Backend.Rule.find_all ?ctx (`Target (`Article, chris_article.uuid))
      in
      let perms = article_rules @ editor_rules in
      let global_set = Auth_rule_set.of_list global_rules in
@@ -156,9 +156,9 @@ module Tests (Backend : Guard.Persistence_s) = struct
   ;;
 
   let test_drop_rules ?ctx _ () =
-    (let* () = Backend.Actor.save_rule ?ctx bad_rule in
+    (let* () = Backend.Rule.save ?ctx bad_rule in
      let* perms =
-       Backend.Actor.find_rules ?ctx (`Target (`Article, aron_article.uuid))
+       Backend.Rule.find_all ?ctx (`Target (`Article, aron_article.uuid))
      in
      let* () =
        match perms with
@@ -167,9 +167,9 @@ module Tests (Backend : Guard.Persistence_s) = struct
          Lwt.return_error "Failed to push bad permission to test perm dropping."
        | _ -> Lwt.return_error "Invalid permissions."
      in
-     let* () = Backend.Actor.delete_rule ?ctx bad_rule in
+     let* () = Backend.Rule.delete ?ctx bad_rule in
      let* perms' =
-       Backend.Actor.find_rules ?ctx (`Target (`Article, aron_article.uuid))
+       Backend.Rule.find_all ?ctx (`Target (`Article, aron_article.uuid))
      in
      match perms' with
      | [] -> Lwt.return_ok ()
@@ -302,7 +302,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
       in
       let* actor = Backend.Actor.find_authorizable ?ctx `User (snd thomas) in
       let* () =
-        Backend.Actor.save_rule
+        Backend.Rule.save
           ?ctx
           ( `ActorEntity (`Editor target'.Guard.AuthorizableTarget.uuid)
           , `Manage
@@ -318,6 +318,45 @@ module Tests (Backend : Guard.Persistence_s) = struct
       (Ok ())
       actual
     |> Lwt.return
+  ;;
+
+  let transistency ?ctx _ () =
+    (let* _ = Post.to_authorizable ?ctx thomas_aron_post in
+     let* aron_authorizable = User.to_authorizable ?ctx aron in
+     let* _thomas_post' =
+       Post.update_post
+         ?ctx
+         aron_authorizable
+         thomas_aron_post
+         "Update the post comment"
+     in
+     Lwt.return_ok true)
+    >|= Alcotest.(check (result bool string))
+          "User can edit an post of an article he's manager of."
+          (Ok true)
+  ;;
+
+  let transistency_deny ?ctx _ () =
+    (let* _ = Post.to_authorizable ?ctx thomas_aron_post in
+     let* chris_authorizable = User.to_authorizable ?ctx chris in
+     let* _thomas_post' =
+       Post.update_post
+         ?ctx
+         chris_authorizable
+         thomas_aron_post
+         "Update the post comment"
+       |> Lwt_result.map_error (fun err ->
+            let check_err =
+              CCString.find
+                ~sub:"does not satisfy any of the following rules:"
+                err
+            in
+            if check_err |> CCBool.of_int then "correct" else err)
+     in
+     Lwt.return_ok true)
+    >|= Alcotest.(check (result bool string))
+          "User cannot edit an post of someone else article."
+          (Error "correct")
   ;;
 
   (** IMPORTANT: the following tests should not compile! *)
@@ -406,10 +445,20 @@ let () =
             `Quick
             (T.operator_works ?ctx)
         ] )
+    ; ( Format.asprintf
+          "(%s) Transistancy, manager of `x` should be able to update `x.a`."
+          name
+      , [ Alcotest_lwt.test_case "transistency" `Quick (T.transistency ?ctx)
+        ; Alcotest_lwt.test_case
+            "transistency fail"
+            `Quick
+            (T.transistency_deny ?ctx)
+        ] )
     ]
   in
   let open Guardian_backend.Pools in
   let test_database = "test" in
+  let ctx = [ "pool", test_database ] in
   let module MariaConfig = struct
     include DefaultConfig
 
@@ -427,11 +476,8 @@ let () =
       (Make (MariaConfig))
   in
   Lwt_main.run
-  @@ let%lwt () = Maria.migrate ~ctx:[ "pool", test_database ] () in
-     let%lwt () = Maria.clean ~ctx:[ "pool", test_database ] () in
-     make_test_cases
-       ~ctx:[ "pool", test_database ]
-       (module Maria)
-       "MariadDB Backend"
+  @@ let%lwt () = Maria.migrate ~ctx () in
+     let%lwt () = Maria.clean ~ctx () in
+     make_test_cases ~ctx (module Maria) "MariadDB Backend"
      |> Alcotest_lwt.run "Authorization"
 ;;
