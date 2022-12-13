@@ -34,22 +34,24 @@ module Target = struct
   type t =
     [ `User
     | `Article
+    | `Post
     ]
   [@@deriving show, eq, ord, yojson]
 
   let name t = show t |> Guardian.Util.decompose_variant_string |> fst
 
   let find_target = function
-    | `User | `Article -> None
+    | `User | `Article | `Post -> None
   ;;
 
   let find_target_exn = CCFun.(find_target %> CCOption.get_exn_or "No target")
-  let all = [ `User; `Article ]
+  let all = [ `User; `Article; `Post ]
 
   let of_string s =
     match Guardian.Util.decompose_variant_string s with
     | "user", [] -> `User
     | "article", [] -> `Article
+    | "post", [] -> `Post
     | _ -> failwith (Format.asprintf "Invalid role: %s" s)
   ;;
 end

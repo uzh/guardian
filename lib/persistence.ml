@@ -7,9 +7,16 @@ module type Backend = sig
   type role
   type target_role_set
   type target_spec
+  type target_typ
   type 'a authorizable
   type 'b authorizable_target
   type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
+
+  module Rule : sig
+    val find_all : ?ctx:context -> target_spec -> (auth_rule list, string) monad
+    val save : ?ctx:context -> auth_rule -> (unit, string) monad
+    val delete : ?ctx:context -> auth_rule -> (unit, string) monad
+  end
 
   module Actor : sig
     module Authorizable : sig
@@ -34,18 +41,10 @@ module type Backend = sig
       -> Uuid.Actor.t
       -> (actor_role_set, string) monad
 
-    val find_rules
-      :  ?ctx:context
-      -> target_spec
-      -> (auth_rule list, string) monad
-
     val find_owner
       :  ?ctx:context
       -> Uuid.Actor.t
       -> (Uuid.Actor.t option, string) monad
-
-    val save_rule : ?ctx:context -> auth_rule -> (unit, string) monad
-    val delete_rule : ?ctx:context -> auth_rule -> (unit, string) monad
 
     val grant_roles
       :  ?ctx:context
@@ -110,13 +109,34 @@ end
 module type Contract = sig
   include Backend
 
-  module Actor : sig
-    include module type of Actor
+  module Dependency : sig
+    type parent =
+      ?ctx:context -> target_spec -> (target_spec option, string) Lwt_result.t
 
-    val save_rules
+    val register : target_typ -> parent -> (unit, string) result
+    val find : target_typ -> parent
+  end
+
+  module Rule : sig
+    include module type of Rule
+
+    val save_all
       :  ?ctx:context
       -> auth_rule list
       -> (auth_rule list, auth_rule list) Lwt_result.t
+
+    val collect_rules
+      :  ?ctx:context
+      -> (Action.t * target_spec) list
+      -> (auth_rule list, string) monad
+
+    val find_all_exn : ?ctx:context -> target_spec -> auth_rule list Lwt.t
+    val save_exn : ?ctx:context -> auth_rule -> unit Lwt.t
+    val delete_exn : ?ctx:context -> auth_rule -> unit Lwt.t
+  end
+
+  module Actor : sig
+    include module type of Actor
 
     val revoke_role
       :  ?ctx:context
@@ -166,18 +186,9 @@ module type Contract = sig
     -> ('param -> ('rval, 'etyp) monad)
     -> ('a authorizable -> 'param -> ('rval, 'etyp) monad, string) monad
 
-  val collect_rules
-    :  ?ctx:context
-    -> (Action.t * target_spec) list
-    -> (auth_rule list, string) monad
-
   val checker_of_effects
     :  ?ctx:context
     -> (Action.t * target_spec) list
     -> 'a authorizable
     -> (unit, string) monad
-
-  val find_rules_exn : ?ctx:context -> target_spec -> auth_rule list Lwt.t
-  val save_rule_exn : ?ctx:context -> auth_rule -> unit Lwt.t
-  val delete_rule_exn : ?ctx:context -> auth_rule -> unit Lwt.t
 end
