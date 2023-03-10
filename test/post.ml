@@ -2,10 +2,8 @@ module Make (P : Guard.Persistence_s) = struct
   module User = User.MakeActor (P)
   module Article = Article.Make (P)
 
-  (* TODO: register current -> parent entities (ability to create dependency
-     tree)*)
-  let _ =
-    P.Dependency.register `Post (fun ?ctx:_ (action, spec) ->
+  let (_ : (unit, string) result) =
+    P.Dependency.register `Post `Article (fun ?ctx:_ (action, spec) ->
       match spec with
       | `TargetEntity `Post | `Target (`Post, _) ->
         Lwt.return_ok (Some (action, `TargetEntity `Article))

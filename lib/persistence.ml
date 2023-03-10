@@ -10,6 +10,7 @@ module type Backend = sig
   type role
   type target_spec
   type target_typ
+  type parent_typ
   type 'a authorizable
   type 'b authorizable_target
   type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
@@ -123,11 +124,20 @@ module type Contract = sig
     val register
       :  ?tags:Logs.Tag.set
       -> ?ignore_duplicates:bool
-      -> target_typ (* -> parent_typ *)
+      -> target_typ
+      -> parent_typ
       -> parent
       -> (unit, string) result
 
-    val find : target_typ -> parent
+    val find : ?default_fcn:parent -> target_typ -> parent_typ -> parent
+    val find_opt : target_typ -> parent_typ -> parent option
+    val find_all : target_typ -> parent list
+
+    val find_all_combined
+      :  target_typ
+      -> ?ctx:context
+      -> effect
+      -> (effect list, string) Lwt_result.t
   end
 
   module Rule : sig

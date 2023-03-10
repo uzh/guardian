@@ -1,3 +1,5 @@
+open CCFun.Infix
+
 module Actor = struct
   type t =
     [ `User
@@ -8,14 +10,14 @@ module Actor = struct
     ]
   [@@deriving show, eq, ord, yojson]
 
-  let name t = show t |> Guardian.Utils.decompose_variant_string |> fst
+  let name = show %> Guardian.Utils.decompose_variant_string %> fst
 
   let find_target = function
     | `User | `Admin | `Hacker -> None
     | `Editor x -> Some x
   ;;
 
-  let find_target_exn = CCFun.(find_target %> CCOption.get_exn_or "No target")
+  let find_target_exn = find_target %> CCOption.get_exn_or "No target"
   let all = [ `User; `Admin; `Hacker; `Editor Guardian.Uuid.Target.nil ]
 
   let of_string s =
@@ -38,13 +40,13 @@ module Target = struct
     ]
   [@@deriving show, eq, ord, yojson]
 
-  let name t = show t |> Guardian.Utils.decompose_variant_string |> fst
+  let name = show %> Guardian.Utils.decompose_variant_string %> fst
 
   let find_target = function
     | `User | `Article | `Post -> None
   ;;
 
-  let find_target_exn = CCFun.(find_target %> CCOption.get_exn_or "No target")
+  let find_target_exn = find_target %> CCOption.get_exn_or "No target"
   let all = [ `User; `Article; `Post ]
 
   let of_string s =

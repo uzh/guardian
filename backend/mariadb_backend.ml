@@ -89,6 +89,7 @@ struct
     type auth_set = Guard.AuthenticationSet.t
     type target_spec = Guard.TargetSpec.t
     type target_typ = Target.t
+    type parent_typ = Target.t
     type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
 
     module Rule = struct

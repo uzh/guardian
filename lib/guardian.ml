@@ -29,6 +29,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
   module Uuid = Uuid
   module Action = Action
   module ActorRoleSet : Role_set.S with type elt = A.t = Role_set.Make (A)
+  module ParentTyp = T
 
   module ActorSpec = struct
     type t =
@@ -110,7 +111,11 @@ module Make (A : RoleSig) (T : RoleSig) = struct
   end [@warning "-4"]
 
   module Dependency = struct
-    module Map = CCMap.Make (T)
+    module Key = struct
+      type t = T.t * T.t [@@deriving eq, ord, show]
+    end
+
+    module Map = CCMap.Make (Key)
 
     type parent =
       ?ctx:context -> Effect.t -> (Effect.t option, string) Lwt_result.t
@@ -121,42 +126,64 @@ module Make (A : RoleSig) (T : RoleSig) = struct
       ?(tags : Logs.Tag.set option)
       ?(ignore_duplicates = false)
       typ
+      parent_typ
       (parent_fcn : parent)
       =
-      let found = Map.find_opt typ !registered in
+      let key = typ, parent_typ in
+      let found = Map.find_opt key !registered in
       let msg =
-        [%show: T.t] %> Format.asprintf "Found duplicate registration: %s"
+        [%show: Key.t] %> Format.asprintf "Found duplicate registration: %s"
       in
       match found, ignore_duplicates with
       | None, _ ->
-        registered := Map.add typ parent_fcn !registered;
+        registered := Map.add key parent_fcn !registered;
         Ok ()
       | Some _, true ->
-        Logs.debug (fun m -> m ?tags "%s" (msg typ));
+        Logs.debug (fun m -> m ?tags "%s" (msg key));
         Ok ()
-      | Some _, false -> Error (msg typ)
+      | Some _, false -> Error (msg key)
     ;;
 
     let register_all dependencies =
       let open CCResult in
       dependencies
-      |> CCList.map (uncurry register)
+      |> CCList.map (fun (typ, parent, fcn) -> register typ parent fcn)
       |> flatten_l
       >|= fun (_ : unit list) -> ()
     ;;
 
-    let find (typ : T.t)
-      : ?ctx:context -> Effect.t -> (Effect.t option, string) Lwt_result.t
+    let find_opt (typ : T.t) (parent_typ : T.t) : parent option =
+      Map.find_opt (typ, parent_typ) !registered
+    ;;
+
+    let find
+      ?(default_fcn = fun ?ctx:_ _ -> Lwt_result.return None)
+      (typ : T.t)
+      (parent_typ : T.t)
+      : parent
       =
-      let default_fcn ?ctx _ =
-        let _ = ctx in
-        Lwt_result.return None
-      in
-      Map.find_opt typ !registered
+      find_opt typ parent_typ
       |> function
       | Some parent_fcn -> parent_fcn
       | None -> default_fcn
     ;;
+
+    let find_all (typ : T.t) : parent list =
+      Map.filter (fun (kind, _) _ -> T.equal kind typ) !registered
+      |> Map.to_list
+      |> CCList.map snd
+    ;;
+
+    let find_all_combined (typ : T.t)
+      : ?ctx:context -> Effect.t -> (Effect.t list, string) Lwt_result.t
+      =
+     fun ?ctx effect ->
+      let open Lwt.Infix in
+      find_all typ
+      |> Lwt_list.map_s (fun fcn ->
+           fcn ?ctx effect |> Lwt_result.map CCOption.to_list)
+      >|= CCResult.(flatten_l %> map CCList.flatten)
+   ;;
   end
 
   module Authorizable = struct
@@ -361,6 +388,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
        and type auth_set = AuthenticationSet.t
        and type target_spec = TargetSpec.t
        and type target_typ = T.t
+       and type parent_typ = ParentTyp.t
        and type role = A.t
 
   module Make_persistence
@@ -375,6 +403,7 @@ module Make (A : RoleSig) (T : RoleSig) = struct
                   and type auth_set = AuthenticationSet.t
                   and type target_spec = TargetSpec.t
                   and type target_typ = T.t
+                  and type parent_typ = ParentTyp.t
                   and type role = A.t) : Persistence_s = struct
     include Backend
     module Dependency = Dependency
@@ -554,8 +583,8 @@ module Make (A : RoleSig) (T : RoleSig) = struct
         : (AuthenticationSet.t, string) Lwt_result.t
         =
         let open AuthenticationSet in
-        let find_parent entity spec : (effect option, string) Lwt_result.t =
-          let fcn = Dependency.find entity in
+        let find_parent entity spec : (effect list, string) Lwt_result.t =
+          let fcn = Dependency.find_all_combined entity in
           fcn ?ctx spec
         in
         let find_all = Lwt_list.map_s expand %> Lwt.map CCResult.flatten_l in
@@ -565,10 +594,11 @@ module Make (A : RoleSig) (T : RoleSig) = struct
            | `TargetEntity entity | `Target (entity, _) ->
              find_parent entity effect
              >>= (function
-             | Some parent_effect ->
-               expand (One parent_effect)
-               >|= fun parent -> Or [ One effect; parent ]
-             | None -> One effect |> Lwt.return_ok))
+             | [] -> One effect |> Lwt.return_ok
+             | parent_effects ->
+               CCList.map one parent_effects
+               |> or_ %> expand
+               >|= fun parents -> Or [ One effect; parents ]))
         | Or effects -> effects |> find_all >|= or_
         | And effects -> effects |> find_all >|= and_
       in
@@ -596,29 +626,19 @@ module Make (A : RoleSig) (T : RoleSig) = struct
 
       (** [collect_rules e] Query the database for a list of rules pertaining to
           the effects [e]. *)
-      let collect_rules ?ctx (effects : AuthenticationSet.t) =
-        Lwt_result.map_error
-          (Format.asprintf
-             "Failed to collect rules for effects list %s. Error message: %s"
-             ([%show: AuthenticationSet.t] effects))
-        @@
-        let open Lwt.Infix in
-        let rules_of_effect (action, spec) : AuthRuleSet.t Lwt.t =
-          Rule.find_all ?ctx spec
-          >|= CCList.filter (fun (_, rule_action, _) ->
-                Action.is_valid ~matches:action rule_action)
-          >|= CCList.map AuthRuleSet.one %> AuthRuleSet.or_
-        in
-        let rec find_rules : AuthenticationSet.t -> AuthRuleSet.t Lwt.t =
-          let open AuthenticationSet in
-          let rules_of_effects effects = Lwt_list.map_s find_rules effects in
-          function
-          | One effect -> rules_of_effect effect
-          | Or effects -> rules_of_effects effects >|= AuthRuleSet.or_
-          | And effects -> rules_of_effects effects >|= AuthRuleSet.and_
-        in
-        effects |> expand_set ?ctx |> flip Lwt_result.bind_lwt find_rules
-      ;;
+      (* let collect_rules ?ctx (effects : AuthenticationSet.t) =
+         Lwt_result.map_error (Format.asprintf "Failed to collect rules for
+         effects list %s. Error message: %s" ([%show: AuthenticationSet.t]
+         effects)) @@ let open Lwt.Infix in let rules_of_effect (action, spec) :
+         AuthRuleSet.t Lwt.t = Rule.find_all ?ctx spec >|= CCList.filter (fun
+         (_, rule_action, _) -> Action.is_valid ~matches:action rule_action) >|=
+         CCList.map AuthRuleSet.one %> AuthRuleSet.or_ in let rec find_rules :
+         AuthenticationSet.t -> AuthRuleSet.t Lwt.t = let open AuthenticationSet
+         in let rules_of_effects effects = Lwt_list.map_s find_rules effects in
+         function | One effect -> rules_of_effect effect | Or effects ->
+         rules_of_effects effects >|= AuthRuleSet.or_ | And effects ->
+         rules_of_effects effects >|= AuthRuleSet.and_ in effects |> expand_set
+         ?ctx |> flip Lwt_result.bind_lwt find_rules ;; *)
 
       let save_exn ?ctx = with_exn Rule.save ?ctx "save_exn"
       let delete_exn ?ctx = with_exn Rule.delete ?ctx "delete_exn"
