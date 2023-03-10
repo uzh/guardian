@@ -21,7 +21,7 @@ module MakeActor (P : Guard.Persistence_s) = struct
       P.wrap_function
         ?ctx
         CCFun.id
-        EffectSet.(One (Guardian.Action.Update, `Target (snd t)))
+        EffectSet.(One (Guardian.Action.Update, TargetSpec.Id (`User, snd t)))
         f
     in
     wrapped actor new_name

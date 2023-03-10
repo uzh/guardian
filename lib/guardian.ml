@@ -40,41 +40,8 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
   module RoleSet : Role_set.S with type elt = ActorRoles.t =
     Role_set.Make (ActorRoles)
 
-  module ActorSpec = struct
-    type t =
-      [ `ActorEntity of ActorRoles.t
-      | `Actor of ActorRoles.t * Uuid.Actor.t
-      ]
-    [@@deriving eq, show, ord, yojson]
-
-    let is_valid (target : t) (spec : t) =
-      match target, spec with
-      | `ActorEntity t_entity, `ActorEntity s_entity
-      | `Actor (t_entity, _), `ActorEntity s_entity ->
-        ActorRoles.equal t_entity s_entity
-      | `ActorEntity _, `Actor (_, _) -> false
-      | `Actor (t_entity, t_uuid), `Actor (s_entity, s_uuid) ->
-        ActorRoles.equal t_entity s_entity && Uuid.Actor.equal t_uuid s_uuid
-    ;;
-  end
-
-  module TargetSpec = struct
-    type t =
-      [ `TargetEntity of TargetRoles.t
-      | `Target of TargetRoles.t * Uuid.Target.t
-      ]
-    [@@deriving eq, show, ord, yojson]
-
-    let is_valid (target : t) (spec : t) =
-      match target, spec with
-      | `TargetEntity t_entity, `TargetEntity s_entity
-      | `Target (t_entity, _), `TargetEntity s_entity ->
-        TargetRoles.equal t_entity s_entity
-      | `TargetEntity _, `Target (_, _) -> false
-      | `Target (t_entity, t_uuid), `Target (s_entity, s_uuid) ->
-        TargetRoles.equal t_entity s_entity && Uuid.Target.equal t_uuid s_uuid
-    ;;
-  end
+  module ActorSpec = Spec.Make (ActorRoles) (Uuid.Actor)
+  module TargetSpec = Spec.Make (TargetRoles) (Uuid.Target)
 
   module Rule = struct
     module Core = struct
@@ -250,9 +217,9 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
   module Authorizer = struct
     let check_effect ?(tags : Logs.Tag.set option) all_rules actor effect =
       let is_matched = function
-        | `Actor (role, uuid) ->
+        | ActorSpec.Id (role, uuid) ->
           uuid = actor.Actor.uuid && RoleSet.mem role actor.Actor.roles
-        | `ActorEntity role -> RoleSet.mem role actor.Actor.roles
+        | ActorSpec.Entity role -> RoleSet.mem role actor.Actor.roles
       in
       let rule =
         CCList.filter
@@ -276,9 +243,9 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
 
     let actor_in_rule actor ((actor', _, _) : Rule.t) =
       match actor' with
-      | `Actor (role, uuid) ->
+      | ActorSpec.Id (role, uuid) ->
         uuid = actor.Actor.uuid && RoleSet.mem role actor.Actor.roles
-      | `ActorEntity role -> RoleSet.mem role actor.Actor.roles
+      | ActorSpec.Entity role -> RoleSet.mem role actor.Actor.roles
     ;;
 
     let actor_in_rule_res actor (rule : Rule.t) =
@@ -361,11 +328,11 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
         CCList.exists
           (fun (actor', action', _) ->
             match actor' with
-            | `Actor (role, id) ->
+            | ActorSpec.Id (role, id) ->
               actor.Actor.uuid = id
               && Action.is_valid ~matches:action action'
               && RoleSet.mem role actor.Actor.roles
-            | `ActorEntity role ->
+            | ActorSpec.Entity role ->
               RoleSet.mem role actor.Actor.roles
               && Action.is_valid ~matches:action action')
           rules
@@ -497,7 +464,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
         let open Lwt_result.Syntax in
         let* kind = find_kind ?ctx uuid in
         let%lwt rules =
-          [ `TargetEntity kind; `Target (kind, uuid) ]
+          TargetSpec.[ Entity kind; Id (kind, uuid) ]
           |> Lwt_list.map_s (Rule.find_all ?ctx)
           |> Lwt.map CCList.flatten
         in
@@ -518,7 +485,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
       ;;
 
       let find_typ_checker ?ctx typ =
-        let%lwt rules = Rule.find_all ?ctx (`TargetEntity typ) in
+        let%lwt rules = Rule.find_all ?ctx (TargetSpec.Entity typ) in
         Lwt.return_ok @@ Utils.exists_in rules
       ;;
     end
@@ -541,7 +508,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
         match effects with
         | One effect ->
           (match snd effect with
-           | `TargetEntity entity | `Target (entity, _) ->
+           | TargetSpec.Entity entity | TargetSpec.Id (entity, _) ->
              find_parent entity effect
              >>= (function
              | [] -> One effect |> Lwt.return_ok
@@ -573,9 +540,9 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
         let open EffectSet in
         let find ((action, spec) : Action.t * TargetSpec.t) =
           (match spec with
-           | `Target (typ, uuid) ->
+           | TargetSpec.Id (typ, uuid) ->
              Target.(find ?ctx typ uuid >>= find_checker ?ctx)
-           | `TargetEntity role -> Target.find_typ_checker ?ctx role)
+           | TargetSpec.Entity role -> Target.find_typ_checker ?ctx role)
           >|= fun checker_fcn -> checker_fcn actor action
         in
         function

@@ -4,9 +4,10 @@ module Make (P : Guard.Persistence_s) = struct
 
   let (_ : (unit, string) result) =
     P.Dependency.register `Post `Article (fun ?ctx:_ (action, spec) ->
-      match spec with
-      | `TargetEntity `Post | `Target (`Post, _) ->
-        Lwt.return_ok (Some (action, `TargetEntity `Article))
+      let open Guard in
+      match[@warning "-4"] spec with
+      | TargetSpec.Entity `Post | TargetSpec.Id (`Post, _) ->
+        Lwt.return_ok (Some (action, TargetSpec.Entity `Article))
       | _ -> Lwt.return_error "Invalid entity provided")
   ;;
 
@@ -40,7 +41,7 @@ module Make (P : Guard.Persistence_s) = struct
     let* () =
       P.validate_effects
         ?ctx
-        EffectSet.(One (Guardian.Action.Update, `Target (`Post, t.uuid)))
+        EffectSet.(One (Guardian.Action.Update, TargetSpec.Id (`Post, t.uuid)))
         actor
     in
     f new_comment

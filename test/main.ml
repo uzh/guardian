@@ -1,18 +1,19 @@
 module Guard = Guardian.Make (Role.Actor) (Role.Target)
 
 module Tests (Backend : Guard.Persistence_s) = struct
+  open Guard
   module Article = Article.Make (Backend)
   module Hacker = Hacker.Make (Backend)
   module Post = Post.Make (Backend)
   module UserTarget = User.MakeTarget (Backend)
   module User = User.MakeActor (Backend)
-  module Set = Guard.RoleSet
+  module Set = RoleSet
 
   (* ensure that the `User` module conforms to the `ActorSig` module type and
      `UserTarget` conforms to `TargetSig`. *)
-  let _ = (module Article : Guard.TargetSig)
-  let _ = (module User : Guard.ActorSig)
-  let _ = (module UserTarget : Guard.TargetSig)
+  let _ = (module Article : TargetSig)
+  let _ = (module User : ActorSig)
+  let _ = (module UserTarget : TargetSig)
   let chris = "Chris", Guardian.Uuid.Actor.create ()
   let aron = "Aron", Guardian.Uuid.Actor.create ()
   let ben : Hacker.t = "Ben Hackerman", Guardian.Uuid.Actor.create ()
@@ -23,18 +24,18 @@ module Tests (Backend : Guard.Persistence_s) = struct
   let thomas_aron_post = Post.make thomas chris_article "A first reaction"
 
   let bad_rule =
-    ( `Actor (`User, snd chris)
+    ( ActorSpec.Id (`User, snd chris)
     , Guardian.Action.Update
-    , `Target (`Article, aron_article.Article.uuid) )
+    , TargetSpec.Id (`Article, aron_article.Article.uuid) )
   ;;
 
-  let global_rules : Guard.Rule.t list =
+  let global_rules : Rule.t list =
     let open Guardian.Action in
-    [ `ActorEntity `User, Read, `TargetEntity `Article
-    ; `ActorEntity `Admin, Manage, `TargetEntity `Article
-    ; ( `ActorEntity (`Editor chris_article.Article.uuid)
+    [ ActorSpec.Entity `User, Read, TargetSpec.Entity `Article
+    ; ActorSpec.Entity `Admin, Manage, TargetSpec.Entity `Article
+    ; ( ActorSpec.Entity (`Editor chris_article.Article.uuid)
       , Update
-      , `Target (`Article, chris_article.Article.uuid) )
+      , TargetSpec.Id (`Article, chris_article.Article.uuid) )
       (* Explanation: Someone with actor rule "Editor of uuid X" has the
          permission to update the "Target with uuid X" *)
     ]
@@ -131,12 +132,12 @@ module Tests (Backend : Guard.Persistence_s) = struct
   let test_push_rules ?ctx _ () =
     (let* put =
        Backend.Rule.save_all ?ctx global_rules
-       |> Lwt_result.map_error [%show: Guard.Rule.t list]
+       |> Lwt_result.map_error [%show: Rule.t list]
      in
-     Lwt.return_ok (CCList.map Guard.Rule.show put))
+     Lwt.return_ok (CCList.map Rule.show put))
     >|= Alcotest.(check (result (slist string CCString.compare) string))
           "Push global permissions."
-          (Ok (CCList.map Guard.Rule.show global_rules))
+          (Ok (CCList.map Rule.show global_rules))
   ;;
 
   let save_existing_rule ?ctx _ () =
@@ -149,12 +150,12 @@ module Tests (Backend : Guard.Persistence_s) = struct
   let test_read_rules ?ctx _ () =
     let open Guard in
     (let%lwt article_rules =
-       Backend.Rule.find_all ?ctx (`TargetEntity `Article)
+       Backend.Rule.find_all ?ctx (TargetSpec.Entity `Article)
      in
      let%lwt editor_rules =
        Backend.Rule.find_all
          ?ctx
-         (`Target (`Article, chris_article.Article.uuid))
+         (TargetSpec.Id (`Article, chris_article.Article.uuid))
      in
      let perms = article_rules @ editor_rules in
      let global_set = Rule.Set.of_list global_rules in
@@ -174,7 +175,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
      let%lwt perms =
        Backend.Rule.find_all
          ?ctx
-         (`Target (`Article, aron_article.Article.uuid))
+         (TargetSpec.Id (`Article, aron_article.Article.uuid))
      in
      let* () =
        match perms with
@@ -187,7 +188,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
      let%lwt perms' =
        Backend.Rule.find_all
          ?ctx
-         (`Target (`Article, aron_article.Article.uuid))
+         (TargetSpec.Id (`Article, aron_article.Article.uuid))
      in
      match perms' with
      | [] -> Lwt.return_ok ()
@@ -265,9 +266,8 @@ module Tests (Backend : Guard.Persistence_s) = struct
      match thomas_auth with
      | Ok thomas_user ->
        let as_target =
-         ( `User
-         , Guardian.Uuid.(
-             thomas |> snd |> Actor.to_string |> Target.of_string_exn) )
+         Guardian.Uuid.(
+           thomas |> snd |> Actor.to_string |> Target.of_string_exn)
        in
        let%lwt res =
          User.update_name
@@ -345,13 +345,13 @@ module Tests (Backend : Guard.Persistence_s) = struct
       let* () =
         Backend.Rule.save
           ?ctx
-          ( `ActorEntity (`Editor target'.Target.uuid)
+          ( ActorSpec.Entity (`Editor target'.Target.uuid)
           , Guardian.Action.Manage
-          , `Target (`User, target'.Target.uuid) )
+          , TargetSpec.Id (`User, target'.Target.uuid) )
       in
       let effects =
         EffectSet.One
-          (Guardian.Action.Manage, `Target (`User, target'.Target.uuid))
+          (Guardian.Action.Manage, TargetSpec.Id (`User, target'.Target.uuid))
       in
       Backend.validate_effects ?ctx effects actor
     in

@@ -96,25 +96,27 @@ struct
         include Guard.Rule
 
         let t =
+          let open Guard in
           let encode = function
-            | `ActorEntity arole, act, `TargetEntity trole ->
+            | ActorSpec.Entity arole, act, TargetSpec.Entity trole ->
               Ok (arole, (None, (act, (trole, None))))
-            | `Actor (arole, aid), act, `TargetEntity trole ->
+            | ActorSpec.Id (arole, aid), act, TargetSpec.Entity trole ->
               Ok (arole, (Some aid, (act, (trole, None))))
-            | `ActorEntity arole, act, `Target (trole, tid) ->
+            | ActorSpec.Entity arole, act, TargetSpec.Id (trole, tid) ->
               Ok (arole, (None, (act, (trole, Some tid))))
-            | `Actor (arole, aid), act, `Target (trole, tid) ->
+            | ActorSpec.Id (arole, aid), act, TargetSpec.Id (trole, tid) ->
               Ok (arole, (Some aid, (act, (trole, Some tid))))
           in
           let decode (arole, (aid, (act, (trole, tid)))) =
             match aid, tid with
             | Some aid, Some tid ->
-              Ok (`Actor (arole, aid), act, `Target (trole, tid))
+              Ok (ActorSpec.Id (arole, aid), act, TargetSpec.Id (trole, tid))
             | None, Some tid ->
-              Ok (`ActorEntity arole, act, `Target (trole, tid))
+              Ok (ActorSpec.Entity arole, act, TargetSpec.Id (trole, tid))
             | Some aid, None ->
-              Ok (`Actor (arole, aid), act, `TargetEntity trole)
-            | None, None -> Ok (`ActorEntity arole, act, `TargetEntity trole)
+              Ok (ActorSpec.Id (arole, aid), act, TargetSpec.Entity trole)
+            | None, None ->
+              Ok (ActorSpec.Entity arole, act, TargetSpec.Entity trole)
           in
           Caqti_type.(
             custom
@@ -128,6 +130,7 @@ struct
         ;;
 
         let find_all ?ctx target_spec =
+          let open Guard in
           let select =
             Format.asprintf
               {sql|
@@ -154,7 +157,7 @@ struct
             |sql}
           in
           match target_spec with
-          | `Target (role, uuid) ->
+          | TargetSpec.Id (role, uuid) ->
             let where =
               {sql|WHERE target_role = ? AND target_id = UNHEX(REPLACE(?, '-', ''))|sql}
             in
@@ -162,7 +165,7 @@ struct
               select where |> Caqti_type.(tup2 Kind.t Uuid.Target.t ->* t)
             in
             Database.collect ?ctx caqti (role, uuid)
-          | `TargetEntity role ->
+          | TargetSpec.Entity role ->
             let where = {sql|WHERE target_role = ?|sql} in
             let caqti = select where |> Kind.t ->* t in
             Database.collect ?ctx caqti role

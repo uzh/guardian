@@ -32,7 +32,8 @@ module Make (P : Guard.Persistence_s) = struct
       P.wrap_function
         ?ctx
         CCFun.id
-        EffectSet.(One (Guardian.Action.Update, `Target (`Article, t.uuid)))
+        EffectSet.(
+          One (Guardian.Action.Update, TargetSpec.Id (`Article, t.uuid)))
         f
     in
     wrapped actor new_title
@@ -53,7 +54,8 @@ module Make (P : Guard.Persistence_s) = struct
       P.wrap_function
         ?ctx
         CCFun.id
-        EffectSet.(One (Guardian.Action.Manage, `Target (`Article, t.uuid)))
+        EffectSet.(
+          One (Guardian.Action.Manage, TargetSpec.Id (`Article, t.uuid)))
         f
     in
     wrapped actor new_author
