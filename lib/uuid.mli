@@ -1,2 +1,4 @@
-module Actor : Sig.Uuid
-module Target : Sig.Uuid
+module type Sig = Sig.Uuid
+
+module Actor : Sig
+module Target : Sig

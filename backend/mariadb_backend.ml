@@ -1,133 +1,99 @@
+open CCFun.Infix
 open Lwt.Infix
 open Caqti_request.Infix
 
 module Make
-  (A : Guardian.RoleSig)
-  (T : Guardian.RoleSig)
-  (Db : Database_pools.Sig) =
+  (Actor : Guardian.RoleSig)
+  (Target : Guardian.RoleSig)
+  (Database : Database_pools.Sig) =
 struct
-  open CCFun.Infix
-  module Guardian = Guardian.Make (A) (T)
-  module Authorizer = Guardian.Authorizer
+  module Guard = Guardian.Make (Actor) (Target)
+  module Authorizer = Guard.Authorizer
 
-  module Uuid = struct
-    include Guardian.Uuid
+  module BaseType (Core : Guardian.RoleSig) = struct
+    include Core
 
-    module Actor = struct
-      include Actor
-
-      let t =
-        Caqti_type.(
-          custom
-            ~encode:(to_string %> CCResult.pure)
-            ~decode:(fun id ->
-              id
-              |> of_string
-              |> CCOption.to_result (Format.asprintf "Invalid UUID: %s" id))
-            string)
-      ;;
-    end
-
-    module Target = struct
-      include Target
-
-      let t =
-        Caqti_type.(
-          custom
-            ~encode:(to_string %> CCResult.pure)
-            ~decode:(fun id ->
-              id
-              |> of_string
-              |> CCOption.to_result (Format.asprintf "Invalid UUID: %s" id))
-            string)
-      ;;
-    end
-  end
-
-  module ActorSet = struct
-    include Guardian.ActorRoleSet
-
-    let t =
-      Caqti_type.(
-        custom
-          ~encode:(to_yojson %> Yojson.Safe.to_string %> CCResult.pure)
-          ~decode:(Yojson.Safe.from_string %> of_yojson)
-          string)
-    ;;
-  end
-
-  module TargetSet = struct
-    include Guardian.TargetRoleSet
-
-    let t =
-      Caqti_type.(
-        custom
-          ~encode:(to_yojson %> Yojson.Safe.to_string %> CCResult.pure)
-          ~decode:(Yojson.Safe.from_string %> of_yojson)
-          string)
-    ;;
-  end
-
-  module Owner = struct
     let t =
       let open CCResult in
       Caqti_type.(
         custom
-          ~encode:(CCOption.map Uuid.Actor.to_string %> pure)
-          ~decode:(CCFun.flip CCOption.bind Uuid.Actor.of_string %> pure)
-          (option string))
-    ;;
-  end
-
-  module ActorRole = struct
-    type t = A.t
-
-    let t =
-      Caqti_type.(
-        custom
-          ~encode:(A.show %> CCResult.pure)
-          ~decode:(A.of_string %> CCResult.pure)
+          ~encode:(Core.show %> return)
+          ~decode:(of_string %> return)
           string)
     ;;
   end
 
-  module TargetRole = struct
-    type t = T.t
+  module Uuid = struct
+    include Guardian.Uuid
+
+    module UuidBase (Core : Guardian.Uuid.Sig) = struct
+      include Core
+
+      let t =
+        Caqti_type.(
+          custom
+            ~encode:(to_string %> CCResult.return)
+            ~decode:(fun id ->
+              id
+              |> of_string
+              |> CCOption.to_result (Format.asprintf "Invalid UUID: %s" id))
+            string)
+      ;;
+    end
+
+    module Actor = UuidBase (Actor)
+    module Target = UuidBase (Target)
+  end
+
+  module Owner = struct
+    let t = Caqti_type.(option Uuid.Actor.t)
+  end
+
+  module Role = BaseType (Actor)
+  module Kind = BaseType (Target)
+
+  module Roles = struct
+    include Guard.ActorRoleSet
 
     let t =
       Caqti_type.(
         custom
-          ~encode:(T.show %> CCResult.pure)
-          ~decode:(T.of_string %> CCResult.pure)
+          ~encode:(to_yojson %> Yojson.Safe.to_string %> CCResult.return)
+          ~decode:(Yojson.Safe.from_string %> of_yojson)
           string)
     ;;
   end
 
   module Action = struct
-    include Guardian.Action
+    include Guard.Action
 
     let t =
+      let open CCResult in
       Caqti_type.(
         custom
-          ~encode:(to_string %> CCResult.pure)
-          ~decode:(of_string %> CCResult.pure)
+          ~encode:(Guard.Action.show %> return)
+          ~decode:(of_string %> return)
           string)
     ;;
   end
 
-  include Guardian.Make_persistence (struct
-    type 'a authorizable = 'a Guardian.Authorizable.t
-    type 'b authorizable_target = 'b Guardian.AuthorizableTarget.t
-    type role = A.t
-    type auth_rule = Authorizer.auth_rule
-    type actor_role_set = ActorSet.t
-    type actor_spec = Authorizer.Actor.spec
-    type target_role_set = TargetSet.t
-    type target_spec = Authorizer.Target.spec
-    type target_typ = TargetSet.elt
+  include Guard.Make_persistence (struct
+    type 'a authorizable = 'a Guard.Authorizable.t
+    type 'b authorizable_target = 'b Guard.AuthorizableTarget.t
+    type role = Actor.t
+    type actor_role_set = Roles.t
+    type actor_spec = Guard.ActorSpec.t
+    type auth_rule = Guard.Rule.t
+    type auth_rule_set = Guard.AuthRuleSet.t
+    type effect = Guard.Effect.t
+    type auth_set = Guard.AuthenticationSet.t
+    type target_spec = Guard.TargetSpec.t
+    type target_typ = Target.t
     type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
 
     module Rule = struct
+      include Guard.Rule
+
       let t =
         let encode = function
           | `ActorEntity arole, act, `TargetEntity trole ->
@@ -152,45 +118,63 @@ struct
             ~encode
             ~decode
             (tup2
-               ActorRole.t
+               Role.t
                (tup2
                   (option Uuid.Actor.t)
-                  (tup2 Action.t (tup2 TargetRole.t (option Uuid.Target.t))))))
+                  (tup2 Action.t (tup2 Kind.t (option Uuid.Target.t))))))
       ;;
 
       let find_all ?ctx target_spec =
-        let%lwt res =
-          let select =
-            {sql|SELECT actor_role, actor_id, act, target_role, target_id FROM guardian_rules|sql}
-          in
-          match target_spec with
-          | `Target (role, uuid) ->
-            let where = {sql|WHERE target_role = ? AND target_id = ?|sql} in
-            let caqti =
-              Format.asprintf "%s\n%s" select where
-              |> Caqti_type.(tup2 TargetRole.t Uuid.Target.t ->* t)
-            in
-            Db.collect ?ctx caqti (role, uuid)
-          | `TargetEntity role ->
-            let where = {sql|WHERE target_role = ?|sql} in
-            let caqti =
-              Format.asprintf "%s\n%s" select where |> TargetRole.t ->* t
-            in
-            Db.collect ?ctx caqti role
+        let select =
+          Format.asprintf
+            {sql|
+              SELECT
+                actor_role,
+                LOWER(CONCAT(
+                  SUBSTR(HEX(actor_id), 1, 8), '-',
+                  SUBSTR(HEX(actor_id), 9, 4), '-',
+                  SUBSTR(HEX(actor_id), 13, 4), '-',
+                  SUBSTR(HEX(actor_id), 17, 4), '-',
+                  SUBSTR(HEX(actor_id), 21)
+                )),
+                act,
+                target_role,
+                LOWER(CONCAT(
+                  SUBSTR(HEX(target_id), 1, 8), '-',
+                  SUBSTR(HEX(target_id), 9, 4), '-',
+                  SUBSTR(HEX(target_id), 13, 4), '-',
+                  SUBSTR(HEX(target_id), 17, 4), '-',
+                  SUBSTR(HEX(target_id), 21)
+                ))
+              FROM guardian_rules
+              %s
+            |sql}
         in
-        res |> Lwt.return_ok
+        match target_spec with
+        | `Target (role, uuid) ->
+          let where =
+            {sql|WHERE target_role = ? AND target_id = UNHEX(REPLACE(?, '-', ''))|sql}
+          in
+          let caqti =
+            select where |> Caqti_type.(tup2 Kind.t Uuid.Target.t ->* t)
+          in
+          Database.collect ?ctx caqti (role, uuid)
+        | `TargetEntity role ->
+          let where = {sql|WHERE target_role = ?|sql} in
+          let caqti = select where |> Kind.t ->* t in
+          Database.collect ?ctx caqti role
       ;;
 
       let act_on_rule ?ctx query rule =
         let caqti = Caqti_type.(t ->. unit) query in
-        Db.exec ?ctx caqti rule |> Lwt_result.ok
+        Database.exec ?ctx caqti rule |> Lwt_result.ok
       ;;
 
       let save ?ctx auth_rule =
         let query =
           {sql|
             INSERT INTO guardian_rules (actor_role, actor_id, act, target_role, target_id)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, UNHEX(REPLACE(?, '-', '')), ?, ?, UNHEX(REPLACE(?, '-', '')))
           |sql}
         in
         act_on_rule ?ctx query auth_rule
@@ -200,7 +184,11 @@ struct
         let query =
           {sql|
             DELETE FROM guardian_rules
-            WHERE actor_role = ? AND actor_id = ? AND act = ? AND target_role = ? AND target_id = ?
+            WHERE actor_role = ?
+              AND actor_id = UNHEX(REPLACE(?, '-', ''))
+              AND act = ?
+              AND target_role = ?
+              AND target_id = UNHEX(REPLACE(?, '-', ''))
           |sql}
         in
         act_on_rule ?ctx query auth_rule
@@ -211,18 +199,23 @@ struct
       module Authorizable = struct
         let create ?ctx ?owner roles id =
           let caqti =
-            {sql|INSERT INTO guardian_actors (id, roles, parent) VALUES (?, ?, ?)|sql}
-            |> Caqti_type.(tup3 Uuid.Actor.t ActorSet.t Owner.t ->. unit)
+            {sql|
+              INSERT INTO guardian_actors (id, roles, parent)
+              VALUES (UNHEX(REPLACE(?, '-', '')), ?, UNHEX(REPLACE(?, '-', '')))
+              ON DUPLICATE KEY UPDATE
+                updated_at = NOW()
+            |sql}
+            |> Caqti_type.(tup3 Uuid.Actor.t Roles.t Owner.t ->. unit)
           in
-          Db.exec ?ctx caqti (id, roles, owner) |> Lwt_result.ok
+          Database.exec ?ctx caqti (id, roles, owner) |> Lwt_result.ok
         ;;
 
         let mem ?ctx id =
           let caqti =
-            {sql|SELECT roles FROM guardian_actors WHERE id = ?|sql}
-            |> Caqti_type.(Uuid.Actor.t ->? string)
+            {sql|SELECT roles FROM guardian_actors WHERE id = UNHEX(REPLACE(?, '-', ''))|sql}
+            |> Uuid.Actor.t ->? Caqti_type.string
           in
-          Db.find_opt ?ctx caqti id >|= CCOption.is_some |> Lwt_result.ok
+          Database.find_opt ?ctx caqti id >|= CCOption.is_some |> Lwt_result.ok
         ;;
       end
 
@@ -230,83 +223,115 @@ struct
         let open Lwt.Infix in
         let open Lwt_result.Syntax in
         let caqti =
-          {sql|SELECT roles, parent FROM guardian_actors WHERE id = ?|sql}
-          |> Caqti_type.(Uuid.Actor.t ->? tup2 ActorSet.t Owner.t)
+          {sql|
+            SELECT
+              roles,
+              LOWER(CONCAT(
+                SUBSTR(HEX(parent), 1, 8), '-',
+                SUBSTR(HEX(parent), 9, 4), '-',
+                SUBSTR(HEX(parent), 13, 4), '-',
+                SUBSTR(HEX(parent), 17, 4), '-',
+                SUBSTR(HEX(parent), 21)
+              ))
+            FROM guardian_actors WHERE id = UNHEX(REPLACE(?, '-', ''))
+          |sql}
+          |> Caqti_type.(Uuid.Actor.t ->? tup2 Roles.t Owner.t)
         in
         let* roles, owner =
-          Db.find_opt ?ctx caqti id >|= CCOption.to_result "No actor found."
+          Database.find_opt ?ctx caqti id
+          >|= CCOption.to_result "No actor found."
         in
-        Guardian.Authorizable.make ?owner roles typ id |> Lwt.return_ok
+        Guard.Authorizable.make ?owner roles typ id |> Lwt.return_ok
       ;;
 
       let find_roles ?ctx id =
         let open Lwt.Infix in
         let caqti =
-          {sql|SELECT roles FROM guardian_actors WHERE id = ?|sql}
-          |> Uuid.Actor.t ->? ActorSet.t
+          {sql|SELECT roles FROM guardian_actors WHERE id = UNHEX(REPLACE(?, '-', ''))|sql}
+          |> Uuid.Actor.t ->? Roles.t
         in
-        Db.find_opt ?ctx caqti id >|= CCOption.to_result "No actor roles found."
+        Database.find_opt ?ctx caqti id
+        >|= CCOption.to_result "No actor roles found."
+      ;;
+
+      let update_roles_request ?ctx uuid roles =
+        let caqti =
+          {sql|UPDATE guardian_actors SET roles = ? WHERE id = UNHEX(REPLACE(?, '-', ''))|sql}
+          |> Caqti_type.(tup2 Roles.t Uuid.Actor.t ->. unit)
+        in
+        Database.exec ?ctx caqti (roles, uuid) |> Lwt_result.ok
       ;;
 
       let grant_roles ?ctx uuid roles =
         let open Lwt_result.Syntax in
         let* pre_roles = find_roles ?ctx uuid in
-        let roles' = ActorSet.union roles pre_roles in
-        if ActorSet.(cardinal roles' > cardinal pre_roles)
-        then (
-          let caqti =
-            {sql|UPDATE guardian_actors SET roles = ? WHERE id = ?|sql}
-            |> Caqti_type.(tup2 ActorSet.t Uuid.Actor.t ->. unit)
-          in
-          Db.exec ?ctx caqti (roles', uuid) |> Lwt_result.ok)
+        let roles' = Roles.union roles pre_roles in
+        if Roles.(cardinal roles' > cardinal pre_roles)
+        then update_roles_request ?ctx uuid roles'
         else Lwt.return_ok ()
       ;;
 
       let revoke_roles ?ctx uuid roles =
         let open Lwt_result.Syntax in
         let* pre_roles = find_roles ?ctx uuid in
-        let roles' = ActorSet.diff pre_roles roles in
-        let caqti =
-          {sql|UPDATE guardian_actors SET roles = ? WHERE id = ?|sql}
-          |> Caqti_type.(tup2 ActorSet.t Uuid.Actor.t ->. unit)
-        in
-        Db.exec ?ctx caqti (roles', uuid) |> Lwt_result.ok
+        let roles' = Roles.diff pre_roles roles in
+        update_roles_request ?ctx uuid roles'
       ;;
 
       let find_owner ?ctx id =
         let open Lwt.Infix in
         let caqti =
-          {sql|SELECT parent FROM guardian_actors WHERE id = ?|sql}
+          {sql|
+            SELECT
+              LOWER(CONCAT(
+                SUBSTR(HEX(parent), 1, 8), '-',
+                SUBSTR(HEX(parent), 9, 4), '-',
+                SUBSTR(HEX(parent), 13, 4), '-',
+                SUBSTR(HEX(parent), 17, 4), '-',
+                SUBSTR(HEX(parent), 21)
+              ))
+            FROM guardian_actors
+            WHERE id = UNHEX(REPLACE(?, '-', ''))
+          |sql}
           |> Uuid.Actor.t ->? Owner.t
         in
-        Db.find_opt ?ctx caqti id >|= CCOption.flatten |> Lwt_result.ok
+        Database.find_opt ?ctx caqti id >|= CCOption.flatten |> Lwt_result.ok
       ;;
 
       let save_owner ?ctx ?owner id =
         let caqti =
           Caqti_type.(tup2 Owner.t Uuid.Actor.t ->. unit)
-            {sql|UPDATE guardian_actors SET parent = ? WHERE id = ?|sql}
+            {sql|
+              UPDATE guardian_actors
+              SET parent = UNHEX(REPLACE(?, '-', ''))
+              WHERE id = UNHEX(REPLACE(?, '-', ''))
+            |sql}
         in
-        Db.exec ?ctx caqti (owner, id) |> Lwt_result.ok
+        Database.exec ?ctx caqti (owner, id) |> Lwt_result.ok
       ;;
     end
 
     module Target = struct
       module Authorizable = struct
-        let create ?ctx ?owner roles id =
+        let create ?ctx ?owner kind id =
           let caqti =
-            {sql|INSERT INTO guardian_targets (id, roles, parent) VALUES (?, ?, ?)|sql}
-            |> Caqti_type.(tup3 Uuid.Target.t TargetSet.t Owner.t ->. unit)
+            {sql|
+              INSERT INTO guardian_targets (id, kind, parent)
+              VALUES (UNHEX(REPLACE(?, '-', '')), ?, UNHEX(REPLACE(?, '-', '')))
+              ON DUPLICATE KEY UPDATE
+                updated_at = NOW()
+            |sql}
+            |> Caqti_type.(tup3 Uuid.Target.t Kind.t Owner.t ->. unit)
           in
-          Db.exec ?ctx caqti (id, roles, owner) |> Lwt_result.ok
+          Database.exec ?ctx caqti (id, kind, owner) |> Lwt_result.ok
         ;;
 
         let mem ?ctx id =
           let caqti =
-            {sql|SELECT roles FROM guardian_targets WHERE id = ?|sql}
-            |> Uuid.Target.t ->? TargetSet.t
+            {sql|SELECT kind FROM guardian_targets WHERE id = UNHEX(REPLACE(?, '-', ''))|sql}
+            |> Uuid.Target.t ->? Kind.t
           in
-          Db.find_opt ?ctx caqti id >|= CCOption.is_some |> Lwt_result.ok
+          Database.find_opt ?ctx caqti id >|= CCOption.is_some |> Lwt_result.ok
         ;;
       end
 
@@ -314,41 +339,67 @@ struct
         let open Lwt.Infix in
         let open Lwt_result.Syntax in
         let caqti =
-          {sql|SELECT roles, parent FROM guardian_targets WHERE id = ?|sql}
-          |> Caqti_type.(Uuid.Target.t ->? tup2 TargetSet.t Owner.t)
+          {sql|
+            SELECT LOWER(CONCAT(
+              SUBSTR(HEX(parent), 1, 8), '-',
+              SUBSTR(HEX(parent), 9, 4), '-',
+              SUBSTR(HEX(parent), 13, 4), '-',
+              SUBSTR(HEX(parent), 17, 4), '-',
+              SUBSTR(HEX(parent), 21)
+            ))
+            FROM guardian_targets
+            WHERE id = UNHEX(REPLACE(?, '-', '')) AND kind = ?
+          |sql}
+          |> Caqti_type.(tup2 Uuid.Target.t Kind.t ->? Owner.t)
         in
-        let* entity, owner =
-          Db.find_opt ?ctx caqti id >|= CCOption.to_result "No target found."
+        let* owner =
+          Database.find_opt ?ctx caqti (id, typ)
+          >|= CCOption.to_result "No target found."
         in
-        Guardian.AuthorizableTarget.make ?owner entity typ id |> Lwt.return_ok
+        Guard.AuthorizableTarget.make ?owner typ id |> Lwt.return_ok
       ;;
 
-      let find_roles ?ctx id =
+      let find_kind ?ctx id =
         let open Lwt.Infix in
         let caqti =
-          {sql|SELECT roles FROM guardian_targets WHERE id = ?|sql}
-          |> Uuid.Target.t ->? TargetSet.t
+          {sql|SELECT kind FROM guardian_targets WHERE id = UNHEX(REPLACE(?, '-', ''))|sql}
+          |> Uuid.Target.t ->? Kind.t
         in
-        Db.find_opt ?ctx caqti id
-        >|= CCOption.to_result "No target roles found."
+        Database.find_opt ?ctx caqti id
+        >|= CCOption.to_result "No target kind found."
       ;;
 
       let find_owner ?ctx id =
         let open Lwt.Infix in
         let caqti =
-          {sql|SELECT parent FROM guardian_targets WHERE id = ?|sql}
+          {sql|
+            SELECT
+              LOWER(CONCAT(
+                SUBSTR(HEX(parent), 1, 8), '-',
+                SUBSTR(HEX(parent), 9, 4), '-',
+                SUBSTR(HEX(parent), 13, 4), '-',
+                SUBSTR(HEX(parent), 17, 4), '-',
+                SUBSTR(HEX(parent), 21)
+              ))
+            FROM guardian_targets
+            WHERE id = UNHEX(REPLACE(?, '-', ''))
+          |sql}
           |> Uuid.Target.t ->? Owner.t
         in
-        Db.find_opt ?ctx caqti id
+        Database.find_opt ?ctx caqti id
         >|= CCOption.to_result "No target found to return its owner."
       ;;
 
       let save_owner ?ctx ?owner id =
         let caqti =
-          {sql|UPDATE guardian_targets SET parent = ? WHERE id = ?|sql}
+          {sql|
+            UPDATE guardian_targets
+            SET parent = UNHEX(REPLACE(?, '-', ''))
+            WHERE id = UNHEX(REPLACE(?, '-', ''))
+          |sql}
           |> Caqti_type.(tup2 Owner.t Uuid.Target.t ->. unit)
         in
-        Db.exec ?ctx caqti (owner, id) |> Lwt_result.ok
+        Database.exec ?ctx caqti (owner, id) |> Lwt_result.ok
       ;;
     end
 
@@ -369,7 +420,7 @@ struct
       |> find_migrations
       |> Lwt_list.iter_s (fun (key, date, sql) ->
            Logs.debug (fun m -> m "Migration: Run '%s' from '%s'" key date);
-           Db.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
+           Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
     ;;
 
     (** [clean ()] runs clean on a specified context [?ctx] **)
@@ -378,7 +429,7 @@ struct
       |> find_clean
       |> Lwt_list.iter_s (fun (key, sql) ->
            Logs.debug (fun m -> m "Clean: Run '%s'" key);
-           Db.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
+           Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
     ;;
   end)
 end

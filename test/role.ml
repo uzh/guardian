@@ -8,7 +8,7 @@ module Actor = struct
     ]
   [@@deriving show, eq, ord, yojson]
 
-  let name t = show t |> Guardian.Util.decompose_variant_string |> fst
+  let name t = show t |> Guardian.Utils.decompose_variant_string |> fst
 
   let find_target = function
     | `User | `Admin | `Hacker -> None
@@ -19,7 +19,7 @@ module Actor = struct
   let all = [ `User; `Admin; `Hacker; `Editor Guardian.Uuid.Target.nil ]
 
   let of_string s =
-    match Guardian.Util.decompose_variant_string s with
+    match Guardian.Utils.decompose_variant_string s with
     | "user", [] -> `User
     | "admin", [] -> `Admin
     | "hacker", [] -> `Hacker
@@ -38,7 +38,7 @@ module Target = struct
     ]
   [@@deriving show, eq, ord, yojson]
 
-  let name t = show t |> Guardian.Util.decompose_variant_string |> fst
+  let name t = show t |> Guardian.Utils.decompose_variant_string |> fst
 
   let find_target = function
     | `User | `Article | `Post -> None
@@ -48,7 +48,7 @@ module Target = struct
   let all = [ `User; `Article; `Post ]
 
   let of_string s =
-    match Guardian.Util.decompose_variant_string s with
+    match Guardian.Utils.decompose_variant_string s with
     | "user", [] -> `User
     | "article", [] -> `Article
     | "post", [] -> `Post

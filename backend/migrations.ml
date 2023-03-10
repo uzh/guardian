@@ -1,9 +1,11 @@
 let create_guardian_actors_table_sql =
   {sql|
     CREATE TABLE IF NOT EXISTS guardian_actors (
-      id TEXT UNIQUE NOT NULL,
+      id binary(16) UNIQUE NOT NULL,
       roles TEXT NOT NULL,
-      parent TEXT
+      parent binary(16) NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   |sql}
 ;;
@@ -11,9 +13,13 @@ let create_guardian_actors_table_sql =
 let create_guardian_targets_table_sql =
   {sql|
     CREATE TABLE IF NOT EXISTS guardian_targets (
-      id TEXT UNIQUE NOT NULL,
-      roles TEXT NOT NULL,
-      parent TEXT
+      id binary(16) UNIQUE NOT NULL,
+      kind varchar(255) NOT NULL,
+      parent binary(16),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      -- Following constraint already handled with a unique id
+      -- CONSTRAINT unique_id_kind UNIQUE (id, kind)
     )
   |sql}
 ;;
@@ -21,23 +27,13 @@ let create_guardian_targets_table_sql =
 let create_guardian_rules_table_sql =
   {sql|
     CREATE TABLE IF NOT EXISTS guardian_rules (
-      actor_id TEXT,
-      actor_role TEXT,
-      act TEXT NOT NULL,
-      target_id TEXT,
-      target_role TEXT,
-      -- These constraints are necessary to prevent rules that cannot be
-      -- represented within OCaml.
-      CONSTRAINT only_one_actor
-        CHECK(
-          (actor_id IS NULL AND actor_role IS NOT NULL)
-          OR (actor_id IS NOT NULL AND actor_role IS NOT NULL)
-        ),
-      CONSTRAINT only_one_target
-        CHECK(
-          (target_id IS NULL AND target_role IS NOT NULL)
-          OR (target_id IS NOT NULL AND target_role IS NOT NULL)
-        ),
+      actor_role varchar(255) NOT NULL,
+      actor_id binary(16) NULL,
+      act ENUM('create', 'read', 'update', 'delete', 'manage') NOT NULL,
+      target_role varchar(255) NOT NULL,
+      target_id binary(16) NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       CONSTRAINT actor_act_target UNIQUE (actor_role, actor_id, act, target_role, target_id)
     )
   |sql}
@@ -47,13 +43,13 @@ let all_tables = [ "guardian_actors"; "guardian_targets"; "guardian_rules" ]
 
 let all =
   [ ( "create guardian actors table"
-    , "2022-10-28T11:30"
+    , "2023-03-09T17:00"
     , create_guardian_actors_table_sql )
   ; ( "create guardian rule table"
-    , "2022-10-28T11:31"
+    , "2023-03-09T17:01"
     , create_guardian_rules_table_sql )
   ; ( "create guardian targets table"
-    , "2022-11-14T11:30"
+    , "2023-03-09T17:02"
     , create_guardian_targets_table_sql )
   ]
 ;;

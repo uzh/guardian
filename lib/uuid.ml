@@ -1,3 +1,5 @@
+module type Sig = Sig.Uuid
+
 module UuidBase = struct
   include Uuidm
 

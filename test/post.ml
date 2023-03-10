@@ -2,12 +2,13 @@ module Make (P : Guard.Persistence_s) = struct
   module User = User.MakeActor (P)
   module Article = Article.Make (P)
 
+  (* TODO: register current -> parent entities (ability to create dependency
+     tree)*)
   let _ =
-    P.Dependency.register `Post (fun ?ctx spec ->
-      let _ = ctx in
+    P.Dependency.register `Post (fun ?ctx:_ (action, spec) ->
       match spec with
       | `TargetEntity `Post | `Target (`Post, _) ->
-        Lwt.return_ok (Some (`TargetEntity `Article))
+        Lwt.return_ok (Some (action, `TargetEntity `Article))
       | _ -> Lwt.return_error "Invalid entity provided")
   ;;
 
@@ -20,8 +21,6 @@ module Make (P : Guard.Persistence_s) = struct
     }
   [@@deriving show]
 
-  type kind = [ `Post ]
-
   let make ?id author article comment =
     let uuid = CCOption.get_or ~default:(Guard.Uuid.Target.create ()) id in
     { uuid; comment; article; author }
@@ -30,11 +29,7 @@ module Make (P : Guard.Persistence_s) = struct
   let to_authorizable ?ctx =
     let open Guard in
     P.Target.decorate ?ctx (fun t ->
-      AuthorizableTarget.make
-        ~owner:(snd t.author)
-        (TargetRoleSet.singleton `Post)
-        `Post
-        t.uuid)
+      AuthorizableTarget.make ~owner:(snd t.author) `Post t.uuid)
   ;;
 
   let update_post ?ctx (actor : [ `User ] Guard.Authorizable.t) t new_comment =
@@ -44,7 +39,10 @@ module Make (P : Guard.Persistence_s) = struct
       Lwt.return_ok t
     in
     let* () =
-      P.checker_of_effects ?ctx [ `Update, `Target (`Post, t.uuid) ] actor
+      P.validate_effects
+        ?ctx
+        Guard.(AuthenticationSet.One (Action.Update, `Target (`Post, t.uuid)))
+        actor
     in
     f new_comment
   ;;

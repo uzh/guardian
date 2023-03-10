@@ -10,8 +10,6 @@ module Make (P : Guard.Persistence_s) = struct
     }
   [@@deriving show]
 
-  type kind = [ `Article ]
-
   let make ?id title content author =
     let uuid = CCOption.get_or ~default:(Guard.Uuid.Target.create ()) id in
     { uuid; title; content; author }
@@ -20,11 +18,7 @@ module Make (P : Guard.Persistence_s) = struct
   let to_authorizable ?ctx =
     let open Guard in
     P.Target.decorate ?ctx (fun t ->
-      AuthorizableTarget.make
-        ~owner:(snd t.author)
-        (TargetRoleSet.singleton `Article)
-        `Article
-        t.uuid)
+      AuthorizableTarget.make ~owner:(snd t.author) `Article t.uuid)
   ;;
 
   let update_title ?ctx (actor : [ `User ] Guard.Authorizable.t) t new_title =
@@ -34,7 +28,12 @@ module Make (P : Guard.Persistence_s) = struct
       Lwt.return_ok t
     in
     let* wrapped =
-      P.wrap_function ?ctx CCFun.id [ `Update, `Target (`Article, t.uuid) ] f
+      P.wrap_function
+        ?ctx
+        CCFun.id
+        Guard.(
+          AuthenticationSet.One (Action.Update, `Target (`Article, t.uuid)))
+        f
     in
     wrapped actor new_title
   ;;
@@ -44,11 +43,21 @@ module Make (P : Guard.Persistence_s) = struct
     let f new_author =
       let () = t.author <- new_author in
       let* ent = to_authorizable ?ctx t in
-      let* () = P.Target.save_owner ?ctx ~owner:(snd new_author) ent.uuid in
+      let* () =
+        P.Target.save_owner
+          ?ctx
+          ~owner:(snd new_author)
+          ent.Guard.AuthorizableTarget.uuid
+      in
       Lwt.return_ok t
     in
     let* wrapped =
-      P.wrap_function ?ctx CCFun.id [ `Manage, `Target (`Article, t.uuid) ] f
+      P.wrap_function
+        ?ctx
+        CCFun.id
+        Guard.(
+          AuthenticationSet.One (Action.Manage, `Target (`Article, t.uuid)))
+        f
     in
     wrapped actor new_author
   ;;

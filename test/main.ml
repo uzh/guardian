@@ -3,16 +3,16 @@ module Guardian = Guardian.Make (Role.Actor) (Role.Target)
 module Tests (Backend : Guard.Persistence_s) = struct
   module Article = Article.Make (Backend)
   module Hacker = Hacker.Make (Backend)
+  module Post = Post.Make (Backend)
   module UserTarget = User.MakeTarget (Backend)
   module User = User.MakeActor (Backend)
-  module Post = Post.Make (Backend)
   module Set = Guardian.ActorRoleSet
 
-  (* ensure that the `User` module conforms to the `Actor_module` module type
-     and `UserTarget` conforms to `Target_module`. *)
-  let _ = (module Article : Guardian.Authorizer.Target_module)
-  let _ = (module User : Guardian.Authorizer.Actor_module)
-  let _ = (module UserTarget : Guardian.Authorizer.Target_module)
+  (* ensure that the `User` module conforms to the `ActorSig` module type and
+     `UserTarget` conforms to `TargetSig`. *)
+  let _ = (module Article : Guardian.Authorizer.TargetSig)
+  let _ = (module User : Guardian.Authorizer.ActorSig)
+  let _ = (module UserTarget : Guardian.Authorizer.TargetSig)
   let chris = "Chris", Guardian.Uuid.Actor.create ()
   let aron = "Aron", Guardian.Uuid.Actor.create ()
   let ben : Hacker.t = "Ben Hackerman", Guardian.Uuid.Actor.create ()
@@ -23,15 +23,18 @@ module Tests (Backend : Guard.Persistence_s) = struct
   let thomas_aron_post = Post.make thomas chris_article "A first reaction"
 
   let bad_rule =
-    `Actor (`User, snd chris), `Update, `Target (`Article, aron_article.uuid)
+    ( `Actor (`User, snd chris)
+    , Guard.Action.Update
+    , `Target (`Article, aron_article.Article.uuid) )
   ;;
 
-  let global_rules : Guardian.Authorizer.auth_rule list =
-    [ `ActorEntity `User, `Read, `TargetEntity `Article
-    ; `ActorEntity `Admin, `Manage, `TargetEntity `Article
-    ; ( `ActorEntity (`Editor chris_article.uuid)
-      , `Update
-      , `Target (`Article, chris_article.uuid) )
+  let global_rules : Guardian.Rule.t list =
+    let open Guard.Action in
+    [ `ActorEntity `User, Read, `TargetEntity `Article
+    ; `ActorEntity `Admin, Manage, `TargetEntity `Article
+    ; ( `ActorEntity (`Editor chris_article.Article.uuid)
+      , Update
+      , `Target (`Article, chris_article.Article.uuid) )
       (* Explanation: Someone with actor rule "Editor of uuid X" has the
          permission to update the "Target with uuid X" *)
     ]
@@ -128,26 +131,37 @@ module Tests (Backend : Guard.Persistence_s) = struct
   let test_push_rules ?ctx _ () =
     (let* put =
        Backend.Rule.save_all ?ctx global_rules
-       |> Lwt_result.map_error [%show: Guard.Authorizer.auth_rule list]
+       |> Lwt_result.map_error [%show: Guard.Rule.t list]
      in
-     Lwt.return_ok (CCList.map Guard.Authorizer.show_auth_rule put))
+     Lwt.return_ok (CCList.map Guard.Rule.show put))
     >|= Alcotest.(check (result (slist string CCString.compare) string))
           "Push global permissions."
-          (Ok (CCList.map Guard.Authorizer.show_auth_rule global_rules))
+          (Ok (CCList.map Guard.Rule.show global_rules))
+  ;;
+
+  let save_existing_rule ?ctx _ () =
+    let existing_rule = List.hd global_rules in
+    (let* () = Backend.Rule.save ?ctx existing_rule in
+     Backend.Rule.save ?ctx existing_rule)
+    >|= Alcotest.(check (result unit string)) "Push global permissions." (Ok ())
   ;;
 
   let test_read_rules ?ctx _ () =
-    let open Guardian.Authorizer in
-    (let* article_rules = Backend.Rule.find_all ?ctx (`TargetEntity `Article) in
-     let* editor_rules =
-       Backend.Rule.find_all ?ctx (`Target (`Article, chris_article.uuid))
+    let open Guardian in
+    (let%lwt article_rules =
+       Backend.Rule.find_all ?ctx (`TargetEntity `Article)
+     in
+     let%lwt editor_rules =
+       Backend.Rule.find_all
+         ?ctx
+         (`Target (`Article, chris_article.Article.uuid))
      in
      let perms = article_rules @ editor_rules in
-     let global_set = Auth_rule_set.of_list global_rules in
-     let retrieved_set = Auth_rule_set.of_list perms in
-     let diff = Auth_rule_set.diff global_set retrieved_set in
-     let diff' = Auth_rule_set.elements diff |> [%show: auth_rule list] in
-     if Auth_rule_set.compare global_set retrieved_set = 0
+     let global_set = RuleSet.of_list global_rules in
+     let retrieved_set = RuleSet.of_list perms in
+     let diff = RuleSet.diff global_set retrieved_set in
+     let diff' = RuleSet.elements diff |> [%show: Rule.t list] in
+     if RuleSet.compare global_set retrieved_set = 0
      then Lwt.return_ok ()
      else Lwt.return_error (Format.asprintf "Permissions diff: %s." diff'))
     >|= Alcotest.(check (result unit string))
@@ -157,8 +171,10 @@ module Tests (Backend : Guard.Persistence_s) = struct
 
   let test_drop_rules ?ctx _ () =
     (let* () = Backend.Rule.save ?ctx bad_rule in
-     let* perms =
-       Backend.Rule.find_all ?ctx (`Target (`Article, aron_article.uuid))
+     let%lwt perms =
+       Backend.Rule.find_all
+         ?ctx
+         (`Target (`Article, aron_article.Article.uuid))
      in
      let* () =
        match perms with
@@ -168,8 +184,10 @@ module Tests (Backend : Guard.Persistence_s) = struct
        | _ -> Lwt.return_error "Invalid permissions."
      in
      let* () = Backend.Rule.delete ?ctx bad_rule in
-     let* perms' =
-       Backend.Rule.find_all ?ctx (`Target (`Article, aron_article.uuid))
+     let%lwt perms' =
+       Backend.Rule.find_all
+         ?ctx
+         (`Target (`Article, aron_article.Article.uuid))
      in
      match perms' with
      | [] -> Lwt.return_ok ()
@@ -188,6 +206,29 @@ module Tests (Backend : Guard.Persistence_s) = struct
     >|= Alcotest.(check (result bool string))
           "Chris can update an article owned by Chris."
           (Ok true)
+  ;;
+
+  let owner_can_update ?ctx _ () =
+    let open CCFun in
+    let%lwt article_owner =
+      let open Lwt.Infix in
+      Backend.Target.find_owner ?ctx aron_article.Article.uuid
+      >|= CCResult.to_opt
+          %> CCOption.flatten
+          %> CCOption.get_exn_or "Owner not set"
+      >>= Backend.Actor.find ?ctx `User
+      >|= CCResult.get_or_failwith
+    in
+    let%lwt try_update =
+      Article.update_title ?ctx article_owner aron_article "Updated Title"
+    in
+    let () =
+      Alcotest.(check bool)
+        "Actor authorizable of article owner, should be allowed to do anything."
+        (CCResult.is_ok try_update)
+        true
+    in
+    Lwt.return_unit
   ;;
 
   let test_admin_update_others' ?ctx _ () =
@@ -245,7 +286,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
        Backend.Actor.grant_roles
          ?ctx
          (snd thomas)
-         (Set.singleton (`Editor chris_article.uuid))
+         (Set.singleton (`Editor chris_article.Article.uuid))
        |> Lwt_result.map_error (fun err -> failwith err)
      in
      let* thomas_authorizable = User.to_authorizable ?ctx thomas in
@@ -268,7 +309,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
        Article.update_author ?ctx aron' chris_article aron
      in
      let* () =
-       if chris_article'.author <> chris
+       if chris_article'.Article.author <> chris
        then Lwt.return_ok ()
        else Lwt_result.fail "Article didn't update"
      in
@@ -305,13 +346,16 @@ module Tests (Backend : Guard.Persistence_s) = struct
         Backend.Rule.save
           ?ctx
           ( `ActorEntity (`Editor target'.Guard.AuthorizableTarget.uuid)
-          , `Manage
+          , Guard.Action.Manage
           , `Target (`User, target'.Guard.AuthorizableTarget.uuid) )
       in
       let effects =
-        [ `Manage, `Target (`User, target'.Guard.AuthorizableTarget.uuid) ]
+        Guardian.(
+          AuthenticationSet.One
+            ( Action.Manage
+            , `Target (`User, target'.Guard.AuthorizableTarget.uuid) ))
       in
-      Backend.checker_of_effects ?ctx effects actor
+      Backend.validate_effects ?ctx effects actor
     in
     Alcotest.(check (result unit string))
       "Parametric roles work."
@@ -360,15 +404,12 @@ module Tests (Backend : Guard.Persistence_s) = struct
   ;;
 
   (** IMPORTANT: the following tests should not compile! *)
-  (* let hacker_cannot_update_article () = let () = print_endline "about to run
-     a test" in Alcotest.(check bool) "Article cannot update another article."
-     (CCResult.is_error (Article.update_title (Hacker.to_authorizable ben)
-     aron_article "Updated Title")) true ;;
-
-     let owner_can_do_nothing () = Alcotest.(check bool) "authorizable.owner
-     shouldn't be allowed to do anything." (CCResult.is_error
-     (Article.update_title (Article.to_authorizable aron_article).owner
-     aron_article "Updated Title")) true ;; *)
+  (* let hacker_cannot_update_article ?ctx _ () = let () = print_endline
+     "about\n to run a test" in let%lwt ben = Hacker.to_authorizable ?ctx ben |>
+     Lwt.map CCResult.get_or_failwith in let%lwt try_update =
+     Article.update_title ben aron_article "Updated Title" in let () =
+     Alcotest.(check bool) "Article\n cannot update another article."
+     (CCResult.is_error try_update) true in Lwt.return_unit ;; *)
 end
 
 let () =
@@ -399,6 +440,7 @@ let () =
       , [ Alcotest_lwt.test_case "Push rules." `Quick (T.test_push_rules ?ctx)
         ; Alcotest_lwt.test_case "Drop rules." `Quick (T.test_drop_rules ?ctx)
         ; Alcotest_lwt.test_case "Read rules." `Quick (T.test_read_rules ?ctx)
+        ; Alcotest_lwt.test_case "Save rule." `Quick (T.save_existing_rule ?ctx)
         ] )
     ; ( Format.asprintf "(%s) Admins should be able to do everything." name
       , [ Alcotest_lwt.test_case
@@ -414,6 +456,10 @@ let () =
             "Update own article."
             `Quick
             (T.test_update_owned ?ctx)
+        ; Alcotest_lwt.test_case
+            "Update own article (via backend)"
+            `Quick
+            (T.owner_can_update ?ctx)
         ] )
     ; ( Format.asprintf
           "(%s) An authorizable should be able to do everything to itself."
@@ -424,11 +470,9 @@ let () =
            access."
           name
       , [ Alcotest_lwt.test_case "Cannot update" `Quick (T.cannot_update ?ctx)
-          (* ; Alcotest_lwt.test_case "Cannot update" `Quick
-             (T.article_cannot_update_other_article ?ctx) *)
           (* uncomment the next line to make sure compile-time invariants
              work *)
-          (* ; Alcotest.test_case "Cannot update" `Quick
+          (* ; Alcotest_lwt.test_case "Cannot update" `Quick
              (T.hacker_cannot_update_article ?ctx) *)
         ] )
     ; ( Format.asprintf "(%s) Check access for targeted roles." name
@@ -476,8 +520,9 @@ let () =
       (Make (MariaConfig))
   in
   Lwt_main.run
-  @@ let%lwt () = Maria.migrate ~ctx () in
-     let%lwt () = Maria.clean ~ctx () in
-     make_test_cases ~ctx (module Maria) "MariadDB Backend"
-     |> Alcotest_lwt.run "Authorization"
+  @@
+  let%lwt () = Maria.migrate ~ctx () in
+  let%lwt () = Maria.clean ~ctx () in
+  make_test_cases ~ctx (module Maria) "MariadDB Backend"
+  |> Alcotest_lwt.run "Authorization"
 ;;

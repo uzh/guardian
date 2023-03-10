@@ -2,7 +2,15 @@
  (public_name guardian.backend)
  (inline_tests)
  (name Guardian_backend)
- (libraries caqti caqti-driver-mariadb caqti-lwt guardian lwt)
+ (libraries
+  caqti
+  caqti-driver-mariadb
+  caqti-lwt
+  containers
+  guardian
+  logs
+  lwt
+  uri)
  (preprocess
   (pps
    lwt_ppx

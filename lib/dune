@@ -3,7 +3,7 @@
  (inline_tests)
  (name guardian)
  (wrapped true)
- (libraries containers lwt uuidm)
+ (libraries containers logs lwt result uuidm)
  (preprocess
   (pps
    lwt_ppx

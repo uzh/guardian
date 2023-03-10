@@ -4,8 +4,10 @@ module type Backend = sig
   type actor_role_set
   type actor_spec
   type auth_rule
+  type auth_rule_set
+  type effect
+  type auth_set
   type role
-  type target_role_set
   type target_spec
   type target_typ
   type 'a authorizable
@@ -13,8 +15,16 @@ module type Backend = sig
   type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
 
   module Rule : sig
-    val find_all : ?ctx:context -> target_spec -> (auth_rule list, string) monad
+    type t = actor_spec * Action.t * target_spec
+
+    val equal : t -> t -> bool
+    val pp : Format.formatter -> t -> unit
+    val show : t -> string
+    val compare : t -> t -> int
+    val find_all : ?ctx:context -> target_spec -> auth_rule list Lwt.t
     val save : ?ctx:context -> auth_rule -> (unit, string) monad
+
+    (*TODO: only mark as deleted*)
     val delete : ?ctx:context -> auth_rule -> (unit, string) monad
   end
 
@@ -52,6 +62,7 @@ module type Backend = sig
       -> actor_role_set
       -> (unit, string) monad
 
+    (* TODO: mark as deleted *)
     val revoke_roles
       :  ?ctx:context
       -> Uuid.Actor.t
@@ -70,7 +81,7 @@ module type Backend = sig
       val create
         :  ?ctx:context
         -> ?owner:Uuid.Actor.t
-        -> target_role_set
+        -> target_typ
         -> Uuid.Target.t
         -> (unit, string) monad
 
@@ -79,14 +90,11 @@ module type Backend = sig
 
     val find
       :  ?ctx:context
-      -> 'kind
+      -> target_typ
       -> Uuid.Target.t
-      -> ('kind authorizable_target, string) monad
+      -> (target_typ authorizable_target, string) monad
 
-    val find_roles
-      :  ?ctx:context
-      -> Uuid.Target.t
-      -> (target_role_set, string) monad
+    val find_kind : ?ctx:context -> Uuid.Target.t -> (target_typ, string) monad
 
     val find_owner
       :  ?ctx:context
@@ -110,10 +118,15 @@ module type Contract = sig
   include Backend
 
   module Dependency : sig
-    type parent =
-      ?ctx:context -> target_spec -> (target_spec option, string) Lwt_result.t
+    type parent = ?ctx:context -> effect -> (effect option, string) Lwt_result.t
 
-    val register : target_typ -> parent -> (unit, string) result
+    val register
+      :  ?tags:Logs.Tag.set
+      -> ?ignore_duplicates:bool
+      -> target_typ (* -> parent_typ *)
+      -> parent
+      -> (unit, string) result
+
     val find : target_typ -> parent
   end
 
@@ -125,12 +138,6 @@ module type Contract = sig
       -> auth_rule list
       -> (auth_rule list, auth_rule list) Lwt_result.t
 
-    val collect_rules
-      :  ?ctx:context
-      -> (Action.t * target_spec) list
-      -> (auth_rule list, string) monad
-
-    val find_all_exn : ?ctx:context -> target_spec -> auth_rule list Lwt.t
     val save_exn : ?ctx:context -> auth_rule -> unit Lwt.t
     val delete_exn : ?ctx:context -> auth_rule -> unit Lwt.t
   end
@@ -164,31 +171,31 @@ module type Contract = sig
 
     val decorate
       :  ?ctx:context
-      -> ('a -> 'kind authorizable_target)
+      -> ('a -> target_typ authorizable_target)
       -> 'a
-      -> ('kind authorizable_target, string) Lwt_result.t
+      -> (target_typ authorizable_target, string) Lwt_result.t
 
     val find_checker
       :  ?ctx:context
-      -> 'a authorizable_target
-      -> ('b authorizable -> Action.t -> bool, string) Lwt_result.t
+      -> target_typ authorizable_target
+      -> ('a authorizable -> Action.t -> bool, string) Lwt_result.t
 
-    val find_role_checker
+    val find_typ_checker
       :  ?ctx:context
-      -> target_role_set
+      -> target_typ
       -> ('b authorizable -> Action.t -> bool, string) Lwt_result.t
   end
 
   val wrap_function
     :  ?ctx:context
     -> (string -> 'etyp)
-    -> (Action.t * target_spec) list
+    -> auth_set
     -> ('param -> ('rval, 'etyp) monad)
     -> ('a authorizable -> 'param -> ('rval, 'etyp) monad, string) monad
 
-  val checker_of_effects
+  val validate_effects
     :  ?ctx:context
-    -> (Action.t * target_spec) list
+    -> auth_set
     -> 'a authorizable
     -> (unit, string) monad
 end

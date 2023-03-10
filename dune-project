@@ -63,3 +63,5 @@
    (>= 2.0.2))
   ;; Test/Dev dependencies
   (alcotest-lwt :with-test)))
+
+(implicit_transitive_deps false)

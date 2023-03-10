@@ -22,7 +22,11 @@ module MakeActor (P : Guard.Persistence_s) = struct
     let open Lwt_result.Syntax in
     let f new_name = Lwt.return_ok (new_name, snd t) in
     let* wrapped =
-      P.wrap_function ?ctx CCFun.id [ `Update, `Target (snd t) ] f
+      P.wrap_function
+        ?ctx
+        CCFun.id
+        Guard.(AuthenticationSet.One (Action.Update, `Target (snd t)))
+        f
     in
     wrapped actor new_name
   ;;
@@ -38,6 +42,6 @@ module MakeTarget (P : Guard.Persistence_s) = struct
       let of_actor =
         CCFun.(Uuid.(snd %> Actor.to_string %> Target.of_string_exn))
       in
-      AuthorizableTarget.make (TargetRoleSet.singleton `User) `User (of_actor t))
+      AuthorizableTarget.make `User (of_actor t))
   ;;
 end
