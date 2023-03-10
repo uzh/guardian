@@ -4,10 +4,7 @@ module Make (P : Guard.Persistence_s) = struct
   let make s : t = s, Guardian.Uuid.Actor.create ()
 
   let to_authorizable ?ctx =
-    P.Actor.decorate ?ctx (fun (t : t) : [ `Hacker ] Guard.Authorizable.t ->
-      Guard.Authorizable.make
-        (Guard.ActorRoleSet.of_list [ `Hacker ])
-        `Hacker
-        (snd t))
+    P.Actor.decorate ?ctx (fun (t : t) : [ `Hacker ] Guard.Actor.t ->
+      Guard.Actor.make (Guard.RoleSet.of_list [ `Hacker ]) `Hacker (snd t))
   ;;
 end

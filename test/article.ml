@@ -11,18 +11,19 @@ module Make (P : Guard.Persistence_s) = struct
   [@@deriving show]
 
   let make ?id title content author =
-    let uuid = CCOption.get_or ~default:(Guard.Uuid.Target.create ()) id in
+    let uuid = CCOption.get_or ~default:(Guardian.Uuid.Target.create ()) id in
     { uuid; title; content; author }
   ;;
 
   let to_authorizable ?ctx =
     let open Guard in
     P.Target.decorate ?ctx (fun t ->
-      AuthorizableTarget.make ~owner:(snd t.author) `Article t.uuid)
+      Target.make ~owner:(snd t.author) `Article t.uuid)
   ;;
 
-  let update_title ?ctx (actor : [ `User ] Guard.Authorizable.t) t new_title =
+  let update_title ?ctx (actor : [ `User ] Guard.Actor.t) t new_title =
     let open Lwt_result.Syntax in
+    let open Guard in
     let f new_title =
       let () = t.title <- new_title in
       Lwt.return_ok t
@@ -31,23 +32,20 @@ module Make (P : Guard.Persistence_s) = struct
       P.wrap_function
         ?ctx
         CCFun.id
-        Guard.(
-          AuthenticationSet.One (Action.Update, `Target (`Article, t.uuid)))
+        EffectSet.(One (Guardian.Action.Update, `Target (`Article, t.uuid)))
         f
     in
     wrapped actor new_title
   ;;
 
-  let update_author ?ctx (actor : [ `User ] Guard.Authorizable.t) t new_author =
+  let update_author ?ctx (actor : [ `User ] Guard.Actor.t) t new_author =
     let open Lwt_result.Syntax in
+    let open Guard in
     let f new_author =
       let () = t.author <- new_author in
       let* ent = to_authorizable ?ctx t in
       let* () =
-        P.Target.save_owner
-          ?ctx
-          ~owner:(snd new_author)
-          ent.Guard.AuthorizableTarget.uuid
+        P.Target.save_owner ?ctx ~owner:(snd new_author) ent.Target.uuid
       in
       Lwt.return_ok t
     in
@@ -55,8 +53,7 @@ module Make (P : Guard.Persistence_s) = struct
       P.wrap_function
         ?ctx
         CCFun.id
-        Guard.(
-          AuthenticationSet.One (Action.Manage, `Target (`Article, t.uuid)))
+        EffectSet.(One (Guardian.Action.Manage, `Target (`Article, t.uuid)))
         f
     in
     wrapped actor new_author

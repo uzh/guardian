@@ -1,4 +1,4 @@
-module Guardian = Guardian.Make (Role.Actor) (Role.Target)
+module Guard = Guardian.Make (Role.Actor) (Role.Target)
 
 module Tests (Backend : Guard.Persistence_s) = struct
   module Article = Article.Make (Backend)
@@ -6,13 +6,13 @@ module Tests (Backend : Guard.Persistence_s) = struct
   module Post = Post.Make (Backend)
   module UserTarget = User.MakeTarget (Backend)
   module User = User.MakeActor (Backend)
-  module Set = Guardian.ActorRoleSet
+  module Set = Guard.RoleSet
 
   (* ensure that the `User` module conforms to the `ActorSig` module type and
      `UserTarget` conforms to `TargetSig`. *)
-  let _ = (module Article : Guardian.Authorizer.TargetSig)
-  let _ = (module User : Guardian.Authorizer.ActorSig)
-  let _ = (module UserTarget : Guardian.Authorizer.TargetSig)
+  let _ = (module Article : Guard.TargetSig)
+  let _ = (module User : Guard.ActorSig)
+  let _ = (module UserTarget : Guard.TargetSig)
   let chris = "Chris", Guardian.Uuid.Actor.create ()
   let aron = "Aron", Guardian.Uuid.Actor.create ()
   let ben : Hacker.t = "Ben Hackerman", Guardian.Uuid.Actor.create ()
@@ -24,12 +24,12 @@ module Tests (Backend : Guard.Persistence_s) = struct
 
   let bad_rule =
     ( `Actor (`User, snd chris)
-    , Guard.Action.Update
+    , Guardian.Action.Update
     , `Target (`Article, aron_article.Article.uuid) )
   ;;
 
-  let global_rules : Guardian.Rule.t list =
-    let open Guard.Action in
+  let global_rules : Guard.Rule.t list =
+    let open Guardian.Action in
     [ `ActorEntity `User, Read, `TargetEntity `Article
     ; `ActorEntity `Admin, Manage, `TargetEntity `Article
     ; ( `ActorEntity (`Editor chris_article.Article.uuid)
@@ -147,7 +147,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
   ;;
 
   let test_read_rules ?ctx _ () =
-    let open Guardian in
+    let open Guard in
     (let%lwt article_rules =
        Backend.Rule.find_all ?ctx (`TargetEntity `Article)
      in
@@ -157,11 +157,11 @@ module Tests (Backend : Guard.Persistence_s) = struct
          (`Target (`Article, chris_article.Article.uuid))
      in
      let perms = article_rules @ editor_rules in
-     let global_set = RuleSet.of_list global_rules in
-     let retrieved_set = RuleSet.of_list perms in
-     let diff = RuleSet.diff global_set retrieved_set in
-     let diff' = RuleSet.elements diff |> [%show: Rule.t list] in
-     if RuleSet.compare global_set retrieved_set = 0
+     let global_set = Rule.Set.of_list global_rules in
+     let retrieved_set = Rule.Set.of_list perms in
+     let diff = Rule.Set.diff global_set retrieved_set in
+     let diff' = Rule.Set.elements diff |> [%show: Rule.t list] in
+     if Rule.Set.compare global_set retrieved_set = 0
      then Lwt.return_ok ()
      else Lwt.return_error (Format.asprintf "Permissions diff: %s." diff'))
     >|= Alcotest.(check (result unit string))
@@ -258,7 +258,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
   ;;
 
   let can_update_self ?ctx _ () =
-    (let%lwt (_ : ([> `User ] Backend.authorizable_target, string) result) =
+    (let%lwt (_ : ([> `User ] Backend.target, string) result) =
        UserTarget.to_authorizable ?ctx thomas
      in
      let%lwt thomas_auth = User.to_authorizable ?ctx thomas in
@@ -266,8 +266,8 @@ module Tests (Backend : Guard.Persistence_s) = struct
      | Ok thomas_user ->
        let as_target =
          ( `User
-         , Guard.Uuid.(thomas |> snd |> Actor.to_string |> Target.of_string_exn)
-         )
+         , Guardian.Uuid.(
+             thomas |> snd |> Actor.to_string |> Target.of_string_exn) )
        in
        let%lwt res =
          User.update_name
@@ -328,6 +328,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
   ;;
 
   let operator_works ?ctx _ () =
+    let open Guard in
     let%lwt actual =
       let open Lwt_result.Syntax in
       (* Note: a user can be an actor or a target, so 'to_authorizable' has to
@@ -337,23 +338,20 @@ module Tests (Backend : Guard.Persistence_s) = struct
       let* () =
         Backend.Actor.grant_roles
           ?ctx
-          actor.Guard.Authorizable.uuid
-          (Guard.ActorRoleSet.singleton
-             (`Editor target'.Guard.AuthorizableTarget.uuid))
+          actor.Actor.uuid
+          (RoleSet.singleton (`Editor target'.Target.uuid))
       in
       let* actor = Backend.Actor.find_authorizable ?ctx `User (snd thomas) in
       let* () =
         Backend.Rule.save
           ?ctx
-          ( `ActorEntity (`Editor target'.Guard.AuthorizableTarget.uuid)
-          , Guard.Action.Manage
-          , `Target (`User, target'.Guard.AuthorizableTarget.uuid) )
+          ( `ActorEntity (`Editor target'.Target.uuid)
+          , Guardian.Action.Manage
+          , `Target (`User, target'.Target.uuid) )
       in
       let effects =
-        Guardian.(
-          AuthenticationSet.One
-            ( Action.Manage
-            , `Target (`User, target'.Guard.AuthorizableTarget.uuid) ))
+        EffectSet.One
+          (Guardian.Action.Manage, `Target (`User, target'.Target.uuid))
       in
       Backend.validate_effects ?ctx effects actor
     in

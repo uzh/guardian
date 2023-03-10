@@ -20,18 +20,19 @@ module Make (P : Guard.Persistence_s) = struct
   [@@deriving show]
 
   let make ?id author article comment =
-    let uuid = CCOption.get_or ~default:(Guard.Uuid.Target.create ()) id in
+    let uuid = CCOption.get_or ~default:(Guardian.Uuid.Target.create ()) id in
     { uuid; comment; article; author }
   ;;
 
   let to_authorizable ?ctx =
     let open Guard in
     P.Target.decorate ?ctx (fun t ->
-      AuthorizableTarget.make ~owner:(snd t.author) `Post t.uuid)
+      Target.make ~owner:(snd t.author) `Post t.uuid)
   ;;
 
-  let update_post ?ctx (actor : [ `User ] Guard.Authorizable.t) t new_comment =
+  let update_post ?ctx (actor : [ `User ] Guard.Actor.t) t new_comment =
     let open Lwt_result.Syntax in
+    let open Guard in
     let f new_comment =
       let () = t.comment <- new_comment in
       Lwt.return_ok t
@@ -39,7 +40,7 @@ module Make (P : Guard.Persistence_s) = struct
     let* () =
       P.validate_effects
         ?ctx
-        Guard.(AuthenticationSet.One (Action.Update, `Target (`Post, t.uuid)))
+        EffectSet.(One (Guardian.Action.Update, `Target (`Post, t.uuid)))
         actor
     in
     f new_comment
