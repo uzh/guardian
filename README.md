@@ -80,12 +80,11 @@ Most used commands can be found in the following list. For the full list of comm
 - `make build-watch` - to build and watch the project
 - `make test` - to run all tests. This requires a running MariaDB instance.
 
-### Release to production
+## 🚀 Release new version
 
-In order to deploy to production:
-
-1. edit `dune-project` and update version `(version 0.0.0)`
-1. build the project `dune build` or edit `pool.opam` and update version `version: "0.0.0"`
-1. commit
-1. tag commit and push
-1. create github and opam release
+1. Update `CHANGELOG.md` and document changes made. Ensure the version to be releases has a header matching the version, follow previous releases.
+1. Edit the file `dune-project` and update version `(version 0.0.0)`.
+1. Build the project `dune build` __OR__ edit the file `pool.opam` and update version `version: "0.0.0"`
+1. Commit your changes.
+1. Tag the commit and push changes and git tag
+1. create opam release (`opam-publish`)

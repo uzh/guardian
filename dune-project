@@ -21,7 +21,7 @@
 
 (bug_reports "https://github.com/uzh/guardian/issues")
 
-(documentation "https://github.com/uzh/guardian")
+(documentation "https://uzh.github.io/guardian")
 
 (package
  (name guardian)

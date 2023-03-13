@@ -10,7 +10,7 @@ authors: [
 ]
 license: "GPL-2.0-or-later"
 homepage: "https://github.com/uzh/guardian"
-doc: "https://github.com/uzh/guardian"
+doc: "https://uzh.github.io/guardian"
 bug-reports: "https://github.com/uzh/guardian/issues"
 depends: [
   "caqti-driver-mariadb" {>= "1.8.0"}
