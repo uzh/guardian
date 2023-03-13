@@ -9,8 +9,8 @@ module Tests (Backend : Guard.Persistence_s) = struct
   module User = User.MakeActor (Backend)
   module Set = RoleSet
 
-  (* ensure that the `User` module conforms to the `ActorSig` module type and
-     `UserTarget` conforms to `TargetSig`. *)
+  (* ensure that the `User` module conforms to the `ActorSig` and `UserTarget`
+     conforms to `TargetSig` module type. *)
   let _ = (module Article : TargetSig)
   let _ = (module User : ActorSig)
   let _ = (module UserTarget : TargetSig)
@@ -71,7 +71,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
   ;;
 
   let test_find_authorizable ?ctx _ () =
-    (match%lwt Backend.Actor.find_authorizable ?ctx `User (snd aron) with
+    (match%lwt Backend.Actor.find ?ctx `User (snd aron) with
      | Ok _ -> Lwt.return_true
      | Error err -> failwith err)
     >|= Alcotest.(check bool) "Fetch an authorizable." true
@@ -341,7 +341,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
           actor.Actor.uuid
           (RoleSet.singleton (`Editor target'.Target.uuid))
       in
-      let* actor = Backend.Actor.find_authorizable ?ctx `User (snd thomas) in
+      let* actor = Backend.Actor.find ?ctx `User (snd thomas) in
       let* () =
         Backend.Rule.save
           ?ctx
@@ -353,7 +353,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
         EffectSet.One
           (Guardian.Action.Manage, TargetSpec.Id (`User, target'.Target.uuid))
       in
-      Backend.validate_effects ?ctx effects actor
+      Backend.validate_effects ?ctx CCFun.id effects actor
     in
     Alcotest.(check (result unit string))
       "Parametric roles work."

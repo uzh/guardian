@@ -41,6 +41,7 @@ module Make (P : Guard.Persistence_s) = struct
     let* () =
       P.validate_effects
         ?ctx
+        CCFun.id
         EffectSet.(One (Guardian.Action.Update, TargetSpec.Id (`Post, t.uuid)))
         actor
     in

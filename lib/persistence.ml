@@ -152,7 +152,7 @@ module type Contract = sig
 
     val find_roles_exn : ?ctx:context -> Uuid.Actor.t -> role_set Lwt.t
 
-    val find_authorizable
+    val find
       :  ?ctx:context
       -> 'kind
       -> Uuid.Actor.t
@@ -188,7 +188,7 @@ module type Contract = sig
       -> kind target
       -> ('a actor -> Action.t -> bool, string) monad
 
-    val find_typ_checker
+    val find_kind_checker
       :  ?ctx:context
       -> kind
       -> ('b actor -> Action.t -> bool, string) monad
@@ -203,7 +203,8 @@ module type Contract = sig
 
   val validate_effects
     :  ?ctx:context
+    -> (string -> 'etyp)
     -> effect_set
     -> 'a actor
-    -> (unit, string) monad
+    -> (unit, 'etyp) monad
 end

@@ -263,10 +263,10 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
         Error msg)
     ;;
 
-    (** Convenience function to return a [can] function. Takes an optional
-        target specification (for error reporting purposes) and a list of
-        [guardian] rules of the form [actor, action, target] and returns a
-        function that looks like:
+    (** [can_for_rules ?any_of rules] Convenience function to return a [can]
+        function. Takes an optional target specification (for error reporting
+        purposes) and a list of [guardian] rules of the form
+        [actor, action, target] and returns a function that looks like:
 
         [val can : actor:\[ whatever \] Guard.Actor.t -> (unit, string) result]
 
@@ -342,9 +342,9 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
     module Rule = struct
       include Repo.Rule
 
-      (** [save_all rules] adds all the permissions [rules] to the backend. If
-          there is an error at any point, it returns a `result` containing all
-          of the items that were not added. *)
+      (** [save_all ?ctx rules] adds all the permissions [rules] to the backend.
+          If there is an error at any point, it returns a `result` containing
+          all of the items that were not added. *)
       let save_all ?ctx =
         Lwt_list.fold_left_s
           (fun acc x ->
@@ -365,7 +365,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
         revoke_roles ?ctx id (RoleSet.singleton role)
       ;;
 
-      let find_authorizable ?ctx (typ : 'kind) (id : Uuid.Actor.t) =
+      let find ?ctx (typ : 'kind) (id : Uuid.Actor.t) =
         let open Lwt_result.Infix in
         mem ?ctx id
         >>= fun exists ->
@@ -378,23 +378,23 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
                (Uuid.Actor.to_string id))
       ;;
 
-      (** This convenience function should be used to decorate the
-          [to_authorizable] * functions of authorizable modules. The newly
+      (** [decorate ?ctx to_actor] This convenience function should be used to
+          decorate the [actor] * functions of authorizable modules. The newly
           decorated function connects * to the persistent backend to ensure that
           the authorizable's roles and ownership * are consistent in both
           spaces. *)
-      let decorate ?ctx (to_authorizable : 'a -> 'kind actor)
+      let decorate ?ctx (to_actor : 'a -> 'kind actor)
         : 'a -> ('kind actor, string) Lwt_result.t
         =
        fun x ->
         let open Lwt_result.Syntax in
         let ({ Actor.uuid; owner; roles; typ } as entity : 'kind actor) =
-          to_authorizable x
+          to_actor x
         in
         let* mem = mem ?ctx uuid in
         if mem
         then
-          let* entity' = find_authorizable ?ctx typ uuid in
+          let* entity' = find ?ctx typ uuid in
           let roles = RoleSet.union roles entity'.Actor.roles in
           let* () = grant_roles ?ctx uuid roles in
           let* owner =
@@ -426,13 +426,18 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
       include Target
       include Repo.Target
 
-      let decorate ?ctx (to_authorizable : 'a -> 'kind target)
+      (** [decorate ?ctx to_target] This convenience function should be used to
+          decorate the [target] * functions of authorizable modules. The newly
+          decorated function connects * to the persistent backend to ensure that
+          the authorizable's roles and ownership * are consistent in both
+          spaces. *)
+      let decorate ?ctx (to_target : 'a -> 'kind target)
         : 'a -> ('kind target, string) Lwt_result.t
         =
        fun x ->
         let open Lwt_result.Syntax in
         let ({ Target.uuid; owner; typ } as entity : 'kind target) =
-          to_authorizable x
+          to_target x
         in
         let* mem = mem ?ctx uuid in
         if mem
@@ -460,6 +465,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
           Lwt.return_ok entity
      ;;
 
+      (** [find_checker] find checker function for a specific target id *)
       let find_checker ?ctx { Target.uuid; owner; _ } =
         let open Lwt_result.Syntax in
         let* kind = find_kind ?ctx uuid in
@@ -484,28 +490,24 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
         else Utils.exists_in rules actor action
       ;;
 
-      let find_typ_checker ?ctx typ =
-        let%lwt rules = Rule.find_all ?ctx (TargetSpec.Entity typ) in
+      (** [find_kind_checker] find checker function for a specific target entity *)
+      let find_kind_checker ?ctx kind =
+        let%lwt rules = Rule.find_all ?ctx (TargetSpec.Entity kind) in
         Lwt.return_ok @@ Utils.exists_in rules
       ;;
     end
 
-    (* For transitional effects, uses the registered dependencies to look for
-       the parent object. *)
-    let expand_set ?ctx (effects : EffectSet.t)
+    (** [expand_set] For transitional effects, uses the registered dependencies
+        to look for the parent object. Update and return the passed [effect_set] *)
+    let expand_set ?ctx (effect_set : EffectSet.t)
       : (EffectSet.t, string) result Lwt.t
       =
       let open Lwt_result.Infix in
-      let rec expand (effects : EffectSet.t)
-        : (EffectSet.t, string) Lwt_result.t
-        =
+      let rec expand set =
         let open EffectSet in
-        let find_parent entity spec : (effect list, string) Lwt_result.t =
-          let fcn = Dependency.find_all_combined entity in
-          fcn ?ctx spec
-        in
+        let find_parent entity = (Dependency.find_all_combined entity) ?ctx in
         let find_all = Lwt_list.map_s expand %> Lwt.map CCResult.flatten_l in
-        match effects with
+        match set with
         | One effect ->
           (match snd effect with
            | TargetSpec.Entity entity | TargetSpec.Id (entity, _) ->
@@ -519,17 +521,26 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
         | Or effects -> effects |> find_all >|= or_
         | And effects -> effects |> find_all >|= and_
       in
-      effects
+      effect_set
       |> expand
       |> Lwt_result.map_error
            (Format.asprintf
               "Failed to expand the effects of the target. Error message: %s")
     ;;
 
-    let validate_set
+    (** [validate_effects ?ctx error effect_set actor] checks permissions and
+        gracefully reports authorization errors.
+
+        [error] e.g. to change the error type to the one used in your app (e.g.
+        `CCFun.id` to keep the string type)
+
+        [effect_set] effect set to check the permissions against
+
+        [actor] actor object who'd like to perform the action *)
+    let validate_effects
       ?ctx
       (error : string -> 'etyp)
-      (to_match : EffectSet.t)
+      (effect_set : EffectSet.t)
       (actor : 'a actor)
       : (unit, 'etyp) Lwt_result.t
       =
@@ -542,7 +553,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
           (match spec with
            | TargetSpec.Id (typ, uuid) ->
              Target.(find ?ctx typ uuid >>= find_checker ?ctx)
-           | TargetSpec.Entity role -> Target.find_typ_checker ?ctx role)
+           | TargetSpec.Entity role -> Target.find_kind_checker ?ctx role)
           >|= fun checker_fcn -> checker_fcn actor action
         in
         function
@@ -576,30 +587,30 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
             (Format.asprintf
                "Entity %s: Permission denied for %s"
                ([%show: Actor.t] actor)
-               ([%show: EffectSet.t] to_match))
+               ([%show: EffectSet.t] effect_set))
       in
-      to_match |> expand_set ?ctx >>= find_checker >>> validate |> map_error
+      effect_set |> expand_set ?ctx >>= find_checker >>> validate |> map_error
     ;;
 
-    (** [wrap_function ?error ~effect f] produces a wrapped version of [f] which
-        checks permissions and gracefully reports authorization errors. *)
+    (** [wrap_function ?ctx error effect_set f] produces a wrapped version of
+        [f] which checks permissions and gracefully reports authorization
+        errors.
+
+        [error] e.g. to change the error type to the one used in your app (e.g.
+        `CCFun.id` to keep the string type)
+
+        [effect_set] effect set to check the permissions against *)
     let wrap_function
       ?ctx
       (error : string -> 'etyp)
-      (to_match : EffectSet.t)
+      (effect_set : EffectSet.t)
       (fcn : 'param -> ('rval, 'etyp) Lwt_result.t)
       =
       let open Lwt_result.Syntax in
-      let can = validate_set ?ctx error to_match in
+      let can = validate_effects ?ctx error effect_set in
       Lwt.return_ok (fun actor param ->
         let* () = can actor in
         fcn param)
-    ;;
-
-    let validate_effects ?ctx (set : EffectSet.t) actor
-      : (unit, string) result Lwt.t
-      =
-      validate_set ?ctx CCFun.id set actor
     ;;
   end
 end
