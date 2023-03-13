@@ -1,9 +1,9 @@
-module Make (P : Guard.Persistence_s) = struct
-  module User = User.MakeActor (P)
-  module Article = Article.Make (P)
+module Make (Backend : Guard.PersistenceSig) = struct
+  module User = User.MakeActor (Backend)
+  module Article = Article.Make (Backend)
 
   let (_ : (unit, string) result) =
-    P.Dependency.register `Post `Article (fun ?ctx:_ (action, spec) ->
+    Backend.Dependency.register `Post `Article (fun ?ctx:_ (action, spec) ->
       let open Guard in
       match[@warning "-4"] spec with
       | TargetSpec.Entity `Post | TargetSpec.Id (`Post, _) ->
@@ -27,7 +27,7 @@ module Make (P : Guard.Persistence_s) = struct
 
   let to_authorizable ?ctx =
     let open Guard in
-    P.Target.decorate ?ctx (fun t ->
+    Backend.Target.decorate ?ctx (fun t ->
       Target.make ~owner:(snd t.author) `Post t.uuid)
   ;;
 
@@ -39,7 +39,7 @@ module Make (P : Guard.Persistence_s) = struct
       Lwt.return_ok t
     in
     let* () =
-      P.validate_effects
+      Backend.validate_effects
         ?ctx
         CCFun.id
         EffectSet.(One (Guardian.Action.Update, TargetSpec.Id (`Post, t.uuid)))

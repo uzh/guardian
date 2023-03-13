@@ -1,5 +1,5 @@
-module Make (P : Guard.Persistence_s) = struct
-  module User = User.MakeActor (P)
+module Make (Backend : Guard.PersistenceSig) = struct
+  module User = User.MakeActor (Backend)
 
   (* pretend that all these fields aren't publically visible *)
   type t =
@@ -17,7 +17,7 @@ module Make (P : Guard.Persistence_s) = struct
 
   let to_authorizable ?ctx =
     let open Guard in
-    P.Target.decorate ?ctx (fun t ->
+    Backend.Target.decorate ?ctx (fun t ->
       Target.make ~owner:(snd t.author) `Article t.uuid)
   ;;
 
@@ -29,7 +29,7 @@ module Make (P : Guard.Persistence_s) = struct
       Lwt.return_ok t
     in
     let* wrapped =
-      P.wrap_function
+      Backend.wrap_function
         ?ctx
         CCFun.id
         EffectSet.(
@@ -46,12 +46,12 @@ module Make (P : Guard.Persistence_s) = struct
       let () = t.author <- new_author in
       let* ent = to_authorizable ?ctx t in
       let* () =
-        P.Target.save_owner ?ctx ~owner:(snd new_author) ent.Target.uuid
+        Backend.Target.save_owner ?ctx ~owner:(snd new_author) ent.Target.uuid
       in
       Lwt.return_ok t
     in
     let* wrapped =
-      P.wrap_function
+      Backend.wrap_function
         ?ctx
         CCFun.id
         EffectSet.(

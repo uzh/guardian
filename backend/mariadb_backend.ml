@@ -77,7 +77,7 @@ struct
     ;;
   end
 
-  include Guard.Make_persistence (struct
+  include Guard.MakePersistence (struct
     type 'a actor = 'a Guard.Actor.t
     type 'b target = 'b Guard.Target.t
     type actor_spec = Guard.ActorSpec.t
@@ -206,7 +206,7 @@ struct
         let create ?ctx ?owner roles id =
           let caqti =
             {sql|
-              INSERT INTO guardian_actors (id, roles, parent)
+              INSERT INTO guardian_actors (id, roles, owner)
               VALUES (UNHEX(REPLACE(?, '-', '')), ?, UNHEX(REPLACE(?, '-', '')))
               ON DUPLICATE KEY UPDATE
                 updated_at = NOW()
@@ -232,11 +232,11 @@ struct
             SELECT
               roles,
               LOWER(CONCAT(
-                SUBSTR(HEX(parent), 1, 8), '-',
-                SUBSTR(HEX(parent), 9, 4), '-',
-                SUBSTR(HEX(parent), 13, 4), '-',
-                SUBSTR(HEX(parent), 17, 4), '-',
-                SUBSTR(HEX(parent), 21)
+                SUBSTR(HEX(owner), 1, 8), '-',
+                SUBSTR(HEX(owner), 9, 4), '-',
+                SUBSTR(HEX(owner), 13, 4), '-',
+                SUBSTR(HEX(owner), 17, 4), '-',
+                SUBSTR(HEX(owner), 21)
               ))
             FROM guardian_actors WHERE id = UNHEX(REPLACE(?, '-', ''))
           |sql}
@@ -290,11 +290,11 @@ struct
             {sql|
             SELECT
               LOWER(CONCAT(
-                SUBSTR(HEX(parent), 1, 8), '-',
-                SUBSTR(HEX(parent), 9, 4), '-',
-                SUBSTR(HEX(parent), 13, 4), '-',
-                SUBSTR(HEX(parent), 17, 4), '-',
-                SUBSTR(HEX(parent), 21)
+                SUBSTR(HEX(owner), 1, 8), '-',
+                SUBSTR(HEX(owner), 9, 4), '-',
+                SUBSTR(HEX(owner), 13, 4), '-',
+                SUBSTR(HEX(owner), 17, 4), '-',
+                SUBSTR(HEX(owner), 21)
               ))
             FROM guardian_actors
             WHERE id = UNHEX(REPLACE(?, '-', ''))
@@ -309,7 +309,7 @@ struct
             Caqti_type.(tup2 Owner.t Uuid.Actor.t ->. unit)
               {sql|
               UPDATE guardian_actors
-              SET parent = UNHEX(REPLACE(?, '-', ''))
+              SET owner = UNHEX(REPLACE(?, '-', ''))
               WHERE id = UNHEX(REPLACE(?, '-', ''))
             |sql}
           in
@@ -321,7 +321,7 @@ struct
         let create ?ctx ?owner kind id =
           let caqti =
             {sql|
-              INSERT INTO guardian_targets (id, kind, parent)
+              INSERT INTO guardian_targets (id, kind, owner)
               VALUES (UNHEX(REPLACE(?, '-', '')), ?, UNHEX(REPLACE(?, '-', '')))
               ON DUPLICATE KEY UPDATE
                 updated_at = NOW()
@@ -345,11 +345,11 @@ struct
           let caqti =
             {sql|
             SELECT LOWER(CONCAT(
-              SUBSTR(HEX(parent), 1, 8), '-',
-              SUBSTR(HEX(parent), 9, 4), '-',
-              SUBSTR(HEX(parent), 13, 4), '-',
-              SUBSTR(HEX(parent), 17, 4), '-',
-              SUBSTR(HEX(parent), 21)
+              SUBSTR(HEX(owner), 1, 8), '-',
+              SUBSTR(HEX(owner), 9, 4), '-',
+              SUBSTR(HEX(owner), 13, 4), '-',
+              SUBSTR(HEX(owner), 17, 4), '-',
+              SUBSTR(HEX(owner), 21)
             ))
             FROM guardian_targets
             WHERE id = UNHEX(REPLACE(?, '-', '')) AND kind = ?
@@ -379,11 +379,11 @@ struct
             {sql|
             SELECT
               LOWER(CONCAT(
-                SUBSTR(HEX(parent), 1, 8), '-',
-                SUBSTR(HEX(parent), 9, 4), '-',
-                SUBSTR(HEX(parent), 13, 4), '-',
-                SUBSTR(HEX(parent), 17, 4), '-',
-                SUBSTR(HEX(parent), 21)
+                SUBSTR(HEX(owner), 1, 8), '-',
+                SUBSTR(HEX(owner), 9, 4), '-',
+                SUBSTR(HEX(owner), 13, 4), '-',
+                SUBSTR(HEX(owner), 17, 4), '-',
+                SUBSTR(HEX(owner), 21)
               ))
             FROM guardian_targets
             WHERE id = UNHEX(REPLACE(?, '-', ''))
@@ -398,7 +398,7 @@ struct
           let caqti =
             {sql|
             UPDATE guardian_targets
-            SET parent = UNHEX(REPLACE(?, '-', ''))
+            SET owner = UNHEX(REPLACE(?, '-', ''))
             WHERE id = UNHEX(REPLACE(?, '-', ''))
           |sql}
             |> Caqti_type.(tup2 Owner.t Uuid.Target.t ->. unit)

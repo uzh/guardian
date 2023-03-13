@@ -1,10 +1,7 @@
 exception Exception of string
 
 let src = Logs.Src.create "guardian.pools"
-
-let find_pool_name : (string * string) list -> string option =
-  CCList.assoc_opt ~eq:CCString.equal "pool"
-;;
+let find_pool_name = CCList.assoc_opt ~eq:CCString.equal "pool"
 
 module LogTag = struct
   let add_label : string Logs.Tag.def =

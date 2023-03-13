@@ -2,14 +2,14 @@ open CCFun.Infix
 
 type user = string * Guardian.Uuid.Actor.t [@@deriving show]
 
-module MakeActor (P : Guard.Persistence_s) = struct
+module MakeActor (Backend : Guard.PersistenceSig) = struct
   type t = user [@@deriving show]
 
   let make s : t = s, Guardian.Uuid.Actor.create ()
 
   let to_authorizable ?ctx =
     let open Guard in
-    P.Actor.decorate ?ctx (fun (t : t) : [> `User ] Actor.t ->
+    Backend.Actor.decorate ?ctx (fun (t : t) : [> `User ] Actor.t ->
       Actor.make (RoleSet.singleton `User) `User (snd t))
   ;;
 
@@ -18,7 +18,7 @@ module MakeActor (P : Guard.Persistence_s) = struct
     let open Guard in
     let f new_name = Lwt.return_ok (new_name, snd t) in
     let* wrapped =
-      P.wrap_function
+      Backend.wrap_function
         ?ctx
         CCFun.id
         EffectSet.(One (Guardian.Action.Update, TargetSpec.Id (`User, snd t)))
@@ -28,12 +28,12 @@ module MakeActor (P : Guard.Persistence_s) = struct
   ;;
 end
 
-module MakeTarget (P : Guard.Persistence_s) = struct
+module MakeTarget (Backend : Guard.PersistenceSig) = struct
   type t = user [@@deriving show]
 
   let to_authorizable ?ctx =
     let open Guard in
-    P.Target.decorate ?ctx (fun t ->
+    Backend.Target.decorate ?ctx (fun t ->
       let of_actor =
         Guardian.Uuid.(snd %> Actor.to_string %> Target.of_string_exn)
       in

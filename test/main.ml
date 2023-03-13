@@ -1,6 +1,6 @@
 module Guard = Guardian.Make (Role.Actor) (Role.Target)
 
-module Tests (Backend : Guard.Persistence_s) = struct
+module Tests (Backend : Guard.PersistenceSig) = struct
   open Guard
   module Article = Article.Make (Backend)
   module Hacker = Hacker.Make (Backend)
@@ -44,7 +44,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
   let ( let* ) = Lwt_result.bind
   let ( >|= ) = Lwt.Infix.( >|= )
 
-  let test_create_authorizable ?ctx _ () =
+  let test_create_authorizable ?ctx (_ : 'a) () =
     (let* _aron_ent = User.to_authorizable ?ctx aron in
      let* _chris_ent = User.to_authorizable ?ctx chris in
      let* _ben_ent = Hacker.to_authorizable ?ctx ben in
@@ -70,19 +70,19 @@ module Tests (Backend : Guard.Persistence_s) = struct
           (Ok Guardian.Uuid.Actor.(to_string (snd chris), to_string (snd aron)))
   ;;
 
-  let test_find_authorizable ?ctx _ () =
+  let test_find_authorizable ?ctx (_ : 'a) () =
     (match%lwt Backend.Actor.find ?ctx `User (snd aron) with
      | Ok _ -> Lwt.return_true
      | Error err -> failwith err)
     >|= Alcotest.(check bool) "Fetch an authorizable." true
   ;;
 
-  let test_grant_roles ?ctx _ () =
+  let test_grant_roles ?ctx (_ : 'a) () =
     Backend.Actor.grant_roles ?ctx (snd aron) (Set.singleton `Admin)
     >|= Alcotest.(check (result unit string)) "Grant a role." (Ok ())
   ;;
 
-  let test_check_roles ?ctx _ () =
+  let test_check_roles ?ctx (_ : 'a) () =
     (let* roles = Backend.Actor.find_roles ?ctx (snd aron) in
      let expected = Set.of_list [ `User; `Admin ] in
      let diff =
@@ -103,7 +103,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
     >|= Alcotest.(check (result unit string)) "Check a user's roles." (Ok ())
   ;;
 
-  let test_revoke_roles ?ctx _ () =
+  let test_revoke_roles ?ctx (_ : 'a) () =
     (let* () =
        Backend.Actor.grant_roles
          ?ctx
@@ -129,7 +129,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
     >|= Alcotest.(check (result bool string)) "Check a user's roles." (Ok false)
   ;;
 
-  let test_push_rules ?ctx _ () =
+  let test_push_rules ?ctx (_ : 'a) () =
     (let* put =
        Backend.Rule.save_all ?ctx global_rules
        |> Lwt_result.map_error [%show: Rule.t list]
@@ -140,14 +140,14 @@ module Tests (Backend : Guard.Persistence_s) = struct
           (Ok (CCList.map Rule.show global_rules))
   ;;
 
-  let save_existing_rule ?ctx _ () =
+  let save_existing_rule ?ctx (_ : 'a) () =
     let existing_rule = List.hd global_rules in
     (let* () = Backend.Rule.save ?ctx existing_rule in
      Backend.Rule.save ?ctx existing_rule)
     >|= Alcotest.(check (result unit string)) "Push global permissions." (Ok ())
   ;;
 
-  let test_read_rules ?ctx _ () =
+  let test_read_rules ?ctx (_ : 'a) () =
     let open Guard in
     (let%lwt article_rules =
        Backend.Rule.find_all ?ctx (TargetSpec.Entity `Article)
@@ -170,7 +170,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
           (Ok ())
   ;;
 
-  let test_drop_rules ?ctx _ () =
+  let test_drop_rules ?ctx (_ : 'a) () =
     (let* () = Backend.Rule.save ?ctx bad_rule in
      let%lwt perms =
        Backend.Rule.find_all
@@ -192,15 +192,15 @@ module Tests (Backend : Guard.Persistence_s) = struct
      in
      match perms' with
      | [] -> Lwt.return_ok ()
-     | _ -> Lwt.return_error "Failed to remove bad perm.")
+     | (_ : Rule.t list) -> Lwt.return_error "Failed to remove bad perm.")
     >|= Alcotest.(check (result unit string))
           "Read the global permissions we've just pushed."
           (Ok ())
   ;;
 
-  let test_update_owned ?ctx _ () =
+  let test_update_owned ?ctx (_ : 'a) () =
     (let* chris_ent = User.to_authorizable ?ctx chris in
-     let* _art =
+     let* (_ : Article.t) =
        Article.update_title ?ctx chris_ent chris_article "Updated Title"
      in
      Lwt.return_ok true)
@@ -209,7 +209,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
           (Ok true)
   ;;
 
-  let owner_can_update ?ctx _ () =
+  let owner_can_update ?ctx (_ : 'a) () =
     let open CCFun in
     let%lwt article_owner =
       let open Lwt.Infix in
@@ -232,7 +232,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
     Lwt.return_unit
   ;;
 
-  let test_admin_update_others' ?ctx _ () =
+  let test_admin_update_others' ?ctx (_ : 'a) () =
     (let%lwt aron_ent = User.to_authorizable ?ctx aron in
      match aron_ent with
      | Ok aron_ent ->
@@ -246,7 +246,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
           true
   ;;
 
-  let cannot_update ?ctx _ () =
+  let cannot_update ?ctx (_ : 'a) () =
     (let%lwt chris_ent = User.to_authorizable ?ctx chris in
      match chris_ent with
      | Ok chris_ent ->
@@ -258,7 +258,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
     >|= Alcotest.(check bool) "Chris cannot update an article Aron owns" true
   ;;
 
-  let can_update_self ?ctx _ () =
+  let can_update_self ?ctx (_ : 'a) () =
     (let%lwt (_ : ([> `User ] Backend.target, string) result) =
        UserTarget.to_authorizable ?ctx thomas
      in
@@ -281,7 +281,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
     >|= Alcotest.(check bool) "Article can update itself." true
   ;;
 
-  let editor_can_edit ?ctx _ () =
+  let editor_can_edit ?ctx (_ : 'a) () =
     (let* () =
        Backend.Actor.grant_roles
          ?ctx
@@ -303,7 +303,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
           (Ok true)
   ;;
 
-  let set_owner ?ctx _ () =
+  let set_owner ?ctx (_ : 'a) () =
     (let* aron' = User.to_authorizable ?ctx aron in
      let* chris_article' =
        Article.update_author ?ctx aron' chris_article aron
@@ -320,14 +320,16 @@ module Tests (Backend : Guard.Persistence_s) = struct
      match should_fail with
      | Ok _ -> Lwt.return_error "Failed to set new owner"
      | Error _ ->
-       let* _ = Article.update_author ?ctx aron' chris_article chris in
+       let* (_ : Article.t) =
+         Article.update_author ?ctx aron' chris_article chris
+       in
        Lwt_result.return true)
     >|= Alcotest.(check (result bool string))
           "Article cannot update another article."
           (Ok true)
   ;;
 
-  let operator_works ?ctx _ () =
+  let operator_works ?ctx (_ : 'a) () =
     let open Guard in
     let%lwt actual =
       let open Lwt_result.Syntax in
@@ -362,8 +364,10 @@ module Tests (Backend : Guard.Persistence_s) = struct
     |> Lwt.return
   ;;
 
-  let transistency ?ctx _ () =
-    (let* _ = Post.to_authorizable ?ctx thomas_aron_post in
+  let transistency ?ctx (_ : 'a) () =
+    (let* (_ : Backend.kind Guard.Target.t) =
+       Post.to_authorizable ?ctx thomas_aron_post
+     in
      let* aron_authorizable = User.to_authorizable ?ctx aron in
      let* _thomas_post' =
        Post.update_post
@@ -378,8 +382,10 @@ module Tests (Backend : Guard.Persistence_s) = struct
           (Ok true)
   ;;
 
-  let transistency_deny ?ctx _ () =
-    (let* _ = Post.to_authorizable ?ctx thomas_aron_post in
+  let transistency_deny ?ctx (_ : 'a) () =
+    (let* (_ : Backend.kind Guard.Target.t) =
+       Post.to_authorizable ?ctx thomas_aron_post
+     in
      let* chris_authorizable = User.to_authorizable ?ctx chris in
      let* _thomas_post' =
        Post.update_post
@@ -402,7 +408,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
   ;;
 
   (** IMPORTANT: the following tests should not compile! *)
-  (* let hacker_cannot_update_article ?ctx _ () = let () = print_endline
+  (* let hacker_cannot_update_article ?ctx (_:'a) () = let () = print_endline
      "about\n to run a test" in let%lwt ben = Hacker.to_authorizable ?ctx ben |>
      Lwt.map CCResult.get_or_failwith in let%lwt try_update =
      Article.update_title ben aron_article "Updated Title" in let () =
@@ -411,7 +417,7 @@ module Tests (Backend : Guard.Persistence_s) = struct
 end
 
 let () =
-  let make_test_cases ?ctx (module Backend : Guard.Persistence_s) name =
+  let make_test_cases ?ctx (module Backend : Guard.PersistenceSig) name =
     let module T = Tests (Backend) in
     [ ( Format.asprintf "(%s) Managing authorizables." name
       , [ Alcotest_lwt.test_case

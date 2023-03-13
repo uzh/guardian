@@ -3,7 +3,7 @@ let create_guardian_actors_table_sql =
     CREATE TABLE IF NOT EXISTS guardian_actors (
       id binary(16) UNIQUE NOT NULL,
       roles TEXT NOT NULL,
-      parent binary(16) NULL,
+      owner binary(16) NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
@@ -15,7 +15,7 @@ let create_guardian_targets_table_sql =
     CREATE TABLE IF NOT EXISTS guardian_targets (
       id binary(16) UNIQUE NOT NULL,
       kind varchar(255) NOT NULL,
-      parent binary(16),
+      owner binary(16),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       -- Following constraint already handled with a unique id

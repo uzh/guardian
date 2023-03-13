@@ -10,7 +10,7 @@ module Uuid = Uuid
 module Action = Action
 
 module Utils = struct
-  let hide_typ f _ = Format.pp_print_string f ""
+  let hide_typ f (_ : 'a) = Format.pp_print_string f ""
 
   (** turn a single argument function returning a [result] into one that raises
       a [Failure] instead *)
@@ -35,7 +35,9 @@ module Utils = struct
 end
 
 module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
-  module ParentTyp = TargetRoles
+  module ParentTyp = struct
+    include TargetRoles
+  end
 
   module RoleSet : Role_set.S with type elt = ActorRoles.t =
     Role_set.Make (ActorRoles)
@@ -196,8 +198,10 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
       | None -> default_fcn
     ;;
 
-    let find_all (typ : TargetRoles.t) : parent list =
-      Map.filter (fun (kind, _) _ -> TargetRoles.equal kind typ) !registered
+    let find_all (kind : TargetRoles.t) : parent list =
+      Map.filter
+        (fun (typ, _) (_ : parent) -> TargetRoles.equal typ kind)
+        !registered
       |> Map.to_list
       |> CCList.map snd
     ;;
@@ -291,7 +295,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
     ;;
   end
 
-  module type Persistence_s =
+  module type PersistenceSig =
     Persistence.Contract
       with type 'a actor = 'a Actor.t
        and type 'b target = 'b Target.t
@@ -305,7 +309,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
        and type rule = Rule.t
        and type target_spec = TargetSpec.t
 
-  module Make_persistence
+  module MakePersistence
     (Backend : Persistence.Backend
                  with type 'a actor = 'a Actor.t
                   and type 'b target = 'b Target.t
@@ -317,7 +321,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
                   and type role_set = RoleSet.t
                   and type roles = ActorRoles.t
                   and type rule = Rule.t
-                  and type target_spec = TargetSpec.t) : Persistence_s = struct
+                  and type target_spec = TargetSpec.t) : PersistenceSig = struct
     include Backend
     module Dependency = Dependency
 
@@ -350,7 +354,8 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
           (fun acc x ->
             match%lwt save ?ctx x with
             | Ok () -> CCResult.map (CCList.cons x) acc |> Lwt_result.lift
-            | Error _ -> CCResult.map_err (CCList.cons x) acc |> Lwt_result.lift)
+            | Error (_ : string) ->
+              CCResult.map_err (CCList.cons x) acc |> Lwt_result.lift)
           (Ok [])
       ;;
 
