@@ -1,22 +1,38 @@
 exception Exception of string
 
+let src = Logs.Src.create "guardian.pools"
+let find_pool_name = CCList.assoc_opt ~eq:CCString.equal "pool"
+
+module LogTag = struct
+  let add_label : string Logs.Tag.def =
+    Logs.Tag.def "database_label" ~doc:"Database Label" CCString.pp
+  ;;
+
+  let create database = Logs.Tag.(empty |> add add_label database)
+
+  let ctx_opt ?ctx () =
+    let open CCOption.Infix in
+    ctx >>= find_pool_name >|= fun db -> Logs.Tag.(empty |> add add_label db)
+  ;;
+end
+
 type connection_type =
   | SinglePool of string
   | MultiPools of (string * string) list
 
-let with_log ?(log_level = Logs.Error) ?(msg_prefix = "Error") err =
+let with_log ?tags ?(log_level = Logs.Error) ?(msg_prefix = "Error") err =
   let msg = Caqti_error.show err in
-  Logs.msg log_level (fun m -> m "%s: %s" msg_prefix msg);
+  Logs.msg ~src log_level (fun m -> m ?tags "%s: %s" msg_prefix msg);
   msg
 ;;
 
-let get_or_raise ?log_level ?msg_prefix () = function
+let get_or_raise ?tags ?log_level ?msg_prefix () = function
   | Ok result -> result
-  | Error error -> failwith (with_log ?log_level ?msg_prefix error)
+  | Error error -> failwith (with_log ?tags ?log_level ?msg_prefix error)
 ;;
 
-let map_or_raise ?log_level ?msg_prefix fcn result =
-  result |> CCResult.map fcn |> get_or_raise ?log_level ?msg_prefix ()
+let map_or_raise ?tags ?log_level ?msg_prefix fcn result =
+  result |> CCResult.map fcn |> get_or_raise ?tags ?log_level ?msg_prefix ()
 ;;
 
 module type ConfigSig = sig
@@ -46,10 +62,11 @@ module Make (Config : ConfigSig) = struct
        | MultiPools pools -> CCList.length pools + spare_for_pools)
   ;;
 
-  let print_pool_usage pool =
+  let print_pool_usage ?tags pool =
     let n_connections = Caqti_lwt.Pool.size pool in
     let max_connections = Config.database_pool_size in
-    Logs.debug (fun m -> m "Pool usage: %i/%i" n_connections max_connections)
+    Logs.debug ~src (fun m ->
+      m ?tags "Pool usage: %i/%i" n_connections max_connections)
   ;;
 
   let connect_or_failwith
@@ -64,6 +81,7 @@ module Make (Config : ConfigSig) = struct
   ;;
 
   let add_pool ?pool_size name database_url =
+    let tags = LogTag.create name in
     match Config.database, Hashtbl.find_opt pools name with
     | SinglePool _, _ ->
       failwith "SinglePool is selected: Switch to 'MultiPools' first"
@@ -73,7 +91,7 @@ module Make (Config : ConfigSig) = struct
           "Failed to create pool: Connection pool with name '%s' exists already"
           name
       in
-      Logs.err (fun m -> m "%s" msg);
+      Logs.err ~src (fun m -> m ~tags "%s" msg);
       failwith msg
     | MultiPools _, None ->
       database_url |> connect_or_failwith ?pool_size (Hashtbl.add pools name)
@@ -102,7 +120,7 @@ module Make (Config : ConfigSig) = struct
     | SinglePool _ ->
       !main_pool_ref |> get_exn_or "Initialization missed: run 'initialize'"
     | MultiPools _ ->
-      CCList.assoc_opt ~eq:CCString.equal "pool" ctx
+      find_pool_name ctx
       >>= Hashtbl.find_opt pools
       |> (function
       | Some pool -> pool
@@ -115,53 +133,72 @@ module Make (Config : ConfigSig) = struct
     print_pool_usage pool;
     Caqti_lwt.Pool.use
       (fun connection ->
-        Logs.debug (fun m -> m "Fetched connection from pool");
+        Logs.debug ~src (fun m ->
+          m ?tags:(LogTag.ctx_opt ?ctx ()) "Fetched connection from pool");
         let (module Connection : Caqti_lwt.CONNECTION) = connection in
         let open Caqti_error in
         match%lwt Connection.start () with
         | Error msg ->
-          Logs.debug (fun m -> m "Failed to start transaction: %s" (show msg));
+          Logs.debug ~src (fun m ->
+            m
+              ?tags:(LogTag.ctx_opt ?ctx ())
+              "Failed to start transaction: %s"
+              (show msg));
           Lwt.return_error msg
         | Ok () ->
-          Logs.debug (fun m -> m "Started transaction");
+          Logs.debug ~src (fun m ->
+            m ?tags:(LogTag.ctx_opt ?ctx ()) "Started transaction");
           Lwt.catch
             (fun () ->
               match%lwt Connection.commit () with
               | Ok () ->
-                Logs.debug (fun m -> m "Successfully committed transaction");
+                Logs.debug ~src (fun m ->
+                  m
+                    ?tags:(LogTag.ctx_opt ?ctx ())
+                    "Successfully committed transaction");
                 f connection |> Lwt_result.return
               | Error error ->
                 Exception
-                  (with_log ~msg_prefix:"Failed to commit transaction" error)
+                  (with_log
+                     ?tags:(LogTag.ctx_opt ?ctx ())
+                     ~msg_prefix:"Failed to commit transaction"
+                     error)
                 |> Lwt.fail)
             (fun e ->
               match%lwt Connection.rollback () with
               | Ok () ->
-                Logs.debug (fun m -> m "Successfully rolled back transaction");
+                Logs.debug ~src (fun m ->
+                  m
+                    ?tags:(LogTag.ctx_opt ?ctx ())
+                    "Successfully rolled back transaction");
                 Lwt.fail e
               | Error error ->
                 Exception
-                  (with_log ~msg_prefix:"Failed to rollback transaction" error)
+                  (with_log
+                     ?tags:(LogTag.ctx_opt ?ctx ())
+                     ~msg_prefix:"Failed to rollback transaction"
+                     error)
                 |> Lwt.fail))
       pool
-    >|= get_or_raise ()
+    >|= get_or_raise ?tags:(LogTag.ctx_opt ?ctx ()) ()
   ;;
 
-  let transaction' ?ctx f = transaction ?ctx f |> Lwt.map (get_or_raise ())
+  let transaction' ?ctx f =
+    transaction ?ctx f
+    |> Lwt.map (get_or_raise ?tags:(LogTag.ctx_opt ?ctx ()) ())
+  ;;
 
   let query ?ctx f =
     let open Lwt.Infix in
     let pool = fetch_pool ?ctx () in
     print_pool_usage pool;
-    Caqti_lwt.Pool.use
-      (fun connection ->
-        let module Connection = (val connection : Caqti_lwt.CONNECTION) in
-        f connection >|= CCResult.return)
-      pool
-    >|= get_or_raise ()
+    Caqti_lwt.Pool.use (fun connection -> f connection >|= CCResult.return) pool
+    >|= get_or_raise ?tags:(LogTag.ctx_opt ?ctx ()) ()
   ;;
 
-  let query' ?ctx f = query ?ctx f |> Lwt.map (get_or_raise ())
+  let query' ?ctx f =
+    query ?ctx f |> Lwt.map (get_or_raise ?tags:(LogTag.ctx_opt ?ctx ()) ())
+  ;;
 
   let find_opt ?ctx request input =
     query' ?ctx (fun connection ->
@@ -198,17 +235,17 @@ module type Sig = sig
 
   val add_pool : ?pool_size:int -> string -> string -> unit
 
-  val find_opt
-    :  ?ctx:(string * string) list
-    -> ('a, 'b, [< `One | `Zero ]) Caqti_request.t
-    -> 'a
-    -> 'b option Lwt.t
-
   val find
     :  ?ctx:(string * string) list
     -> ('a, 'b, [< `One ]) Caqti_request.t
     -> 'a
     -> 'b Lwt.t
+
+  val find_opt
+    :  ?ctx:(string * string) list
+    -> ('a, 'b, [< `One | `Zero ]) Caqti_request.t
+    -> 'a
+    -> 'b option Lwt.t
 
   val collect
     :  ?ctx:(string * string) list

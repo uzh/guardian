@@ -15,5 +15,6 @@ module Target : sig
       with type t =
         [ `User
         | `Article
+        | `Post
         ]
 end

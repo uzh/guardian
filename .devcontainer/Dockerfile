@@ -31,7 +31,6 @@ RUN apt-get update --allow-releaseinfo-change -q \
   libgmp-dev \
   libmariadb-dev \
   libqt5gui5 \
-  libsqlite3-dev \
   libssl-dev \
   lsof \
   m4 \
@@ -39,7 +38,6 @@ RUN apt-get update --allow-releaseinfo-change -q \
   pdftk-java \
   perl \
   pkg-config \
-  sqlite3 \
   utop \
   wget \
   wkhtmltopdf \

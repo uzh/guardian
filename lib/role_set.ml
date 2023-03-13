@@ -6,10 +6,10 @@ module type S = sig
   val pp : Format.formatter -> t -> unit
 end
 
-module Make (R : Role.Sig) : S with type elt = R.t = struct
-  include Set.Make (R)
+module Make (Role : Role.Sig) : S with type elt = Role.t = struct
+  include Set.Make (Role)
 
-  let to_yojson t = `List (CCList.map R.to_yojson (elements t))
+  let to_yojson t = `List (CCList.map Role.to_yojson (elements t))
 
   let of_yojson =
     let open CCResult in
@@ -17,14 +17,14 @@ module Make (R : Role.Sig) : S with type elt = R.t = struct
     | `List items ->
       CCList.fold_left
         (fun acc x ->
-          acc >>= fun acc' -> x |> R.of_yojson >|= CCFun.flip add acc')
+          acc >>= fun acc' -> x |> Role.of_yojson >|= CCFun.flip add acc')
         (Ok empty)
         items
     | _ -> Error "Invalid role set"
   ;;
 
   let pp fmt t =
-    let show = [%show: R.t list] in
+    let show = [%show: Role.t list] in
     Format.fprintf fmt "[%s]" (show (elements t))
   ;;
 end

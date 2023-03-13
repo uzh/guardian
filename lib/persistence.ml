@@ -1,104 +1,97 @@
 type context = (string * string) list
 
 module type Backend = sig
-  type actor_role_set
+  type 'a actor
+  type 'b target
   type actor_spec
-  type auth_rule
-  type role
-  type target_role_set
+  type effect
+  type effect_set
+  type kind
+  type parent_kind
+  type role_set
+  type roles
+  type rule
   type target_spec
-  type 'a authorizable
-  type 'b authorizable_target
   type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
 
-  module Actor : sig
-    module Authorizable : sig
+  module Repo : sig
+    module Rule : sig
+      val find_all : ?ctx:context -> target_spec -> rule list Lwt.t
+      val save : ?ctx:context -> rule -> (unit, string) monad
+      val delete : ?ctx:context -> rule -> (unit, string) monad
+    end
+
+    module Actor : sig
       val create
         :  ?ctx:context
         -> ?owner:Uuid.Actor.t
-        -> actor_role_set
+        -> role_set
         -> Uuid.Actor.t
         -> (unit, string) monad
 
       val mem : ?ctx:context -> Uuid.Actor.t -> (bool, string) monad
+
+      val find
+        :  ?ctx:context
+        -> 'kind
+        -> Uuid.Actor.t
+        -> ('kind actor, string) monad
+
+      val find_roles : ?ctx:context -> Uuid.Actor.t -> (role_set, string) monad
+
+      val find_owner
+        :  ?ctx:context
+        -> Uuid.Actor.t
+        -> (Uuid.Actor.t option, string) monad
+
+      val grant_roles
+        :  ?ctx:context
+        -> Uuid.Actor.t
+        -> role_set
+        -> (unit, string) monad
+
+      val revoke_roles
+        :  ?ctx:context
+        -> Uuid.Actor.t
+        -> role_set
+        -> (unit, string) monad
+
+      val save_owner
+        :  ?ctx:context
+        -> ?owner:Uuid.Actor.t
+        -> Uuid.Actor.t
+        -> (unit, string) monad
     end
 
-    val find
-      :  ?ctx:context
-      -> 'kind
-      -> Uuid.Actor.t
-      -> ('kind authorizable, string) monad
-
-    val find_roles
-      :  ?ctx:context
-      -> Uuid.Actor.t
-      -> (actor_role_set, string) monad
-
-    val find_rules
-      :  ?ctx:context
-      -> target_spec
-      -> (auth_rule list, string) monad
-
-    val find_owner
-      :  ?ctx:context
-      -> Uuid.Actor.t
-      -> (Uuid.Actor.t option, string) monad
-
-    val save_rule : ?ctx:context -> auth_rule -> (unit, string) monad
-    val delete_rule : ?ctx:context -> auth_rule -> (unit, string) monad
-
-    val grant_roles
-      :  ?ctx:context
-      -> Uuid.Actor.t
-      -> actor_role_set
-      -> (unit, string) monad
-
-    val revoke_roles
-      :  ?ctx:context
-      -> Uuid.Actor.t
-      -> actor_role_set
-      -> (unit, string) monad
-
-    val save_owner
-      :  ?ctx:context
-      -> ?owner:Uuid.Actor.t
-      -> Uuid.Actor.t
-      -> (unit, string) monad
-  end
-
-  module Target : sig
-    module Authorizable : sig
+    module Target : sig
       val create
         :  ?ctx:context
         -> ?owner:Uuid.Actor.t
-        -> target_role_set
+        -> kind
         -> Uuid.Target.t
         -> (unit, string) monad
 
       val mem : ?ctx:context -> Uuid.Target.t -> (bool, string) monad
+
+      val find
+        :  ?ctx:context
+        -> kind
+        -> Uuid.Target.t
+        -> (kind target, string) monad
+
+      val find_kind : ?ctx:context -> Uuid.Target.t -> (kind, string) monad
+
+      val find_owner
+        :  ?ctx:context
+        -> Uuid.Target.t
+        -> (Uuid.Actor.t option, string) monad
+
+      val save_owner
+        :  ?ctx:context
+        -> ?owner:Uuid.Actor.t
+        -> Uuid.Target.t
+        -> (unit, string) monad
     end
-
-    val find
-      :  ?ctx:context
-      -> 'kind
-      -> Uuid.Target.t
-      -> ('kind authorizable_target, string) monad
-
-    val find_roles
-      :  ?ctx:context
-      -> Uuid.Target.t
-      -> (target_role_set, string) monad
-
-    val find_owner
-      :  ?ctx:context
-      -> Uuid.Target.t
-      -> (Uuid.Actor.t option, string) monad
-
-    val save_owner
-      :  ?ctx:context
-      -> ?owner:Uuid.Actor.t
-      -> Uuid.Target.t
-      -> (unit, string) monad
   end
 
   val find_migrations : unit -> (string * string * string) list
@@ -110,74 +103,108 @@ end
 module type Contract = sig
   include Backend
 
-  module Actor : sig
-    include module type of Actor
+  module Dependency : sig
+    type parent = ?ctx:context -> effect -> (effect option, string) monad
 
-    val save_rules
+    val register
+      :  ?tags:Logs.Tag.set
+      -> ?ignore_duplicates:bool
+      -> kind
+      -> parent_kind
+      -> parent
+      -> (unit, string) result
+
+    val find : ?default_fcn:parent -> kind -> parent_kind -> parent
+    val find_opt : kind -> parent_kind -> parent option
+    val find_all : kind -> parent list
+
+    val find_all_combined
+      :  kind
+      -> ?ctx:context
+      -> effect
+      -> (effect list, string) monad
+  end
+
+  module Rule : sig
+    include module type of Repo.Rule
+
+    val save_all : ?ctx:context -> rule list -> (rule list, rule list) monad
+    val delete_exn : ?ctx:context -> rule -> unit Lwt.t
+  end
+
+  module Actor : sig
+    include module type of Repo.Actor
+
+    val create
       :  ?ctx:context
-      -> auth_rule list
-      -> (auth_rule list, auth_rule list) Lwt_result.t
+      -> ?owner:Uuid.Actor.t
+      -> role_set
+      -> Uuid.Actor.t
+      -> (unit, string) monad
+
+    val mem : ?ctx:context -> Uuid.Actor.t -> (bool, string) monad
 
     val revoke_role
       :  ?ctx:context
       -> Uuid.Actor.t
-      -> role
+      -> roles
       -> (unit, string) monad
 
-    val find_roles_exn : ?ctx:context -> Uuid.Actor.t -> actor_role_set Lwt.t
+    val find_roles_exn : ?ctx:context -> Uuid.Actor.t -> role_set Lwt.t
 
-    val find_authorizable
+    val find
       :  ?ctx:context
       -> 'kind
       -> Uuid.Actor.t
-      -> ('kind authorizable, string) Lwt_result.t
+      -> ('kind actor, string) monad
 
     val decorate
       :  ?ctx:context
-      -> ('a -> 'kind authorizable)
+      -> ('a -> 'kind actor)
       -> 'a
-      -> ('kind authorizable, string) Lwt_result.t
+      -> ('kind actor, string) monad
   end
 
   module Target : sig
-    include module type of Target
+    include module type of Repo.Target
+
+    val create
+      :  ?ctx:context
+      -> ?owner:Uuid.Actor.t
+      -> kind
+      -> Uuid.Target.t
+      -> (unit, string) monad
+
+    val mem : ?ctx:context -> Uuid.Target.t -> (bool, string) monad
 
     val decorate
       :  ?ctx:context
-      -> ('a -> 'kind authorizable_target)
+      -> ('a -> kind target)
       -> 'a
-      -> ('kind authorizable_target, string) Lwt_result.t
+      -> (kind target, string) monad
 
     val find_checker
       :  ?ctx:context
-      -> 'a authorizable_target
-      -> ('b authorizable -> Action.t -> bool, string) Lwt_result.t
+      -> kind target
+      -> ('a actor -> Action.t -> bool, string) monad
 
-    val find_role_checker
+    val find_kind_checker
       :  ?ctx:context
-      -> target_role_set
-      -> ('b authorizable -> Action.t -> bool, string) Lwt_result.t
+      -> kind
+      -> ('b actor -> Action.t -> bool, string) monad
   end
 
   val wrap_function
     :  ?ctx:context
     -> (string -> 'etyp)
-    -> (Action.t * target_spec) list
+    -> effect_set
     -> ('param -> ('rval, 'etyp) monad)
-    -> ('a authorizable -> 'param -> ('rval, 'etyp) monad, string) monad
+    -> ('a actor -> 'param -> ('rval, 'etyp) monad, string) monad
 
-  val collect_rules
+  val validate_effects
     :  ?ctx:context
-    -> (Action.t * target_spec) list
-    -> (auth_rule list, string) monad
-
-  val checker_of_effects
-    :  ?ctx:context
-    -> (Action.t * target_spec) list
-    -> 'a authorizable
-    -> (unit, string) monad
-
-  val find_rules_exn : ?ctx:context -> target_spec -> auth_rule list Lwt.t
-  val save_rule_exn : ?ctx:context -> auth_rule -> unit Lwt.t
-  val delete_rule_exn : ?ctx:context -> auth_rule -> unit Lwt.t
+    -> (string -> 'etyp)
+    -> effect_set
+    -> 'a actor
+    -> (unit, 'etyp) monad
 end

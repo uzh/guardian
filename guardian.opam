@@ -25,8 +25,7 @@ depends: [
   "ocamlformat" {>= "0.24.1"}
   "ppx_deriving" {>= "5.2.1"}
   "ppx_deriving_yojson" {>= "3.6.1"}
-  "ppx_inline_test"
-  "sqlite3" {>= "5.1.0"}
+  "ppx_inline_test" {= "v0.15.0"}
   "uri" {>= "4.2.0"}
   "uuidm" {>= "0.9.8"}
   "yojson" {>= "2.0.2"}

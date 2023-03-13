@@ -4,7 +4,7 @@ Generic framework for roles and permissions to be used in our projects
 
 ## Limitations and Notes
 
-- Supported Database: Implementation with MariaDb (Sqlite only for testing)
+- Supported Database: Implementation with MariaDb
 - Context (`ctx`): Allows to have multiple database pools (See [next section](#setup-with-mariadb-backend-multipools))
 
 ## Setup with MariaDB backend (MultiPools)
@@ -78,7 +78,7 @@ Most used commands can be found in the following list. For the full list of comm
 
 - `make build` - to build the project
 - `make build-watch` - to build and watch the project
-- `make test` - to run all tests. This requires a running MariaDB instance (sqlite will be created).
+- `make test` - to run all tests. This requires a running MariaDB instance.
 
 ### Release to production
 
