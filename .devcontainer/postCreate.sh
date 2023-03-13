@@ -10,6 +10,6 @@ opam remote remove --all default
 opam repository add default --all-switches --set-default https://opam.ocaml.org
 
 opam pin add -yn guardian .
-opam depext -y guardian
+opam depext --with-test --with-doc -y guardian
 
 make deps

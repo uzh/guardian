@@ -40,3 +40,7 @@ utop: ## Run a REPL and link with the project's libraries
 .PHONY: format
 format: ## Format the codebase with ocamlformat
 	opam exec -- dune build --root . --auto-promote @fmt
+
+.PHONY: doc
+doc: ## Build the documentation
+	opam exec -- dune build --root . @doc

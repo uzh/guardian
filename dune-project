@@ -61,6 +61,8 @@
    (>= 0.9.8))
   (yojson
    (>= 2.0.2))
+  ;; Documentation
+  (odoc :with-doc)
   ;; Test/Dev dependencies
   (alcotest-lwt :with-test)))
 

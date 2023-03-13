@@ -29,8 +29,8 @@ depends: [
   "uri" {>= "4.2.0"}
   "uuidm" {>= "0.9.8"}
   "yojson" {>= "2.0.2"}
-  "alcotest-lwt" {with-test}
   "odoc" {with-doc}
+  "alcotest-lwt" {with-test}
 ]
 build: [
   ["dune" "subst"] {dev}
