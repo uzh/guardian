@@ -1,10 +1,12 @@
 module Make (Backend : Guard.PersistenceSig) = struct
-  type t = string * Guardian.Uuid.Actor.t
+  open Guard
 
-  let make s : t = s, Guardian.Uuid.Actor.create ()
+  type t = string * Uuid.Actor.t
+
+  let make s : t = s, Uuid.Actor.create ()
 
   let to_authorizable ?ctx =
-    Backend.Actor.decorate ?ctx (fun (t : t) : [ `Hacker ] Guard.Actor.t ->
-      Guard.Actor.make (Guard.RoleSet.of_list [ `Hacker ]) `Hacker (snd t))
+    Backend.Actor.decorate ?ctx (fun (t : t) : [ `Hacker ] Actor.t ->
+      Actor.make (RoleSet.singleton `Hacker) `Hacker (snd t))
   ;;
 end

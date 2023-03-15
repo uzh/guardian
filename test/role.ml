@@ -1,12 +1,12 @@
 open CCFun.Infix
+module Uuid = Guardian.Contract.Uuid
 
 module Actor = struct
   type t =
     [ `User
     | `Admin
     | `Hacker
-    | `Editor of Guardian.Uuid.Target.t
-      [@equal fun a b -> Guardian.Uuid.Target.(equal a nil || equal b nil)]
+    | `Editor of Uuid.Target.t
     ]
   [@@deriving show, eq, ord, yojson]
 
@@ -18,17 +18,18 @@ module Actor = struct
   ;;
 
   let find_target_exn = find_target %> CCOption.get_exn_or "No target"
-  let all = [ `User; `Admin; `Hacker; `Editor Guardian.Uuid.Target.nil ]
+  let all = [ `User; `Admin; `Hacker; `Editor Uuid.Target.nil ]
 
-  let of_string s =
-    match Guardian.Utils.decompose_variant_string s with
+  let of_string =
+    Guardian.Utils.decompose_variant_string
+    %> function
     | "user", [] -> `User
     | "admin", [] -> `Admin
     | "hacker", [] -> `Hacker
     | "editor", [ id ] ->
-      Logs.debug (fun m -> m "Parsing role string: %s" s);
-      `Editor (Guardian.Uuid.Target.of_string_exn id)
-    | _ -> failwith (Format.asprintf "Invalid role: %s" s)
+      Logs.debug (fun m -> m "Parsing role `Editor with id: %s" id);
+      `Editor (Uuid.Target.of_string_exn id)
+    | role -> Guardian.Utils.failwith_invalid_role role
   ;;
 end
 
@@ -54,6 +55,6 @@ module Target = struct
     | "user", [] -> `User
     | "article", [] -> `Article
     | "post", [] -> `Post
-    | _ -> failwith (Format.asprintf "Invalid role: %s" s)
+    | role -> Guardian.Utils.failwith_invalid_role role
   ;;
 end

@@ -5,7 +5,7 @@ module Actor : sig
         [ `User
         | `Admin
         | `Hacker
-        | `Editor of Guardian.Uuid.Target.t
+        | `Editor of Guardian.Contract.Uuid.Target.t
         ]
 end
 

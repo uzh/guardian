@@ -14,23 +14,23 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   let _ = (module Article : TargetSig)
   let _ = (module User : ActorSig)
   let _ = (module UserTarget : TargetSig)
-  let chris = "Chris", Guardian.Uuid.Actor.create ()
-  let aron = "Aron", Guardian.Uuid.Actor.create ()
-  let ben : Hacker.t = "Ben Hackerman", Guardian.Uuid.Actor.create ()
-  let thomas = "Thomas", Guardian.Uuid.Actor.create ()
-  let hugo = "Hugo", Guardian.Uuid.Actor.create ()
+  let chris = "Chris", Guard.Uuid.Actor.create ()
+  let aron = "Aron", Guard.Uuid.Actor.create ()
+  let ben : Hacker.t = "Ben Hackerman", Guard.Uuid.Actor.create ()
+  let thomas = "Thomas", Guard.Uuid.Actor.create ()
+  let hugo = "Hugo", Guard.Uuid.Actor.create ()
   let chris_article = Article.make "Foo" "Bar" chris
   let aron_article = Article.make "Fizz" "Buzz" aron
   let thomas_aron_post = Post.make thomas chris_article "A first reaction"
 
   let bad_rule =
     ( ActorSpec.Id (`User, snd chris)
-    , Guardian.Action.Update
+    , Guard.Action.Update
     , TargetSpec.Id (`Article, aron_article.Article.uuid) )
   ;;
 
   let global_rules : Rule.t list =
-    let open Guardian.Action in
+    let open Guard.Action in
     [ ActorSpec.Entity `User, Read, TargetSpec.Entity `Article
     ; ActorSpec.Entity `Admin, Manage, TargetSpec.Entity `Article
     ; ( ActorSpec.Entity (`Editor chris_article.Article.uuid)
@@ -64,10 +64,10 @@ module Tests (Backend : Guard.PersistenceSig) = struct
      let* chris_art_owner = find_owner_id chris_article in
      let* aron_art_owner = find_owner_id aron_article in
      Lwt.return_ok
-       Guardian.Uuid.Actor.(to_string chris_art_owner, to_string aron_art_owner))
+       Guard.Uuid.Actor.(to_string chris_art_owner, to_string aron_art_owner))
     >|= Alcotest.(check (result (pair string string) string))
           "Create an authorizable."
-          (Ok Guardian.Uuid.Actor.(to_string (snd chris), to_string (snd aron)))
+          (Ok Guard.Uuid.Actor.(to_string (snd chris), to_string (snd aron)))
   ;;
 
   let test_find_authorizable ?ctx (_ : 'a) () =
@@ -98,7 +98,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
          (Format.asprintf
             "Got %s for roles of authorizable %s, but expected %s."
             received
-            (Guardian.Uuid.Actor.to_string (snd aron))
+            (Guard.Uuid.Actor.to_string (snd aron))
             expected))
     >|= Alcotest.(check (result unit string)) "Check a user's roles." (Ok ())
   ;;
@@ -108,11 +108,11 @@ module Tests (Backend : Guard.PersistenceSig) = struct
        Backend.Actor.grant_roles
          ?ctx
          (snd aron)
-         (Set.singleton (`Editor Guardian.Uuid.Target.nil))
+         (Set.singleton (`Editor Guard.Uuid.Target.nil))
      in
      let* () =
        let* roles = Backend.Actor.find_roles ?ctx (snd aron) in
-       if Set.mem (`Editor Guardian.Uuid.Target.nil) roles
+       if Set.mem (`Editor Guard.Uuid.Target.nil) roles
        then Lwt.return_ok ()
        else
          Lwt.return_error
@@ -122,10 +122,10 @@ module Tests (Backend : Guard.PersistenceSig) = struct
        Backend.Actor.revoke_roles
          ?ctx
          (snd aron)
-         (Set.singleton (`Editor Guardian.Uuid.Target.nil))
+         (Set.singleton (`Editor Guard.Uuid.Target.nil))
      in
      let* roles = Backend.Actor.find_roles ?ctx (snd aron) in
-     Lwt.return_ok (Set.mem (`Editor Guardian.Uuid.Target.nil) roles))
+     Lwt.return_ok (Set.mem (`Editor Guard.Uuid.Target.nil) roles))
     >|= Alcotest.(check (result bool string)) "Check a user's roles." (Ok false)
   ;;
 
@@ -266,8 +266,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
      match thomas_auth with
      | Ok thomas_user ->
        let as_target =
-         Guardian.Uuid.(
-           thomas |> snd |> Actor.to_string |> Target.of_string_exn)
+         Guard.Uuid.(thomas |> snd |> Actor.to_string |> Target.of_string_exn)
        in
        let%lwt res =
          User.update_name
@@ -336,24 +335,24 @@ module Tests (Backend : Guard.PersistenceSig) = struct
       (* Note: a user can be an actor or a target, so 'to_authorizable' has to
          be called for both roles *)
       let* target' = UserTarget.to_authorizable ?ctx hugo in
+      let target_id = target' |> Target.id in
       let* actor = User.to_authorizable ?ctx thomas in
       let* () =
         Backend.Actor.grant_roles
           ?ctx
-          actor.Actor.uuid
-          (RoleSet.singleton (`Editor target'.Target.uuid))
+          (actor |> Actor.id)
+          (RoleSet.singleton (`Editor target_id))
       in
       let* actor = Backend.Actor.find ?ctx `User (snd thomas) in
       let* () =
         Backend.Rule.save
           ?ctx
-          ( ActorSpec.Entity (`Editor target'.Target.uuid)
-          , Guardian.Action.Manage
-          , TargetSpec.Id (`User, target'.Target.uuid) )
+          ( ActorSpec.Entity (`Editor target_id)
+          , Guard.Action.Manage
+          , TargetSpec.Id (`User, target_id) )
       in
       let effects =
-        EffectSet.One
-          (Guardian.Action.Manage, TargetSpec.Id (`User, target'.Target.uuid))
+        EffectSet.One (Guard.Action.Manage, TargetSpec.Id (`User, target_id))
       in
       Backend.validate_effects ?ctx CCFun.id effects actor
     in

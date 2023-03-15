@@ -1,13 +1,13 @@
-module type S = sig
-  include Set.S
+module type Core = sig
+  include CCSet.S
 
   val to_yojson : t -> Yojson.Safe.t
   val of_yojson : Yojson.Safe.t -> (t, string) CCResult.t
   val pp : Format.formatter -> t -> unit
 end
 
-module Make (Role : Role.Sig) : S with type elt = Role.t = struct
-  include Set.Make (Role)
+module Make (Role : Role.Sig) : Core with type elt = Role.t = struct
+  include CCSet.Make (Role)
 
   let to_yojson t = `List (CCList.map Role.to_yojson (elements t))
 
