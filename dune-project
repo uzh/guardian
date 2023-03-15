@@ -53,8 +53,6 @@
    (>= 5.2.1))
   (ppx_deriving_yojson
    (>= 3.6.1))
-  (ppx_inline_test
-   (= v0.15.0))
   (uri
    (>= 4.2.0))
   (uuidm
