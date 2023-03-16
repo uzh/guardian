@@ -21,9 +21,9 @@ let decompose_variant_string s =
     Scanf.sscanf s fmt (fun name -> lowercase_ascii name, [])
 ;;
 
-let failwith_invalid_role =
+let failwith_invalid_role ?(msg_prefix = "Invalid role") =
   let open CCFun in
   [%show: string * string list]
-  %> Format.asprintf "Invalid role: %s"
+  %> Format.asprintf "%s: %s" msg_prefix
   %> failwith
 ;;

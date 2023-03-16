@@ -11,7 +11,7 @@ module Utils : sig
     -> 'c Lwt.t
 
   val decompose_variant_string : string -> string * string list
-  val failwith_invalid_role : string * string list -> 'a
+  val failwith_invalid_role : ?msg_prefix:string -> string * string list -> 'a
 end
 
 module Contract : sig
