@@ -44,7 +44,7 @@ struct
   end
 
   module Owner = struct
-    let t = Caqti_type.(option Uuid.Actor.t)
+    let t = Uuid.Actor.t
   end
 
   module Role = BaseType (ActorRoles)
@@ -133,27 +133,27 @@ struct
           let select =
             Format.asprintf
               {sql|
-              SELECT
-                actor_role,
-                LOWER(CONCAT(
-                  SUBSTR(HEX(actor_id), 1, 8), '-',
-                  SUBSTR(HEX(actor_id), 9, 4), '-',
-                  SUBSTR(HEX(actor_id), 13, 4), '-',
-                  SUBSTR(HEX(actor_id), 17, 4), '-',
-                  SUBSTR(HEX(actor_id), 21)
-                )),
-                act,
-                target_role,
-                LOWER(CONCAT(
-                  SUBSTR(HEX(target_id), 1, 8), '-',
-                  SUBSTR(HEX(target_id), 9, 4), '-',
-                  SUBSTR(HEX(target_id), 13, 4), '-',
-                  SUBSTR(HEX(target_id), 17, 4), '-',
-                  SUBSTR(HEX(target_id), 21)
-                ))
-              FROM guardian_rules
-              %s
-            |sql}
+                SELECT
+                  actor_role,
+                  LOWER(CONCAT(
+                    SUBSTR(HEX(actor_id), 1, 8), '-',
+                    SUBSTR(HEX(actor_id), 9, 4), '-',
+                    SUBSTR(HEX(actor_id), 13, 4), '-',
+                    SUBSTR(HEX(actor_id), 17, 4), '-',
+                    SUBSTR(HEX(actor_id), 21)
+                  )),
+                  act,
+                  target_role,
+                  LOWER(CONCAT(
+                    SUBSTR(HEX(target_id), 1, 8), '-',
+                    SUBSTR(HEX(target_id), 9, 4), '-',
+                    SUBSTR(HEX(target_id), 13, 4), '-',
+                    SUBSTR(HEX(target_id), 17, 4), '-',
+                    SUBSTR(HEX(target_id), 21)
+                  ))
+                FROM guardian_rules
+                %s
+              |sql}
           in
           match target_spec with
           | Guard.TargetSpec.Id (role, uuid) ->
@@ -178,9 +178,9 @@ struct
         let save ?ctx rule =
           let query =
             {sql|
-            INSERT INTO guardian_rules (actor_role, actor_id, act, target_role, target_id)
-            VALUES (?, UNHEX(REPLACE(?, '-', '')), ?, ?, UNHEX(REPLACE(?, '-', '')))
-          |sql}
+              INSERT INTO guardian_rules (actor_role, actor_id, act, target_role, target_id)
+              VALUES (?, UNHEX(REPLACE(?, '-', '')), ?, ?, UNHEX(REPLACE(?, '-', '')))
+            |sql}
           in
           act_on_rule ?ctx query rule
         ;;
@@ -189,13 +189,13 @@ struct
           (* TODO: only mark as deleted *)
           let query =
             {sql|
-            DELETE FROM guardian_rules
-            WHERE actor_role = ?
-              AND actor_id = UNHEX(REPLACE(?, '-', ''))
-              AND act = ?
-              AND target_role = ?
-              AND target_id = UNHEX(REPLACE(?, '-', ''))
-          |sql}
+              DELETE FROM guardian_rules
+              WHERE actor_role = ?
+                AND actor_id = UNHEX(REPLACE(?, '-', ''))
+                AND act = ?
+                AND target_role = ?
+                AND target_id = UNHEX(REPLACE(?, '-', ''))
+            |sql}
           in
           act_on_rule ?ctx query rule
         ;;
@@ -210,7 +210,7 @@ struct
               ON DUPLICATE KEY UPDATE
                 updated_at = NOW()
             |sql}
-            |> Caqti_type.(tup3 Uuid.Actor.t Roles.t Owner.t ->. unit)
+            |> Caqti_type.(tup3 Uuid.Actor.t Roles.t (option Owner.t) ->. unit)
           in
           Database.exec ?ctx caqti (id, roles, owner) |> Lwt_result.ok
         ;;
@@ -228,22 +228,25 @@ struct
           let open Lwt_result.Syntax in
           let caqti =
             {sql|
-            SELECT
-              roles,
-              LOWER(CONCAT(
-                SUBSTR(HEX(owner), 1, 8), '-',
-                SUBSTR(HEX(owner), 9, 4), '-',
-                SUBSTR(HEX(owner), 13, 4), '-',
-                SUBSTR(HEX(owner), 17, 4), '-',
-                SUBSTR(HEX(owner), 21)
-              ))
-            FROM guardian_actors WHERE id = UNHEX(REPLACE(?, '-', ''))
-          |sql}
-            |> Caqti_type.(Uuid.Actor.t ->? tup2 Roles.t Owner.t)
+              SELECT
+                roles,
+                LOWER(CONCAT(
+                  SUBSTR(HEX(owner), 1, 8), '-',
+                  SUBSTR(HEX(owner), 9, 4), '-',
+                  SUBSTR(HEX(owner), 13, 4), '-',
+                  SUBSTR(HEX(owner), 17, 4), '-',
+                  SUBSTR(HEX(owner), 21)
+                ))
+              FROM guardian_actors WHERE id = UNHEX(REPLACE(?, '-', ''))
+            |sql}
+            |> Caqti_type.(Uuid.Actor.t ->? tup2 Roles.t (option Owner.t))
           in
           let* roles, owner =
             Database.find_opt ?ctx caqti id
-            >|= CCOption.to_result "No actor found."
+            >|= CCOption.to_result
+                  (Format.asprintf
+                     "Actor ('%s') not found"
+                     ([%show: Uuid.Actor.t] id))
           in
           Guard.Actor.make ?owner roles typ id |> Lwt.return_ok
         ;;
@@ -284,33 +287,32 @@ struct
         ;;
 
         let find_owner ?ctx id =
-          let open Lwt.Infix in
           let caqti =
             {sql|
-            SELECT
-              LOWER(CONCAT(
-                SUBSTR(HEX(owner), 1, 8), '-',
-                SUBSTR(HEX(owner), 9, 4), '-',
-                SUBSTR(HEX(owner), 13, 4), '-',
-                SUBSTR(HEX(owner), 17, 4), '-',
-                SUBSTR(HEX(owner), 21)
-              ))
-            FROM guardian_actors
-            WHERE id = UNHEX(REPLACE(?, '-', ''))
-          |sql}
+              SELECT
+                LOWER(CONCAT(
+                  SUBSTR(HEX(owner), 1, 8), '-',
+                  SUBSTR(HEX(owner), 9, 4), '-',
+                  SUBSTR(HEX(owner), 13, 4), '-',
+                  SUBSTR(HEX(owner), 17, 4), '-',
+                  SUBSTR(HEX(owner), 21)
+                ))
+              FROM guardian_actors
+              WHERE id = UNHEX(REPLACE(?, '-', ''))
+            |sql}
             |> Uuid.Actor.t ->? Owner.t
           in
-          Database.find_opt ?ctx caqti id >|= CCOption.flatten |> Lwt_result.ok
+          Database.find_opt ?ctx caqti id |> Lwt_result.ok
         ;;
 
         let save_owner ?ctx ?owner id =
           let caqti =
-            Caqti_type.(tup2 Owner.t Uuid.Actor.t ->. unit)
+            Caqti_type.(tup2 (option Owner.t) Uuid.Actor.t ->. unit)
               {sql|
-              UPDATE guardian_actors
-              SET owner = UNHEX(REPLACE(?, '-', ''))
-              WHERE id = UNHEX(REPLACE(?, '-', ''))
-            |sql}
+                UPDATE guardian_actors
+                SET owner = UNHEX(REPLACE(?, '-', ''))
+                WHERE id = UNHEX(REPLACE(?, '-', ''))
+              |sql}
           in
           Database.exec ?ctx caqti (owner, id) |> Lwt_result.ok
         ;;
@@ -325,7 +327,7 @@ struct
               ON DUPLICATE KEY UPDATE
                 updated_at = NOW()
             |sql}
-            |> Caqti_type.(tup3 Uuid.Target.t Kind.t Owner.t ->. unit)
+            |> Caqti_type.(tup3 Uuid.Target.t Kind.t (option Owner.t) ->. unit)
           in
           Database.exec ?ctx caqti (id, kind, owner) |> Lwt_result.ok
         ;;
@@ -338,26 +340,35 @@ struct
           Database.find_opt ?ctx caqti id >|= CCOption.is_some |> Lwt_result.ok
         ;;
 
+        let find_owner_sql =
+          Format.asprintf
+            {sql|
+            SELECT
+              LOWER(CONCAT(
+                SUBSTR(HEX(owner), 1, 8), '-',
+                SUBSTR(HEX(owner), 9, 4), '-',
+                SUBSTR(HEX(owner), 13, 4), '-',
+                SUBSTR(HEX(owner), 17, 4), '-',
+                SUBSTR(HEX(owner), 21)
+              ))
+            FROM guardian_targets
+            %s
+          |sql}
+        ;;
+
         let find ?ctx typ id =
-          let open Lwt.Infix in
           let open Lwt_result.Syntax in
           let caqti =
-            {sql|
-            SELECT LOWER(CONCAT(
-              SUBSTR(HEX(owner), 1, 8), '-',
-              SUBSTR(HEX(owner), 9, 4), '-',
-              SUBSTR(HEX(owner), 13, 4), '-',
-              SUBSTR(HEX(owner), 17, 4), '-',
-              SUBSTR(HEX(owner), 21)
-            ))
-            FROM guardian_targets
-            WHERE id = UNHEX(REPLACE(?, '-', '')) AND kind = ?
-          |sql}
-            |> Caqti_type.(tup2 Uuid.Target.t Kind.t ->? Owner.t)
+            {sql|WHERE id = UNHEX(REPLACE(?, '-', '')) AND kind = ?|sql}
+            |> find_owner_sql
+            |> Caqti_type.(tup2 Uuid.Target.t Kind.t ->? option Owner.t)
           in
           let* owner =
             Database.find_opt ?ctx caqti (id, typ)
-            >|= CCOption.to_result "No target found."
+            >|= CCOption.to_result
+                  (Format.asprintf
+                     "Target ('%s') not found - no kind"
+                     ([%show: Uuid.Target.t] id))
           in
           Guard.Target.make ?owner typ id |> Lwt.return_ok
         ;;
@@ -369,38 +380,33 @@ struct
             |> Uuid.Target.t ->? Kind.t
           in
           Database.find_opt ?ctx caqti id
-          >|= CCOption.to_result "No target kind found."
+          >|= CCOption.to_result
+                (Format.asprintf
+                   "Target ('%s') not found - no owner"
+                   ([%show: Uuid.Target.t] id))
         ;;
 
         let find_owner ?ctx id =
-          let open Lwt.Infix in
           let caqti =
-            {sql|
-            SELECT
-              LOWER(CONCAT(
-                SUBSTR(HEX(owner), 1, 8), '-',
-                SUBSTR(HEX(owner), 9, 4), '-',
-                SUBSTR(HEX(owner), 13, 4), '-',
-                SUBSTR(HEX(owner), 17, 4), '-',
-                SUBSTR(HEX(owner), 21)
-              ))
-            FROM guardian_targets
-            WHERE id = UNHEX(REPLACE(?, '-', ''))
-          |sql}
-            |> Uuid.Target.t ->? Owner.t
+            {sql|WHERE id = UNHEX(REPLACE(?, '-', ''))|sql}
+            |> find_owner_sql
+            |> Uuid.Target.t ->? Caqti_type.option Owner.t
           in
           Database.find_opt ?ctx caqti id
-          >|= CCOption.to_result "No target found to return its owner."
+          >|= CCOption.to_result
+                (Format.asprintf
+                   "Target ('%s') not found - no owner"
+                   ([%show: Uuid.Target.t] id))
         ;;
 
         let save_owner ?ctx ?owner id =
           let caqti =
             {sql|
-            UPDATE guardian_targets
-            SET owner = UNHEX(REPLACE(?, '-', ''))
-            WHERE id = UNHEX(REPLACE(?, '-', ''))
-          |sql}
-            |> Caqti_type.(tup2 Owner.t Uuid.Target.t ->. unit)
+              UPDATE guardian_targets
+              SET owner = UNHEX(REPLACE(?, '-', ''))
+              WHERE id = UNHEX(REPLACE(?, '-', ''))
+            |sql}
+            |> Caqti_type.(tup2 (option Owner.t) Uuid.Target.t ->. unit)
           in
           Database.exec ?ctx caqti (owner, id) |> Lwt_result.ok
         ;;
