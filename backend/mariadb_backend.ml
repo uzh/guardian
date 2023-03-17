@@ -357,18 +357,14 @@ struct
         ;;
 
         let find ?ctx typ id =
-          let open Lwt_result.Syntax in
+          let open Lwt.Infix in
           let caqti =
             {sql|WHERE id = UNHEX(REPLACE(?, '-', '')) AND kind = ?|sql}
             |> find_owner_sql
             |> Caqti_type.(tup2 Uuid.Target.t Kind.t ->? option Owner.t)
           in
-          let* owner =
-            Database.find_opt ?ctx caqti (id, typ)
-            >|= CCOption.to_result
-                  (Format.asprintf
-                     "Target ('%s') not found - no kind"
-                     ([%show: Uuid.Target.t] id))
+          let%lwt owner =
+            Database.find_opt ?ctx caqti (id, typ) >|= CCOption.flatten
           in
           Guard.Target.make ?owner typ id |> Lwt.return_ok
         ;;
@@ -382,21 +378,18 @@ struct
           Database.find_opt ?ctx caqti id
           >|= CCOption.to_result
                 (Format.asprintf
-                   "Target ('%s') not found - no owner"
+                   "Target ('%s') not found - no kind"
                    ([%show: Uuid.Target.t] id))
         ;;
 
         let find_owner ?ctx id =
+          let open Lwt.Infix in
           let caqti =
             {sql|WHERE id = UNHEX(REPLACE(?, '-', ''))|sql}
             |> find_owner_sql
             |> Uuid.Target.t ->? Caqti_type.option Owner.t
           in
-          Database.find_opt ?ctx caqti id
-          >|= CCOption.to_result
-                (Format.asprintf
-                   "Target ('%s') not found - no owner"
-                   ([%show: Uuid.Target.t] id))
+          Database.find_opt ?ctx caqti id >|= CCOption.flatten |> Lwt_result.ok
         ;;
 
         let save_owner ?ctx ?owner id =
