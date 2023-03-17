@@ -189,10 +189,18 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
       =
      fun ?ctx effect ->
       let open Lwt.Infix in
+      let ( >|+ ) = flip Lwt_result.map in
       find_all typ
       |> Lwt_list.map_s (fun fcn ->
            fcn ?ctx effect |> Lwt_result.map CCOption.to_list)
       >|= CCResult.(flatten_l %> map CCList.flatten)
+      >|+ fun set ->
+      Logs.debug ~src (fun m ->
+        m
+          "Effects found:\nChild: %s\nParent: %s"
+          ([%show: Effect.t] effect)
+          ([%show: Effect.t list] set));
+      set
    ;;
   end
 
@@ -496,11 +504,20 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
            | TargetSpec.Entity entity | TargetSpec.Id (entity, _) ->
              find_parent entity effect
              >>= (function
-             | [] -> One effect |> Lwt.return_ok
+             | [] ->
+               Logs.debug ~src (fun m ->
+                 m "Expand: %s (No parents) " ([%show: Effect.t] effect));
+               One effect |> Lwt.return_ok
              | parent_effects ->
                CCList.map one parent_effects
                |> or_ %> expand
-               >|= fun parents -> Or [ One effect; parents ]))
+               >|= fun parents ->
+               Logs.debug ~src (fun m ->
+                 m
+                   "Expand: %s with parent %s "
+                   ([%show: Effect.t] effect)
+                   ([%show: EffectSet.t] parents));
+               Or [ One effect; parents ]))
         | Or effects -> effects |> find_all >|= or_
         | And effects -> effects |> find_all >|= and_
       in
@@ -532,12 +549,19 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
       let map_error = Lwt_result.map_error error in
       let rec find_checker =
         let open EffectSet in
-        let find ((action, spec) : Action.t * TargetSpec.t) =
+        let find ((action, spec) as effect : Action.t * TargetSpec.t) =
           (match spec with
            | TargetSpec.Id (typ, uuid) ->
              Target.(find ?ctx typ uuid >>= find_checker ?ctx)
            | TargetSpec.Entity role -> Target.find_kind_checker ?ctx role)
-          >|= fun checker_fcn -> checker_fcn actor action
+          >|= (fun checker_fcn -> checker_fcn actor action)
+          >|= fun valid ->
+          Logs.debug ~src (fun m ->
+            m
+              "Validated: %s (%s) "
+              ([%show: bool] valid)
+              ([%show: Effect.t] effect));
+          valid
         in
         function
         | One effect -> find effect
