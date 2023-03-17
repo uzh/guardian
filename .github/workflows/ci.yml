@@ -56,7 +56,7 @@ jobs:
       - name: Build
         run: |
           make build
-          make doc
+
 
       - name: Check formatting
         run: make format
@@ -65,6 +65,10 @@ jobs:
         env:
           DATABASE_URL: mariadb://root:${{ env.MYSQL_ROOT_PASSWORD }}@127.0.0.1:3306/${{ env.MYSQL_DATABASE }}
         run: make test
+
+      - name: Build documentation
+        run: |
+          make doc
 
       - uses: actions/upload-artifact@v3
         with:
@@ -90,7 +94,7 @@ jobs:
     if: github.ref_name == 'main'
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deploy-doc.outputs.page_url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
