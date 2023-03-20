@@ -35,8 +35,6 @@
    (>= 1.8.0))
   (containers
    (>= 3.6))
-  (dune
-   (>= 2.9.0))
   (logs
    (>= 0.7.0))
   (lwt
@@ -47,8 +45,6 @@
    (>= 1.1.4))
   (ocaml
    (>= 4.12.0))
-  (ocamlformat
-   (>= 0.24.1))
   (ppx_deriving
    (>= 5.2.1))
   (ppx_deriving_yojson
