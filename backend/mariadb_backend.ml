@@ -4,10 +4,10 @@ open Caqti_request.Infix
 
 module Make
   (ActorRoles : Guardian.RoleSig)
-  (Target : Guardian.RoleSig)
+  (TargetRoles : Guardian.RoleSig)
   (Database : Database_pools.Sig) =
 struct
-  module Guard = Guardian.Make (ActorRoles) (Target)
+  module Guard = Guardian.Make (ActorRoles) (TargetRoles)
   module Authorizer = Guard.Authorizer
 
   module BaseType (Core : Guardian.RoleSig) = struct
@@ -48,7 +48,7 @@ struct
   end
 
   module Role = BaseType (ActorRoles)
-  module Kind = BaseType (Target)
+  module Kind = BaseType (TargetRoles)
 
   module Roles = struct
     include Guard.RoleSet
@@ -81,8 +81,7 @@ struct
     type actor_spec = Guard.ActorSpec.t
     type effect = Guard.Effect.t
     type effect_set = Guard.EffectSet.t
-    type kind = Target.t
-    type parent_kind = Target.t
+    type kind = TargetRoles.t
     type role_set = Roles.t
     type roles = ActorRoles.t
     type rule = Guard.Rule.t
@@ -136,20 +135,20 @@ struct
                 SELECT
                   actor_role,
                   LOWER(CONCAT(
-                    SUBSTR(HEX(actor_id), 1, 8), '-',
-                    SUBSTR(HEX(actor_id), 9, 4), '-',
-                    SUBSTR(HEX(actor_id), 13, 4), '-',
-                    SUBSTR(HEX(actor_id), 17, 4), '-',
-                    SUBSTR(HEX(actor_id), 21)
+                    SUBSTR(HEX(actor_uuid), 1, 8), '-',
+                    SUBSTR(HEX(actor_uuid), 9, 4), '-',
+                    SUBSTR(HEX(actor_uuid), 13, 4), '-',
+                    SUBSTR(HEX(actor_uuid), 17, 4), '-',
+                    SUBSTR(HEX(actor_uuid), 21)
                   )),
                   act,
                   target_role,
                   LOWER(CONCAT(
-                    SUBSTR(HEX(target_id), 1, 8), '-',
-                    SUBSTR(HEX(target_id), 9, 4), '-',
-                    SUBSTR(HEX(target_id), 13, 4), '-',
-                    SUBSTR(HEX(target_id), 17, 4), '-',
-                    SUBSTR(HEX(target_id), 21)
+                    SUBSTR(HEX(target_uuid), 1, 8), '-',
+                    SUBSTR(HEX(target_uuid), 9, 4), '-',
+                    SUBSTR(HEX(target_uuid), 13, 4), '-',
+                    SUBSTR(HEX(target_uuid), 17, 4), '-',
+                    SUBSTR(HEX(target_uuid), 21)
                   ))
                 FROM guardian_rules
                 %s
@@ -158,7 +157,7 @@ struct
           match target_spec with
           | Guard.TargetSpec.Id (role, uuid) ->
             let where =
-              {sql|WHERE target_role = ? AND target_id = UNHEX(REPLACE(?, '-', ''))|sql}
+              {sql|WHERE target_role = ? AND target_uuid = UNHEX(REPLACE(?, '-', ''))|sql}
             in
             let caqti =
               select where |> Caqti_type.(tup2 Kind.t Uuid.Target.t ->* t)
@@ -178,7 +177,7 @@ struct
         let save ?ctx rule =
           let query =
             {sql|
-              INSERT INTO guardian_rules (actor_role, actor_id, act, target_role, target_id)
+              INSERT INTO guardian_rules (actor_role, actor_uuid, act, target_role, target_uuid)
               VALUES (?, UNHEX(REPLACE(?, '-', '')), ?, ?, UNHEX(REPLACE(?, '-', '')))
             |sql}
           in
@@ -191,10 +190,10 @@ struct
             {sql|
               DELETE FROM guardian_rules
               WHERE actor_role = ?
-                AND actor_id = UNHEX(REPLACE(?, '-', ''))
+                AND actor_uuid = UNHEX(REPLACE(?, '-', ''))
                 AND act = ?
                 AND target_role = ?
-                AND target_id = UNHEX(REPLACE(?, '-', ''))
+                AND target_uuid = UNHEX(REPLACE(?, '-', ''))
             |sql}
           in
           act_on_rule ?ctx query rule
@@ -205,7 +204,7 @@ struct
         let create ?ctx ?owner roles id =
           let caqti =
             {sql|
-              INSERT INTO guardian_actors (id, roles, owner)
+              INSERT INTO guardian_actors (uuid, roles, owner)
               VALUES (UNHEX(REPLACE(?, '-', '')), ?, UNHEX(REPLACE(?, '-', '')))
               ON DUPLICATE KEY UPDATE
                 updated_at = NOW()
@@ -217,7 +216,7 @@ struct
 
         let mem ?ctx id =
           let caqti =
-            {sql|SELECT roles FROM guardian_actors WHERE id = UNHEX(REPLACE(?, '-', ''))|sql}
+            {sql|SELECT roles FROM guardian_actors WHERE uuid = UNHEX(REPLACE(?, '-', ''))|sql}
             |> Uuid.Actor.t ->? Caqti_type.string
           in
           Database.find_opt ?ctx caqti id >|= CCOption.is_some |> Lwt_result.ok
@@ -237,7 +236,7 @@ struct
                   SUBSTR(HEX(owner), 17, 4), '-',
                   SUBSTR(HEX(owner), 21)
                 ))
-              FROM guardian_actors WHERE id = UNHEX(REPLACE(?, '-', ''))
+              FROM guardian_actors WHERE uuid = UNHEX(REPLACE(?, '-', ''))
             |sql}
             |> Caqti_type.(Uuid.Actor.t ->? tup2 Roles.t (option Owner.t))
           in
@@ -254,7 +253,7 @@ struct
         let find_roles ?ctx id =
           let open Lwt.Infix in
           let caqti =
-            {sql|SELECT roles FROM guardian_actors WHERE id = UNHEX(REPLACE(?, '-', ''))|sql}
+            {sql|SELECT roles FROM guardian_actors WHERE uuid = UNHEX(REPLACE(?, '-', ''))|sql}
             |> Uuid.Actor.t ->? Roles.t
           in
           Database.find_opt ?ctx caqti id
@@ -263,7 +262,7 @@ struct
 
         let update_roles_request ?ctx uuid roles =
           let caqti =
-            {sql|UPDATE guardian_actors SET roles = ? WHERE id = UNHEX(REPLACE(?, '-', ''))|sql}
+            {sql|UPDATE guardian_actors SET roles = ? WHERE uuid = UNHEX(REPLACE(?, '-', ''))|sql}
             |> Caqti_type.(tup2 Roles.t Uuid.Actor.t ->. unit)
           in
           Database.exec ?ctx caqti (roles, uuid) |> Lwt_result.ok
@@ -298,7 +297,7 @@ struct
                   SUBSTR(HEX(owner), 21)
                 ))
               FROM guardian_actors
-              WHERE id = UNHEX(REPLACE(?, '-', ''))
+              WHERE uuid = UNHEX(REPLACE(?, '-', ''))
             |sql}
             |> Uuid.Actor.t ->? Owner.t
           in
@@ -311,7 +310,7 @@ struct
               {sql|
                 UPDATE guardian_actors
                 SET owner = UNHEX(REPLACE(?, '-', ''))
-                WHERE id = UNHEX(REPLACE(?, '-', ''))
+                WHERE uuid = UNHEX(REPLACE(?, '-', ''))
               |sql}
           in
           Database.exec ?ctx caqti (owner, id) |> Lwt_result.ok
@@ -322,7 +321,7 @@ struct
         let create ?ctx ?owner kind id =
           let caqti =
             {sql|
-              INSERT INTO guardian_targets (id, kind, owner)
+              INSERT INTO guardian_targets (uuid, kind, owner)
               VALUES (UNHEX(REPLACE(?, '-', '')), ?, UNHEX(REPLACE(?, '-', '')))
               ON DUPLICATE KEY UPDATE
                 updated_at = NOW()
@@ -334,45 +333,41 @@ struct
 
         let mem ?ctx id =
           let caqti =
-            {sql|SELECT kind FROM guardian_targets WHERE id = UNHEX(REPLACE(?, '-', ''))|sql}
+            {sql|SELECT kind FROM guardian_targets WHERE uuid = UNHEX(REPLACE(?, '-', ''))|sql}
             |> Uuid.Target.t ->? Kind.t
           in
           Database.find_opt ?ctx caqti id >|= CCOption.is_some |> Lwt_result.ok
         ;;
 
-        let find_owner_sql =
-          Format.asprintf
+        let find_owner_base ?ctx typ id =
+          let open Lwt.Infix in
+          let caqti =
             {sql|
-            SELECT
-              LOWER(CONCAT(
-                SUBSTR(HEX(owner), 1, 8), '-',
-                SUBSTR(HEX(owner), 9, 4), '-',
-                SUBSTR(HEX(owner), 13, 4), '-',
-                SUBSTR(HEX(owner), 17, 4), '-',
-                SUBSTR(HEX(owner), 21)
-              ))
-            FROM guardian_targets
-            %s
-          |sql}
+              SELECT
+                LOWER(CONCAT(
+                  SUBSTR(HEX(owner), 1, 8), '-',
+                  SUBSTR(HEX(owner), 9, 4), '-',
+                  SUBSTR(HEX(owner), 13, 4), '-',
+                  SUBSTR(HEX(owner), 17, 4), '-',
+                  SUBSTR(HEX(owner), 21)
+                ))
+              FROM guardian_targets
+              WHERE uuid = UNHEX(REPLACE(?, '-', '')) AND kind = ?
+            |sql}
+            |> Caqti_type.(tup2 Uuid.Target.t Kind.t ->? option Owner.t)
+          in
+          Database.find_opt ?ctx caqti (id, typ) >|= CCOption.flatten
         ;;
 
         let find ?ctx typ id =
-          let open Lwt.Infix in
-          let caqti =
-            {sql|WHERE id = UNHEX(REPLACE(?, '-', '')) AND kind = ?|sql}
-            |> find_owner_sql
-            |> Caqti_type.(tup2 Uuid.Target.t Kind.t ->? option Owner.t)
-          in
-          let%lwt owner =
-            Database.find_opt ?ctx caqti (id, typ) >|= CCOption.flatten
-          in
+          let%lwt owner = find_owner_base ?ctx typ id in
           Guard.Target.make ?owner typ id |> Lwt.return_ok
         ;;
 
         let find_kind ?ctx id =
           let open Lwt.Infix in
           let caqti =
-            {sql|SELECT kind FROM guardian_targets WHERE id = UNHEX(REPLACE(?, '-', ''))|sql}
+            {sql|SELECT kind FROM guardian_targets WHERE uuid = UNHEX(REPLACE(?, '-', ''))|sql}
             |> Uuid.Target.t ->? Kind.t
           in
           Database.find_opt ?ctx caqti id
@@ -382,22 +377,14 @@ struct
                    ([%show: Uuid.Target.t] id))
         ;;
 
-        let find_owner ?ctx id =
-          let open Lwt.Infix in
-          let caqti =
-            {sql|WHERE id = UNHEX(REPLACE(?, '-', ''))|sql}
-            |> find_owner_sql
-            |> Uuid.Target.t ->? Caqti_type.option Owner.t
-          in
-          Database.find_opt ?ctx caqti id >|= CCOption.flatten |> Lwt_result.ok
-        ;;
+        let find_owner ?ctx typ = find_owner_base ?ctx typ %> Lwt_result.ok
 
         let save_owner ?ctx ?owner id =
           let caqti =
             {sql|
               UPDATE guardian_targets
               SET owner = UNHEX(REPLACE(?, '-', ''))
-              WHERE id = UNHEX(REPLACE(?, '-', ''))
+              WHERE uuid = UNHEX(REPLACE(?, '-', ''))
             |sql}
             |> Caqti_type.(tup2 (option Owner.t) Uuid.Target.t ->. unit)
           in

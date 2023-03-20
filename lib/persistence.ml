@@ -7,7 +7,6 @@ module type Backend = sig
   type effect
   type effect_set
   type kind
-  type parent_kind
   type role_set
   type roles
   type rule
@@ -83,6 +82,7 @@ module type Backend = sig
 
       val find_owner
         :  ?ctx:context
+        -> kind
         -> Uuid.Target.t
         -> (Uuid.Actor.t option, string) monad
 
@@ -104,19 +104,19 @@ module type Contract = sig
   include Backend
 
   module Dependency : sig
-    type parent = ?ctx:context -> effect -> (effect option, string) monad
+    type parent_fcn = ?ctx:context -> effect -> (effect option, string) monad
 
     val register
       :  ?tags:Logs.Tag.set
       -> ?ignore_duplicates:bool
+      -> parent:kind
       -> kind
-      -> parent_kind
-      -> parent
+      -> parent_fcn
       -> (unit, string) result
 
-    val find : ?default_fcn:parent -> kind -> parent_kind -> parent
-    val find_opt : kind -> parent_kind -> parent option
-    val find_all : kind -> parent list
+    val find : ?default_fcn:parent_fcn -> parent:kind -> kind -> parent_fcn
+    val find_opt : parent:kind -> kind -> parent_fcn option
+    val find_all : kind -> parent_fcn list
 
     val find_all_combined
       :  kind

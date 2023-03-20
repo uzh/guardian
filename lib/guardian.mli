@@ -1,4 +1,4 @@
-type context = Persistence.context
+type context = (string * string) list
 
 module type RoleSig = Role.Sig
 
@@ -21,11 +21,6 @@ end
 module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
   module Uuid = Uuid
   module Action = Action
-
-  module ParentTyp : sig
-    type t = TargetRoles.t
-  end
-
   module RoleSet : Role_set.Core with type elt = ActorRoles.t
 
   module ActorSpec : sig
@@ -186,7 +181,6 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
        and type effect = Effect.t
        and type effect_set = EffectSet.t
        and type kind = TargetRoles.t
-       and type parent_kind = ParentTyp.t
        and type role_set = RoleSet.t
        and type roles = ActorRoles.t
        and type rule = Rule.t
@@ -200,7 +194,6 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
                   and type effect = Effect.t
                   and type effect_set = EffectSet.t
                   and type kind = TargetRoles.t
-                  and type parent_kind = ParentTyp.t
                   and type role_set = RoleSet.t
                   and type roles = ActorRoles.t
                   and type rule = Rule.t

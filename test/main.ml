@@ -53,7 +53,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
      let* _aron_art_ent = Article.to_authorizable ?ctx aron_article in
      (* now we check to see that the authorizables have had ownership set *)
      let find_owner_id article =
-       let* x = Backend.Target.find_owner ?ctx article.Article.uuid in
+       let* x = Backend.Target.find_owner ?ctx `Article article.Article.uuid in
        x
        |> CCOption.to_result
             (Format.asprintf
@@ -213,7 +213,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     let open CCFun in
     let%lwt article_owner =
       let open Lwt.Infix in
-      Backend.Target.find_owner ?ctx aron_article.Article.uuid
+      Backend.Target.find_owner ?ctx `Article aron_article.Article.uuid
       >|= CCResult.to_opt
           %> CCOption.flatten
           %> CCOption.get_exn_or "Owner not set"

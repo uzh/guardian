@@ -9,11 +9,6 @@ module type RoleSig = Role.Sig
 module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
   module Uuid = Uuid
   module Action = Action
-
-  module ParentTyp = struct
-    type t = TargetRoles.t
-  end
-
   module RoleSet = Role_set.Make (ActorRoles)
   module ActorSpec = Spec.Make (ActorRoles) (Uuid.Actor)
   module TargetSpec = Spec.Make (TargetRoles) (Uuid.Target)
@@ -123,19 +118,19 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
 
     module Map = CCMap.Make (Key)
 
-    type parent =
+    type parent_fcn =
       ?ctx:context -> Effect.t -> (Effect.t option, string) Lwt_result.t
 
-    let registered : parent Map.t ref = ref Map.empty
+    let registered : parent_fcn Map.t ref = ref Map.empty
 
     let register
       ?(tags : Logs.Tag.set option)
       ?(ignore_duplicates = false)
+      ~parent
       typ
-      parent_kind
-      (parent_fcn : parent)
+      parent_fcn
       =
-      let key = typ, parent_kind in
+      let key = typ, parent in
       let found = Map.find_opt key !registered in
       let msg =
         [%show: Key.t] %> Format.asprintf "Found duplicate registration: %s"
@@ -153,44 +148,39 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
     let register_all dependencies =
       let open CCResult in
       dependencies
-      |> CCList.map (fun (typ, parent, fcn) -> register typ parent fcn)
+      |> CCList.map (fun (typ, parent, fcn) -> register ~parent typ fcn)
       |> flatten_l
       >|= fun (_ : unit list) -> ()
     ;;
 
-    let find_opt (typ : TargetRoles.t) (parent_kind : TargetRoles.t)
-      : parent option
-      =
-      Map.find_opt (typ, parent_kind) !registered
+    let find_opt ~parent typ : parent_fcn option =
+      Map.find_opt (typ, parent) !registered
     ;;
 
-    let find
-      ?(default_fcn = fun ?ctx:_ _ -> Lwt_result.return None)
-      (typ : TargetRoles.t)
-      (parent_kind : TargetRoles.t)
-      : parent
+    let find ?(default_fcn = fun ?ctx:_ _ -> Lwt_result.return None) ~parent typ
+      : parent_fcn
       =
-      find_opt typ parent_kind
+      find_opt ~parent typ
       |> function
       | Some parent_fcn -> parent_fcn
       | None -> default_fcn
     ;;
 
-    let find_all (kind : TargetRoles.t) : parent list =
+    let find_all kind : parent_fcn list =
       Map.filter
-        (fun (typ, _) (_ : parent) -> TargetRoles.equal typ kind)
+        (fun (typ, _) (_ : parent_fcn) -> TargetRoles.equal typ kind)
         !registered
       |> Map.to_list
       |> CCList.map snd
     ;;
 
-    let find_all_combined (typ : TargetRoles.t)
+    let find_all_combined kind
       : ?ctx:context -> Effect.t -> (Effect.t list, string) Lwt_result.t
       =
      fun ?ctx effect ->
       let open Lwt.Infix in
       let ( >|+ ) = flip Lwt_result.map in
-      find_all typ
+      find_all kind
       |> Lwt_list.map_s (fun fcn ->
            fcn ?ctx effect |> Lwt_result.map CCOption.to_list)
       >|= CCResult.(flatten_l %> map CCList.flatten)
@@ -289,7 +279,6 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
        and type effect = Effect.t
        and type effect_set = EffectSet.t
        and type kind = TargetRoles.t
-       and type parent_kind = ParentTyp.t
        and type role_set = RoleSet.t
        and type roles = ActorRoles.t
        and type rule = Rule.t
@@ -303,7 +292,6 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
                   and type effect = Effect.t
                   and type effect_set = EffectSet.t
                   and type kind = TargetRoles.t
-                  and type parent_kind = ParentTyp.t
                   and type role_set = RoleSet.t
                   and type roles = ActorRoles.t
                   and type rule = Rule.t
@@ -619,10 +607,5 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
         let* () = can actor in
         fcn param)
     ;;
-
-    (* module Contract = struct module Action = Action module Actor = Actor
-       module ActorSpec = ActorSpec module EffectSet = EffectSet module RoleSet
-       = RoleSet module Target = Target module TargetSpec = TargetSpec module
-       Uuid = Uuid module Rule = Rule module Utils = Utils end *)
   end
 end

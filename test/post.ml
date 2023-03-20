@@ -4,7 +4,10 @@ module Make (Backend : Guard.PersistenceSig) = struct
   module Article = Article.Make (Backend)
 
   let (_ : (unit, string) result) =
-    Backend.Dependency.register `Post `Article (fun ?ctx:_ (action, spec) ->
+    Backend.Dependency.register
+      ~parent:`Article
+      `Post
+      (fun ?ctx:_ (action, spec) ->
       match[@warning "-4"] spec with
       | TargetSpec.Entity `Post | TargetSpec.Id (`Post, _) ->
         Lwt.return_ok (Some (action, TargetSpec.Entity `Article))
