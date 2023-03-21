@@ -48,7 +48,9 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
     let and_ m = And m
     let or_ m = Or m
     let one m = One m
-  end [@warning "-4"]
+    let specific_role m = SpecificRole m
+    let empty = Or []
+  end
 
   module Actor = struct
     type 'a t =
@@ -579,7 +581,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
               | Error err -> Lwt.return_error err)
             init
             rules
-        | Or [] | And [] -> Lwt.return_error "Empty Authentication Set"
+        | Or [] | And [] -> Lwt.return_ok true
       in
       let validate = function
         | true -> Ok ()

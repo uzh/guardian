@@ -95,6 +95,8 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
     val and_ : t list -> t
     val or_ : t list -> t
     val one : Effect.t -> t
+    val specific_role : ActorRoles.t -> t
+    val empty : t
   end
 
   module Actor : sig
