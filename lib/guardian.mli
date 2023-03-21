@@ -79,11 +79,12 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
     val is_valid : t -> t -> bool
   end
 
-  module EffectSet : sig
+  module ValidationSet : sig
     type t =
       | And of t list
       | Or of t list
       | One of Effect.t
+      | SpecificRole of ActorRoles.t
 
     val equal : t -> t -> bool
     val pp : Format.formatter -> t -> unit
@@ -179,12 +180,12 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
        and type 'b target = 'b Target.t
        and type actor_spec = ActorSpec.t
        and type effect = Effect.t
-       and type effect_set = EffectSet.t
        and type kind = TargetRoles.t
        and type role_set = RoleSet.t
        and type roles = ActorRoles.t
        and type rule = Rule.t
        and type target_spec = TargetSpec.t
+       and type validation_set = ValidationSet.t
 
   module MakePersistence : functor
     (Backend : Persistence.Backend
@@ -192,11 +193,11 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
                   and type 'b target = 'b Target.t
                   and type actor_spec = ActorSpec.t
                   and type effect = Effect.t
-                  and type effect_set = EffectSet.t
                   and type kind = TargetRoles.t
                   and type role_set = RoleSet.t
                   and type roles = ActorRoles.t
                   and type rule = Rule.t
-                  and type target_spec = TargetSpec.t)
+                  and type target_spec = TargetSpec.t
+                  and type validation_set = ValidationSet.t)
     -> PersistenceSig
 end [@warning "-67"]

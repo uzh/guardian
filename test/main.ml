@@ -286,7 +286,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
          ?ctx
          (snd thomas)
          (Set.singleton (`Editor chris_article.Article.uuid))
-       |> Lwt_result.map_error (fun err -> failwith err)
+       |> Lwt_result.map_error failwith
      in
      let* thomas_authorizable = User.to_authorizable ?ctx thomas in
      let* _chris_article' =
@@ -299,6 +299,28 @@ module Tests (Backend : Guard.PersistenceSig) = struct
      Lwt.return_ok true)
     >|= Alcotest.(check (result bool string))
           "Editor can edit an article he's assigned as the editor of."
+          (Ok true)
+  ;;
+
+  let editor_role_can_edit ?ctx (_ : 'a) () =
+    (let* () =
+       Backend.Actor.grant_roles
+         ?ctx
+         (snd thomas)
+         (Set.singleton (`Editor chris_article.Article.uuid))
+       |> Lwt_result.map_error failwith
+     in
+     let* thomas_authorizable = User.to_authorizable ?ctx thomas in
+     let* _chris_article' =
+       Article.update_title_by_role
+         ?ctx
+         thomas_authorizable
+         chris_article
+         "Thomas set this one"
+     in
+     Lwt.return_ok true)
+    >|= Alcotest.(check (result bool string))
+          "Editor can edit an article he's has the specific editor role of."
           (Ok true)
   ;;
 
@@ -352,9 +374,9 @@ module Tests (Backend : Guard.PersistenceSig) = struct
           , TargetSpec.Id (`User, target_id) )
       in
       let effects =
-        EffectSet.One (Guard.Action.Manage, TargetSpec.Id (`User, target_id))
+        ValidationSet.One (Guard.Action.Manage, TargetSpec.Id (`User, target_id))
       in
-      Backend.validate_effects ?ctx CCFun.id effects actor
+      Backend.validate ?ctx CCFun.id effects actor
     in
     Alcotest.(check (result unit string))
       "Parametric roles work."
@@ -483,6 +505,10 @@ let () =
             "Editor can edit"
             `Quick
             (T.editor_can_edit ?ctx)
+        ; Alcotest_lwt.test_case
+            "Editor can edit (by specific role)"
+            `Quick
+            (T.editor_role_can_edit ?ctx)
         ] )
     ; ( Format.asprintf "(%s) Managing ownership." name
       , [ Alcotest_lwt.test_case "Set owner" `Quick (T.set_owner ?ctx) ] )

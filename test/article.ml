@@ -31,7 +31,23 @@ module Make (Backend : Guard.PersistenceSig) = struct
       Backend.wrap_function
         ?ctx
         CCFun.id
-        EffectSet.(One (Action.Update, TargetSpec.Id (`Article, t.uuid)))
+        ValidationSet.(One (Action.Update, TargetSpec.Id (`Article, t.uuid)))
+        f
+    in
+    wrapped actor new_title
+  ;;
+
+  let update_title_by_role ?ctx (actor : [ `User ] Actor.t) t new_title =
+    let open Lwt_result.Syntax in
+    let f new_title =
+      let () = t.title <- new_title in
+      Lwt.return_ok t
+    in
+    let* wrapped =
+      Backend.wrap_function
+        ?ctx
+        CCFun.id
+        ValidationSet.(SpecificRole (`Editor t.uuid))
         f
     in
     wrapped actor new_title
@@ -51,7 +67,7 @@ module Make (Backend : Guard.PersistenceSig) = struct
       Backend.wrap_function
         ?ctx
         CCFun.id
-        EffectSet.(One (Action.Manage, TargetSpec.Id (`Article, t.uuid)))
+        ValidationSet.(One (Action.Manage, TargetSpec.Id (`Article, t.uuid)))
         f
     in
     wrapped actor new_author

@@ -40,10 +40,10 @@ module Make (Backend : Guard.PersistenceSig) = struct
       Lwt.return_ok t
     in
     let* () =
-      Backend.validate_effects
+      Backend.validate
         ?ctx
         CCFun.id
-        EffectSet.(One (Action.Update, TargetSpec.Id (`Post, t.uuid)))
+        ValidationSet.(One (Action.Update, TargetSpec.Id (`Post, t.uuid)))
         actor
     in
     f new_comment

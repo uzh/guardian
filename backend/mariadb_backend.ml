@@ -80,7 +80,7 @@ struct
     type 'b target = 'b Guard.Target.t
     type actor_spec = Guard.ActorSpec.t
     type effect = Guard.Effect.t
-    type effect_set = Guard.EffectSet.t
+    type validation_set = Guard.ValidationSet.t
     type kind = TargetRoles.t
     type role_set = Roles.t
     type roles = ActorRoles.t

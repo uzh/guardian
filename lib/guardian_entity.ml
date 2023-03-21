@@ -37,11 +37,12 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
     ;;
   end
 
-  module EffectSet = struct
+  module ValidationSet = struct
     type t =
       | And of t list
       | Or of t list
       | One of Effect.t
+      | SpecificRole of ActorRoles.t
     [@@deriving eq, show, ord, yojson]
 
     let and_ m = And m
@@ -277,12 +278,12 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
        and type 'b target = 'b Target.t
        and type actor_spec = ActorSpec.t
        and type effect = Effect.t
-       and type effect_set = EffectSet.t
        and type kind = TargetRoles.t
        and type role_set = RoleSet.t
        and type roles = ActorRoles.t
        and type rule = Rule.t
        and type target_spec = TargetSpec.t
+       and type validation_set = ValidationSet.t
 
   module MakePersistence
     (Backend : Persistence.Backend
@@ -290,12 +291,13 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
                   and type 'b target = 'b Target.t
                   and type actor_spec = ActorSpec.t
                   and type effect = Effect.t
-                  and type effect_set = EffectSet.t
                   and type kind = TargetRoles.t
                   and type role_set = RoleSet.t
                   and type roles = ActorRoles.t
                   and type rule = Rule.t
-                  and type target_spec = TargetSpec.t) : PersistenceSig = struct
+                  and type target_spec = TargetSpec.t
+                  and type validation_set = ValidationSet.t) : PersistenceSig =
+  struct
     include Backend
     module Dependency = Dependency
 
@@ -477,13 +479,14 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
     end
 
     (** [expand_set] For transitional effects, uses the registered dependencies
-        to look for the parent object. Update and return the passed [effect_set] *)
-    let expand_set ?ctx (effect_set : EffectSet.t)
-      : (EffectSet.t, string) result Lwt.t
+        to look for the parent object. Update and return the passed
+        [validation_set] *)
+    let expand_set ?ctx (validation_set : ValidationSet.t)
+      : (ValidationSet.t, string) result Lwt.t
       =
       let open Lwt_result.Infix in
       let rec expand set =
-        let open EffectSet in
+        let open ValidationSet in
         let find_parent entity = (Dependency.find_all_combined entity) ?ctx in
         let find_all = Lwt_list.map_s expand %> Lwt.map CCResult.flatten_l in
         match set with
@@ -504,31 +507,32 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
                  m
                    "Expand: %s with parent %s "
                    ([%show: Effect.t] effect)
-                   ([%show: EffectSet.t] parents));
+                   ([%show: ValidationSet.t] parents));
                Or [ One effect; parents ]))
         | Or effects -> effects |> find_all >|= or_
         | And effects -> effects |> find_all >|= and_
+        | SpecificRole role -> SpecificRole role |> Lwt.return_ok
       in
-      effect_set
+      validation_set
       |> expand
       |> Lwt_result.map_error
            (Format.asprintf
               "Failed to expand the effects of the target. Error message: %s")
     ;;
 
-    (** [validate_effects ?ctx error effect_set actor] checks permissions and
+    (** [validate ?ctx error validation_set actor] checks permissions and
         gracefully reports authorization errors.
 
         [error] e.g. to change the error type to the one used in your app (e.g.
         `CCFun.id` to keep the string type)
 
-        [effect_set] effect set to check the permissions against
+        [validation_set] effect set to check the permissions against
 
         [actor] actor object who'd like to perform the action *)
-    let validate_effects
+    let validate
       ?ctx
       (error : string -> 'etyp)
-      (effect_set : EffectSet.t)
+      (validation_set : ValidationSet.t)
       (actor : 'a actor)
       : (unit, 'etyp) Lwt_result.t
       =
@@ -536,7 +540,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
       let ( >>> ) = Lwt_result.bind_result in
       let map_error = Lwt_result.map_error error in
       let rec find_checker =
-        let open EffectSet in
+        let open ValidationSet in
         let find ((action, spec) as effect : Action.t * TargetSpec.t) =
           (match spec with
            | TargetSpec.Id (typ, uuid) ->
@@ -553,6 +557,8 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
         in
         function
         | One effect -> find effect
+        | SpecificRole role ->
+          Actor.find_roles ?ctx (Actor.id actor) >|= RoleSet.(mem role)
         | Or (rule :: rules) ->
           let%lwt init = find_checker rule in
           Lwt_list.fold_left_s
@@ -582,27 +588,31 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
             (Format.asprintf
                "Entity %s: Permission denied for %s"
                ([%show: Actor.t] actor)
-               ([%show: EffectSet.t] effect_set))
+               ([%show: ValidationSet.t] validation_set))
       in
-      effect_set |> expand_set ?ctx >>= find_checker >>> validate |> map_error
+      validation_set
+      |> expand_set ?ctx
+      >>= find_checker
+      >>> validate
+      |> map_error
     ;;
 
-    (** [wrap_function ?ctx error effect_set f] produces a wrapped version of
-        [f] which checks permissions and gracefully reports authorization
+    (** [wrap_function ?ctx error validation_set f] produces a wrapped version
+        of [f] which checks permissions and gracefully reports authorization
         errors.
 
         [error] e.g. to change the error type to the one used in your app (e.g.
         `CCFun.id` to keep the string type)
 
-        [effect_set] effect set to check the permissions against *)
+        [validation_set] effect set to check the permissions against *)
     let wrap_function
       ?ctx
       (error : string -> 'etyp)
-      (effect_set : EffectSet.t)
+      (validation_set : ValidationSet.t)
       (fcn : 'param -> ('rval, 'etyp) Lwt_result.t)
       =
       let open Lwt_result.Syntax in
-      let can = validate_effects ?ctx error effect_set in
+      let can = validate ?ctx error validation_set in
       Lwt.return_ok (fun actor param ->
         let* () = can actor in
         fcn param)

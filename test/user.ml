@@ -20,7 +20,7 @@ module MakeActor (Backend : PersistenceSig) = struct
       Backend.wrap_function
         ?ctx
         CCFun.id
-        EffectSet.(One (Action.Update, TargetSpec.Id (`User, snd t)))
+        ValidationSet.(One (Action.Update, TargetSpec.Id (`User, snd t)))
         f
     in
     wrapped actor new_name

@@ -5,12 +5,12 @@ module type Backend = sig
   type 'b target
   type actor_spec
   type effect
-  type effect_set
   type kind
   type role_set
   type roles
   type rule
   type target_spec
+  type validation_set
   type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
 
   module Repo : sig
@@ -197,14 +197,14 @@ module type Contract = sig
   val wrap_function
     :  ?ctx:context
     -> (string -> 'etyp)
-    -> effect_set
+    -> validation_set
     -> ('param -> ('rval, 'etyp) monad)
     -> ('a actor -> 'param -> ('rval, 'etyp) monad, string) monad
 
-  val validate_effects
+  val validate
     :  ?ctx:context
     -> (string -> 'etyp)
-    -> effect_set
+    -> validation_set
     -> 'a actor
     -> (unit, 'etyp) monad
 end
