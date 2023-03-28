@@ -17,7 +17,15 @@
    ppx_deriving.make
    ppx_deriving.ord
    ppx_deriving.show))
- (deps article.ml guard.ml hacker.ml main.ml post.ml role.ml user.ml)
+ (deps
+  article.ml
+  guard.ml
+  hacker.ml
+  main.ml
+  notes.ml
+  post.ml
+  role.ml
+  user.ml)
  (action
   (progn
    (run %{test} -e))))
