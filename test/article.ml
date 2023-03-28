@@ -7,18 +7,18 @@ module Make (Backend : Guard.PersistenceSig) = struct
     { mutable title : string
     ; mutable content : string
     ; mutable author : User.t
-    ; uuid : Uuid.Target.t
+    ; id : Uuid.Target.t
     }
   [@@deriving show]
 
   let make ?id title content author =
-    let uuid = CCOption.get_or ~default:(Uuid.Target.create ()) id in
-    { uuid; title; content; author }
+    let id = CCOption.get_or ~default:(Uuid.Target.create ()) id in
+    { id; title; content; author }
   ;;
 
   let to_authorizable ?ctx =
     Backend.Target.decorate ?ctx (fun t ->
-      Target.make ~owner:(snd t.author) `Article t.uuid)
+      Target.make ~owner:(snd t.author) `Article t.id)
   ;;
 
   let update_title ?ctx (actor : [ `User ] Actor.t) t new_title =
@@ -31,7 +31,7 @@ module Make (Backend : Guard.PersistenceSig) = struct
       Backend.wrap_function
         ?ctx
         CCFun.id
-        ValidationSet.(One (Action.Update, TargetSpec.Id (`Article, t.uuid)))
+        ValidationSet.(One (Action.Update, TargetSpec.Id (`Article, t.id)))
         f
     in
     wrapped actor new_title
@@ -47,7 +47,7 @@ module Make (Backend : Guard.PersistenceSig) = struct
       Backend.wrap_function
         ?ctx
         CCFun.id
-        ValidationSet.(SpecificRole (`Editor t.uuid))
+        ValidationSet.(SpecificRole (`Editor t.id))
         f
     in
     wrapped actor new_title
@@ -67,7 +67,7 @@ module Make (Backend : Guard.PersistenceSig) = struct
       Backend.wrap_function
         ?ctx
         CCFun.id
-        ValidationSet.(One (Action.Manage, TargetSpec.Id (`Article, t.uuid)))
+        ValidationSet.(One (Action.Manage, TargetSpec.Id (`Article, t.id)))
         f
     in
     wrapped actor new_author

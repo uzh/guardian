@@ -164,7 +164,9 @@ struct
             in
             Database.collect ?ctx caqti (role, uuid)
           | Guard.TargetSpec.Entity role ->
-            let where = {sql|WHERE target_role = ?|sql} in
+            let where =
+              {sql|WHERE target_role = ? AND target_uuid IS NULL |sql}
+            in
             let caqti = select where |> Kind.t ->* t in
             Database.collect ?ctx caqti role
         ;;

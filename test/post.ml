@@ -16,21 +16,20 @@ module Make (Backend : Guard.PersistenceSig) = struct
 
   (* pretend that all these fields aren't publically visible *)
   type t =
-    { uuid : Uuid.Target.t
+    { id : Uuid.Target.t
     ; mutable comment : string
     ; author : User.t
     ; article : Article.t
     }
   [@@deriving show]
 
-  let make ?id author article comment =
-    let uuid = CCOption.get_or ~default:(Uuid.Target.create ()) id in
-    { uuid; comment; article; author }
+  let make ?(id = Uuid.Target.create ()) author article comment =
+    { id; comment; article; author }
   ;;
 
   let to_authorizable ?ctx =
     Backend.Target.decorate ?ctx (fun t ->
-      Target.make ~owner:(snd t.author) `Post t.uuid)
+      Target.make ~owner:(snd t.author) `Post t.id)
   ;;
 
   let update_post ?ctx (actor : [ `User ] Actor.t) t new_comment =
@@ -43,7 +42,7 @@ module Make (Backend : Guard.PersistenceSig) = struct
       Backend.validate
         ?ctx
         CCFun.id
-        ValidationSet.(One (Action.Update, TargetSpec.Id (`Post, t.uuid)))
+        ValidationSet.(One (Action.Update, TargetSpec.Id (`Post, t.id)))
         actor
     in
     f new_comment
