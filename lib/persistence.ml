@@ -16,6 +16,7 @@ module type Backend = sig
   module Repo : sig
     module Rule : sig
       val find_all : ?ctx:context -> target_spec -> rule list Lwt.t
+      val find_all_of_entity : ?ctx:context -> target_spec -> rule list Lwt.t
       val save : ?ctx:context -> rule -> (unit, string) monad
       val delete : ?ctx:context -> rule -> (unit, string) monad
     end
@@ -203,6 +204,7 @@ module type Contract = sig
 
   val validate
     :  ?ctx:context
+    -> ?any_id:bool
     -> (string -> 'etyp)
     -> validation_set
     -> 'a actor

@@ -3,9 +3,9 @@ open Lwt.Infix
 open Caqti_request.Infix
 
 module Make
-  (ActorRoles : Guardian.RoleSig)
-  (TargetRoles : Guardian.RoleSig)
-  (Database : Database_pools.Sig) =
+    (ActorRoles : Guardian.RoleSig)
+    (TargetRoles : Guardian.RoleSig)
+    (Database : Database_pools.Sig) =
 struct
   module Guard = Guardian.Make (ActorRoles) (TargetRoles)
   module Authorizer = Guard.Authorizer
@@ -128,52 +128,64 @@ struct
                     (tup2 Action.t (tup2 Kind.t (option Uuid.Target.t))))))
         ;;
 
+        let select_rule_sql =
+          Format.asprintf
+            {sql|
+              SELECT
+                actor_role,
+                LOWER(CONCAT(
+                  SUBSTR(HEX(actor_uuid), 1, 8), '-',
+                  SUBSTR(HEX(actor_uuid), 9, 4), '-',
+                  SUBSTR(HEX(actor_uuid), 13, 4), '-',
+                  SUBSTR(HEX(actor_uuid), 17, 4), '-',
+                  SUBSTR(HEX(actor_uuid), 21)
+                )),
+                act,
+                target_role,
+                LOWER(CONCAT(
+                  SUBSTR(HEX(target_uuid), 1, 8), '-',
+                  SUBSTR(HEX(target_uuid), 9, 4), '-',
+                  SUBSTR(HEX(target_uuid), 13, 4), '-',
+                  SUBSTR(HEX(target_uuid), 17, 4), '-',
+                  SUBSTR(HEX(target_uuid), 21)
+                ))
+              FROM guardian_rules
+              %s
+            |sql}
+        ;;
+
         let find_all ?ctx target_spec =
-          let select =
-            Format.asprintf
-              {sql|
-                SELECT
-                  actor_role,
-                  LOWER(CONCAT(
-                    SUBSTR(HEX(actor_uuid), 1, 8), '-',
-                    SUBSTR(HEX(actor_uuid), 9, 4), '-',
-                    SUBSTR(HEX(actor_uuid), 13, 4), '-',
-                    SUBSTR(HEX(actor_uuid), 17, 4), '-',
-                    SUBSTR(HEX(actor_uuid), 21)
-                  )),
-                  act,
-                  target_role,
-                  LOWER(CONCAT(
-                    SUBSTR(HEX(target_uuid), 1, 8), '-',
-                    SUBSTR(HEX(target_uuid), 9, 4), '-',
-                    SUBSTR(HEX(target_uuid), 13, 4), '-',
-                    SUBSTR(HEX(target_uuid), 17, 4), '-',
-                    SUBSTR(HEX(target_uuid), 21)
-                  ))
-                FROM guardian_rules
-                %s
-              |sql}
-          in
           match target_spec with
           | Guard.TargetSpec.Id (role, uuid) ->
-            let where =
+            let query =
               {sql|WHERE target_role = ? AND target_uuid = UNHEX(REPLACE(?, '-', ''))|sql}
+              |> select_rule_sql
+              |> Caqti_type.(tup2 Kind.t Uuid.Target.t ->* t)
             in
-            let caqti =
-              select where |> Caqti_type.(tup2 Kind.t Uuid.Target.t ->* t)
-            in
-            Database.collect ?ctx caqti (role, uuid)
+            Database.collect ?ctx query (role, uuid)
           | Guard.TargetSpec.Entity role ->
-            let where =
+            let query =
               {sql|WHERE target_role = ? AND target_uuid IS NULL |sql}
+              |> select_rule_sql
+              |> Kind.t ->* t
             in
-            let caqti = select where |> Kind.t ->* t in
-            Database.collect ?ctx caqti role
+            Database.collect ?ctx query role
+        ;;
+
+        let find_all_of_entity ?ctx target_spec =
+          match target_spec with
+          | Guard.TargetSpec.Id (role, _) | Guard.TargetSpec.Entity role ->
+            let query =
+              {sql|WHERE target_role = ? |sql}
+              |> select_rule_sql
+              |> Kind.t ->* t
+            in
+            Database.collect ?ctx query role
         ;;
 
         let act_on_rule ?ctx query rule =
-          let caqti = Caqti_type.(t ->. unit) query in
-          Database.exec ?ctx caqti rule |> Lwt_result.ok
+          let query = Caqti_type.(t ->. unit) query in
+          Database.exec ?ctx query rule |> Lwt_result.ok
         ;;
 
         let save ?ctx rule =
@@ -411,8 +423,8 @@ struct
       ()
       |> find_migrations
       |> Lwt_list.iter_s (fun (key, date, sql) ->
-           Logs.debug (fun m -> m "Migration: Run '%s' from '%s'" key date);
-           Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
+             Logs.debug (fun m -> m "Migration: Run '%s' from '%s'" key date);
+             Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
     ;;
 
     (** [clean ()] runs clean on a specified context [?ctx] **)
@@ -420,8 +432,8 @@ struct
       ()
       |> find_clean
       |> Lwt_list.iter_s (fun (key, sql) ->
-           Logs.debug (fun m -> m "Clean: Run '%s'" key);
-           Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
+             Logs.debug (fun m -> m "Clean: Run '%s'" key);
+             Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
     ;;
   end)
 end
