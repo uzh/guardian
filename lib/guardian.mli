@@ -85,6 +85,7 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
       | Or of t list
       | One of Effect.t
       | SpecificRole of ActorRoles.t
+      | NotRole of ActorRoles.t
 
     val equal : t -> t -> bool
     val pp : Format.formatter -> t -> unit
@@ -96,6 +97,7 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
     val or_ : t list -> t
     val one : Effect.t -> t
     val specific_role : ActorRoles.t -> t
+    val not_role : ActorRoles.t -> t
     val empty : t
   end
 

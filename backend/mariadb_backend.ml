@@ -3,9 +3,9 @@ open Lwt.Infix
 open Caqti_request.Infix
 
 module Make
-    (ActorRoles : Guardian.RoleSig)
-    (TargetRoles : Guardian.RoleSig)
-    (Database : Database_pools.Sig) =
+  (ActorRoles : Guardian.RoleSig)
+  (TargetRoles : Guardian.RoleSig)
+  (Database : Database_pools.Sig) =
 struct
   module Guard = Guardian.Make (ActorRoles) (TargetRoles)
   module Authorizer = Guard.Authorizer
@@ -423,8 +423,8 @@ struct
       ()
       |> find_migrations
       |> Lwt_list.iter_s (fun (key, date, sql) ->
-             Logs.debug (fun m -> m "Migration: Run '%s' from '%s'" key date);
-             Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
+           Logs.debug (fun m -> m "Migration: Run '%s' from '%s'" key date);
+           Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
     ;;
 
     (** [clean ()] runs clean on a specified context [?ctx] **)
@@ -432,8 +432,8 @@ struct
       ()
       |> find_clean
       |> Lwt_list.iter_s (fun (key, sql) ->
-             Logs.debug (fun m -> m "Clean: Run '%s'" key);
-             Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
+           Logs.debug (fun m -> m "Clean: Run '%s'" key);
+           Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
     ;;
   end)
 end
