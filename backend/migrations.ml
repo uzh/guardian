@@ -45,7 +45,28 @@ let create_guardian_rules_table_sql =
   |sql}
 ;;
 
-let all_tables = [ "guardian_actors"; "guardian_targets"; "guardian_rules" ]
+let create_guardian_relations_table =
+  {sql|
+    CREATE TABLE IF NOT EXISTS guardian_relations (
+      id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+      origin varchar(255) NOT NULL,
+      target varchar(255) NOT NULL,
+      query text NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT unique_origin_target UNIQUE (origin, target),
+      PRIMARY KEY (id)
+    )
+  |sql}
+;;
+
+let all_tables =
+  [ "guardian_actors"
+  ; "guardian_targets"
+  ; "guardian_rules"
+  ; "guardian_relations"
+  ]
+;;
 
 let all =
   [ ( "create guardian actors table"
@@ -57,5 +78,8 @@ let all =
   ; ( "create guardian targets table"
     , "2023-03-09T17:02"
     , create_guardian_targets_table_sql )
+  ; ( "create guardian relations table"
+    , "2023-05-03T08:30"
+    , create_guardian_relations_table )
   ]
 ;;

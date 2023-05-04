@@ -6,6 +6,8 @@ module type Backend = sig
   type actor_spec
   type effect
   type kind
+  type query
+  type relation
   type role_set
   type roles
   type rule
@@ -93,6 +95,28 @@ module type Backend = sig
         -> Uuid.Target.t
         -> (unit, string) monad
     end
+
+    module Relation : sig
+      val upsert
+        :  ?ctx:context
+        -> ?query:string
+        -> kind
+        -> kind
+        -> (unit, string) monad
+
+      val find_query
+        :  ?ctx:(string * string) list
+        -> kind
+        -> kind
+        -> (query option, string) monad
+
+      val find_rec
+        :  ?ctx:context
+        -> kind
+        -> (kind * kind * string option) list Lwt.t
+
+      val find_effects_rec : ?ctx:context -> effect -> effect list Lwt.t
+    end
   end
 
   val find_migrations : unit -> (string * string * string) list
@@ -104,26 +128,32 @@ end
 module type Contract = sig
   include Backend
 
-  module Dependency : sig
-    type parent_fcn = ?ctx:context -> effect -> (effect option, string) monad
-
-    val register
-      :  ?tags:Logs.Tag.set
+  module Relation : sig
+    val add
+      :  ?ctx:context
+      -> ?tags:Logs.Tag.set
       -> ?ignore_duplicates:bool
-      -> parent:kind
+      -> ?to_target:query
+      -> target:kind
       -> kind
-      -> parent_fcn
-      -> (unit, string) result
+      -> (unit, string) monad
 
-    val find : ?default_fcn:parent_fcn -> parent:kind -> kind -> parent_fcn
-    val find_opt : parent:kind -> kind -> parent_fcn option
-    val find_all : kind -> parent_fcn list
+    val add_multiple
+      :  ?ctx:context
+      -> ?tags:Logs.Tag.set
+      -> ?ignore_duplicates:bool
+      -> relation list
+      -> (unit, string) monad
 
-    val find_all_combined
-      :  kind
-      -> ?ctx:context
-      -> effect
-      -> (effect list, string) monad
+    val find
+      :  ?ctx:context
+      -> ?default:query
+      -> target:kind
+      -> kind
+      -> (relation, string) monad
+
+    val find_opt : ?ctx:context -> target:kind -> kind -> relation option Lwt.t
+    val find_rec : ?ctx:context -> kind -> relation list Lwt.t
   end
 
   module Rule : sig

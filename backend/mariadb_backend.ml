@@ -1,4 +1,4 @@
-open CCFun.Infix
+open CCFun
 open Lwt.Infix
 open Caqti_request.Infix
 
@@ -82,6 +82,8 @@ struct
     type effect = Guard.Effect.t
     type validation_set = Guard.ValidationSet.t
     type kind = TargetRoles.t
+    type query = Guard.Relation.Query.t
+    type relation = Guard.Relation.t
     type role_set = Roles.t
     type roles = ActorRoles.t
     type rule = Guard.Rule.t
@@ -403,6 +405,156 @@ struct
             |> Caqti_type.(tup2 (option Owner.t) Uuid.Target.t ->. unit)
           in
           Database.exec ?ctx caqti (owner, id) |> Lwt_result.ok
+        ;;
+      end
+
+      module Relation = struct
+        let find_query_request =
+          {sql|
+              SELECT query
+              FROM guardian_relations
+              WHERE origin = ? AND target = ?
+            |sql}
+          |> Caqti_type.(tup2 Kind.t Kind.t ->? option string)
+        ;;
+
+        let find_query ?ctx origin target : (query option, string) Lwt_result.t =
+          let open Lwt.Infix in
+          Database.find_opt ?ctx find_query_request (origin, target)
+          >|= function
+          | Some (Some query) -> Ok (Some (Guard.Relation.Query.create query))
+          | Some None -> Ok None
+          | None ->
+            let msg =
+              Format.asprintf
+                "Undefined Relation: %s -> %s"
+                ([%show: TargetRoles.t] origin)
+                ([%show: TargetRoles.t] target)
+            in
+            Error msg
+        ;;
+
+        let upsert_request =
+          {sql|
+              INSERT INTO guardian_relations (origin, target, query)
+              VALUES (?, ?, ?)
+              ON DUPLICATE KEY UPDATE
+                query = VALUES(query),
+                updated_at = NOW()
+            |sql}
+          |> Caqti_type.(tup3 Kind.t Kind.t (option string) ->. unit)
+        ;;
+
+        let upsert ?ctx ?query origin target =
+          Database.exec ?ctx upsert_request (origin, target, query)
+          |> Lwt_result.ok
+        ;;
+
+        let find_rec_request =
+          {sql|
+              WITH RECURSIVE cte_relations AS (
+                SELECT origin, target, query
+                FROM guardian_relations
+                WHERE origin = ?
+                UNION ALL
+                SELECT r.origin, r.target, r.query
+                FROM guardian_relations r
+                JOIN cte_relations n ON r.origin = n.target
+              )
+              SELECT origin, target, query
+              FROM cte_relations
+            |sql}
+          |> Caqti_type.(Kind.t ->* tup3 Kind.t Kind.t (option string))
+        ;;
+
+        let find_rec ?ctx = Database.collect ?ctx find_rec_request
+
+        let create_rec_request relations =
+          let format_role =
+            CCString.(
+              TargetRoles.show %> replace ~sub:"`" ~by:"" %> lowercase_ascii)
+          in
+          let relation_sql =
+            relations
+            |> CCList.mapi (fun iter (origin, target, query) ->
+                 CCOption.map_or
+                   ~default:{sql| IS NULL |sql}
+                   (CCString.replace
+                      ~sub:"?"
+                      ~by:(origin |> format_role |> Format.asprintf "@id_%s")
+                    %> Format.asprintf {sql| IN (%s) |sql})
+                   query
+                 |> Format.asprintf
+                      {sql|
+                        SELECT @id_%s := t{{iterator}}.uuid, t{{iterator}}.kind
+                        FROM guardian_targets as t{{iterator}}
+                        WHERE t{{iterator}}.kind = '%s' AND t{{iterator}}.uuid %s
+                      |sql}
+                      (format_role target)
+                      (TargetRoles.show target)
+                 |> CCString.replace
+                      ~sub:"{{iterator}}"
+                      ~by:(CCInt.to_string iter))
+          in
+          let union = "\nUNION\n" in
+          let origin_id, combined_sql =
+            if CCList.is_empty relation_sql
+            then "", ""
+            else
+              ( relations
+                |> CCList.head_opt
+                |> CCOption.map_or ~default:"" (fun (origin, _, _) ->
+                     Format.asprintf "@id_%s :=" (format_role origin))
+              , CCString.concat union relation_sql
+                |> Format.asprintf "%s%s" union )
+          in
+          Format.asprintf
+            {sql|
+              WITH RECURSIVE cte_find_effects (uuid, kind) AS (
+                SELECT %s uuid, kind
+                FROM guardian_targets
+                WHERE kind = ? AND uuid = UNHEX(REPLACE(?, '-', ''))
+                %s
+              )
+              SELECT
+                kind,
+                LOWER(CONCAT(
+                  SUBSTR(HEX(uuid), 1, 8), '-',
+                  SUBSTR(HEX(uuid), 9, 4), '-',
+                  SUBSTR(HEX(uuid), 13, 4), '-',
+                  SUBSTR(HEX(uuid), 17, 4), '-',
+                  SUBSTR(HEX(uuid), 21)
+                ))
+              FROM cte_find_effects
+            |sql}
+            origin_id
+            combined_sql
+          |> Caqti_type.(
+               tup2 Kind.t Uuid.Target.t ->* tup2 Kind.t Uuid.Target.t)
+        ;;
+
+        let find_effects_rec ?ctx ((action, target_spec) : effect)
+          : effect list Lwt.t
+          =
+          let open Guard.TargetSpec in
+          let open Lwt.Infix in
+          match target_spec with
+          | Entity kind ->
+            find_rec ?ctx kind
+            >|= CCList.map (fun (_, target, _) -> action, Entity target)
+          | Id (kind, id) ->
+            let%lwt relations = find_rec ?ctx kind in
+            let entity_specs =
+              CCList.filter_map
+                (fun (_, target, query) ->
+                  if CCOption.is_none query then Some (Entity target) else None)
+                relations
+            in
+            let request = create_rec_request relations in
+            Database.collect ?ctx request (kind, id)
+            >|= CCList.map (fun (kind, id) -> Id (kind, id))
+            >|= CCList.append entity_specs
+            >|= CCList.map (fun spec -> action, spec)
         ;;
       end
     end

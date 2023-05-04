@@ -1,5 +1,19 @@
 module Guard = Guardian.Make (Role.Actor) (Role.Target)
 
+let chris_article_id = Guard.Uuid.Target.create ()
+let thomas_chris_post_id = Guard.Uuid.Target.create ()
+
+let test_find_article_query =
+  Format.asprintf
+    {sql|
+      SELECT UNHEX(REPLACE('%s', '-', ''))
+      WHERE UNHEX(REPLACE('%s', '-', '')) = ?
+    |sql}
+    (Guard.Uuid.Target.to_string chris_article_id)
+    (Guard.Uuid.Target.to_string thomas_chris_post_id)
+  |> Guard.Relation.Query.create
+;;
+
 module Tests (Backend : Guard.PersistenceSig) = struct
   open Guard
   module Article = Article.Make (Backend)
@@ -20,9 +34,14 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   let ben : Hacker.t = "Ben Hackerman", Guard.Uuid.Actor.create ()
   let thomas = "Thomas", Guard.Uuid.Actor.create ()
   let hugo = "Hugo", Guard.Uuid.Actor.create ()
-  let chris_article = Article.make "Foo" "Bar" chris
+  let chris_article = Article.make ~id:chris_article_id "Foo" "Bar" chris
   let aron_article = Article.make "Fizz" "Buzz" aron
-  let thomas_aron_post = Post.make thomas chris_article "A first reaction"
+
+  let thomas_chris_post =
+    Post.make ~id:thomas_chris_post_id thomas chris_article "A first reaction"
+  ;;
+
+  let thomas_aron_post = Post.make thomas aron_article "A second reaction"
   let thomas_note = Notes.make thomas "Hello world note"
   let chris_note = Notes.make chris "My private note"
 
@@ -449,14 +468,14 @@ module Tests (Backend : Guard.PersistenceSig) = struct
 
   let transistency ?ctx (_ : 'a) () =
     (let* (_ : Backend.kind Guard.Target.t) =
-       Post.to_authorizable ?ctx thomas_aron_post
+       Post.to_authorizable ?ctx thomas_chris_post
      in
-     let* aron_authorizable = User.to_authorizable ?ctx aron in
+     let* chris_authorizable = User.to_authorizable ?ctx chris in
      let* _thomas_post' =
        Post.update_post
          ?ctx
-         aron_authorizable
-         thomas_aron_post
+         chris_authorizable
+         thomas_chris_post
          "Update the post comment"
      in
      Lwt.return_ok true)
@@ -618,6 +637,13 @@ let () =
   @@
   let%lwt () = Maria.migrate ~ctx () in
   let%lwt () = Maria.clean ~ctx () in
+  let%lwt () =
+    Maria.Relation.add_multiple
+      ~ctx
+      ~ignore_duplicates:true
+      [ Post.article_relation ~query:test_find_article_query () ]
+    |> Lwt.map CCResult.get_or_failwith
+  in
   make_test_cases ~ctx (module Maria) "MariadDB Backend"
   |> Alcotest_lwt.run "Authorization"
 ;;

@@ -35,6 +35,8 @@
    (>= 1.8.0))
   (containers
    (>= 3.6))
+  (containers-data
+   (>= 3.6))
   (logs
    (>= 0.7.0))
   (lwt

@@ -116,87 +116,16 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
       -> (TargetRoles.t Target.t, string) Lwt_result.t
   end
 
-  module Dependency = struct
-    module Key = struct
-      type t = TargetRoles.t * TargetRoles.t [@@deriving eq, ord, show]
+  module Relation = struct
+    module Query = struct
+      type t = string [@@deriving eq, ord, show]
+
+      let create m = m
+      let value m = m
     end
 
-    module Map = CCMap.Make (Key)
-
-    type parent_fcn =
-      ?ctx:context -> Effect.t -> (Effect.t option, string) Lwt_result.t
-
-    let registered : parent_fcn Map.t ref = ref Map.empty
-
-    let register
-      ?(tags : Logs.Tag.set option)
-      ?(ignore_duplicates = false)
-      ~parent
-      typ
-      parent_fcn
-      =
-      let key = typ, parent in
-      let found = Map.find_opt key !registered in
-      let msg =
-        [%show: Key.t] %> Format.asprintf "Found duplicate registration: %s"
-      in
-      match found, ignore_duplicates with
-      | None, _ ->
-        registered := Map.add key parent_fcn !registered;
-        Ok ()
-      | Some _, true ->
-        Logs.debug (fun m -> m ?tags "%s" (msg key));
-        Ok ()
-      | Some _, false -> Error (msg key)
-    ;;
-
-    let register_all dependencies =
-      let open CCResult in
-      dependencies
-      |> CCList.map (fun (typ, parent, fcn) -> register ~parent typ fcn)
-      |> flatten_l
-      >|= fun (_ : unit list) -> ()
-    ;;
-
-    let find_opt ~parent typ : parent_fcn option =
-      Map.find_opt (typ, parent) !registered
-    ;;
-
-    let find ?(default_fcn = fun ?ctx:_ _ -> Lwt_result.return None) ~parent typ
-      : parent_fcn
-      =
-      find_opt ~parent typ
-      |> function
-      | Some parent_fcn -> parent_fcn
-      | None -> default_fcn
-    ;;
-
-    let find_all kind : parent_fcn list =
-      Map.filter
-        (fun (typ, _) (_ : parent_fcn) -> TargetRoles.equal typ kind)
-        !registered
-      |> Map.to_list
-      |> CCList.map snd
-    ;;
-
-    let find_all_combined kind
-      : ?ctx:context -> Effect.t -> (Effect.t list, string) Lwt_result.t
-      =
-     fun ?ctx effect ->
-      let open Lwt.Infix in
-      let ( >|+ ) = flip Lwt_result.map in
-      find_all kind
-      |> Lwt_list.map_s (fun fcn ->
-           fcn ?ctx effect |> Lwt_result.map CCOption.to_list)
-      >|= CCResult.(flatten_l %> map CCList.flatten)
-      >|+ fun set ->
-      Logs.debug ~src (fun m ->
-        m
-          "Effects found:\nChild: %s\nParent: %s"
-          ([%show: Effect.t] effect)
-          ([%show: Effect.t list] set));
-      set
-   ;;
+    type t = TargetRoles.t * TargetRoles.t * Query.t option
+    [@@deriving eq, ord, show]
   end
 
   module Authorizer = struct
@@ -283,6 +212,8 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
        and type actor_spec = ActorSpec.t
        and type effect = Effect.t
        and type kind = TargetRoles.t
+       and type query = Relation.Query.t
+       and type relation = Relation.t
        and type role_set = RoleSet.t
        and type roles = ActorRoles.t
        and type rule = Rule.t
@@ -296,6 +227,8 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
                   and type actor_spec = ActorSpec.t
                   and type effect = Effect.t
                   and type kind = TargetRoles.t
+                  and type query = Relation.Query.t
+                  and type relation = Relation.t
                   and type role_set = RoleSet.t
                   and type roles = ActorRoles.t
                   and type rule = Rule.t
@@ -303,7 +236,85 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
                   and type validation_set = ValidationSet.t) : PersistenceSig =
   struct
     include Backend
-    module Dependency = Dependency
+
+    module Relation = struct
+      include Relation
+
+      module Cache = struct
+        open CCCache
+
+        let equal_relation (c1, o1, t1) (c2, o2, t2) =
+          let ctx = [%show: (string * string) list] in
+          CCOption.equal (fun a b -> CCString.equal (ctx a) (ctx b)) c1 c2
+          && TargetRoles.equal o1 o2
+          && TargetRoles.equal t1 t2
+        ;;
+
+        let lru
+          : ( context option * kind * kind
+          , (Query.t option, string) Lwt_result.t ) t
+          =
+          lru ~eq:equal_relation 2048
+        ;;
+      end
+
+      let add
+        ?ctx
+        ?(tags : Logs.Tag.set option)
+        ?(ignore_duplicates = false)
+        ?to_target
+        ~target
+        origin
+        =
+        let%lwt found = Repo.Relation.find_query ?ctx origin target in
+        let msg =
+          Format.asprintf
+            "Found duplicate registration: (%s, %s)"
+            ([%show: TargetRoles.t] origin)
+            ([%show: TargetRoles.t] target)
+        in
+        match found, ignore_duplicates with
+        | Error _, _ -> Repo.Relation.upsert ?ctx ?query:to_target origin target
+        | Ok _, true ->
+          Logs.debug (fun m -> m ?tags "%s" msg);
+          Lwt.return_ok ()
+        | Ok _, false -> Lwt.return_error msg
+      ;;
+
+      let add_multiple ?ctx ?tags ?ignore_duplicates dependencies =
+        let open Lwt_result.Infix in
+        dependencies
+        |> Lwt_list.map_s (fun (origin, target, to_target) ->
+             add ?ctx ?tags ?ignore_duplicates ~target ?to_target origin)
+        |> Lwt.map CCResult.flatten_l
+        >|= fun (_ : unit list) -> ()
+      ;;
+
+      let find_query ?(ctx : context option) ~target origin
+        : (Query.t option, string) Lwt_result.t
+        =
+        let find' (context, origin, target) =
+          Repo.Relation.find_query ?ctx:context origin target
+        in
+        CCCache.with_cache Cache.lru find' (ctx, origin, target)
+      ;;
+
+      let find ?ctx ?default ~target origin =
+        let open Lwt_result.Infix in
+        find_query ?ctx ~target origin
+        >|= fun query -> origin, target, CCOption.choice [ query; default ]
+      ;;
+
+      let find_opt ?ctx ~target origin =
+        let open Lwt.Infix in
+        find_query ?ctx ~target origin
+        >|= CCResult.map_or ~default:None (fun query ->
+              Some (origin, target, query))
+      ;;
+
+      let find_rec = Repo.Relation.find_rec
+      let find_effects_rec = Repo.Relation.find_effects_rec
+    end
 
     module Utils = struct
       include Utils
@@ -491,43 +502,33 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
         to look for the parent object. Update and return the passed
         [validation_set] *)
     let expand_set ?ctx (validation_set : ValidationSet.t)
-      : (ValidationSet.t, string) result Lwt.t
+      : ValidationSet.t Lwt.t
       =
-      let open Lwt_result.Infix in
-      let rec expand set =
+      let open Lwt.Infix in
+      let rec expand set : validation_set Lwt.t =
         let open ValidationSet in
-        let find_parent entity = (Dependency.find_all_combined entity) ?ctx in
-        let find_all = Lwt_list.map_s expand %> Lwt.map CCResult.flatten_l in
+        let find_all = Lwt_list.map_s expand in
         match set with
         | One effect ->
-          (match snd effect with
-           | TargetSpec.Entity entity | TargetSpec.Id (entity, _) ->
-             find_parent entity effect
-             >>= (function
-             | [] ->
-               Logs.debug ~src (fun m ->
-                 m "Expand: %s (No parents) " ([%show: Effect.t] effect));
-               One effect |> Lwt.return_ok
-             | parent_effects ->
-               CCList.map one parent_effects
-               |> or_ %> expand
-               >|= fun parents ->
-               Logs.debug ~src (fun m ->
-                 m
-                   "Expand: %s with parent %s "
-                   ([%show: Effect.t] effect)
-                   ([%show: ValidationSet.t] parents));
-               Or [ One effect; parents ]))
+          Relation.find_effects_rec ?ctx effect
+          >|= (function
+          | [] ->
+            Logs.debug ~src (fun m ->
+              m "Expand: %s (No parents) " ([%show: Effect.t] effect));
+            One effect
+          | parent_effects ->
+            Logs.debug ~src (fun m ->
+              m
+                "Expand: %s with parent %s "
+                ([%show: Effect.t] effect)
+                ([%show: Effect.t list] parent_effects));
+            One effect :: CCList.map one parent_effects |> or_)
         | Or effects -> effects |> find_all >|= or_
         | And effects -> effects |> find_all >|= and_
-        | SpecificRole role -> SpecificRole role |> Lwt.return_ok
-        | NotRole role -> NotRole role |> Lwt.return_ok
+        | SpecificRole role -> SpecificRole role |> Lwt.return
+        | NotRole role -> NotRole role |> Lwt.return
       in
-      validation_set
-      |> expand
-      |> Lwt_result.map_error
-           (Format.asprintf
-              "Failed to expand the effects of the target. Error message: %s")
+      validation_set |> expand
     ;;
 
     (** [validate ?ctx error validation_set actor] checks permissions and
@@ -611,6 +612,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
       in
       validation_set
       |> expand_set ?ctx
+      |> Lwt_result.ok
       >>= find_checker
       >>> validate
       |> map_error
