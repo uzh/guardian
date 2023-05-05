@@ -131,28 +131,26 @@ struct
         ;;
 
         let select_rule_sql =
-          Format.asprintf
-            {sql|
+          {sql|
               SELECT
-                actor_role,
+                rules.actor_role,
                 LOWER(CONCAT(
-                  SUBSTR(HEX(actor_uuid), 1, 8), '-',
-                  SUBSTR(HEX(actor_uuid), 9, 4), '-',
-                  SUBSTR(HEX(actor_uuid), 13, 4), '-',
-                  SUBSTR(HEX(actor_uuid), 17, 4), '-',
-                  SUBSTR(HEX(actor_uuid), 21)
+                  SUBSTR(HEX(rules.actor_uuid), 1, 8), '-',
+                  SUBSTR(HEX(rules.actor_uuid), 9, 4), '-',
+                  SUBSTR(HEX(rules.actor_uuid), 13, 4), '-',
+                  SUBSTR(HEX(rules.actor_uuid), 17, 4), '-',
+                  SUBSTR(HEX(rules.actor_uuid), 21)
                 )),
-                act,
-                target_role,
+                rules.act,
+                rules.target_role,
                 LOWER(CONCAT(
-                  SUBSTR(HEX(target_uuid), 1, 8), '-',
-                  SUBSTR(HEX(target_uuid), 9, 4), '-',
-                  SUBSTR(HEX(target_uuid), 13, 4), '-',
-                  SUBSTR(HEX(target_uuid), 17, 4), '-',
-                  SUBSTR(HEX(target_uuid), 21)
+                  SUBSTR(HEX(rules.target_uuid), 1, 8), '-',
+                  SUBSTR(HEX(rules.target_uuid), 9, 4), '-',
+                  SUBSTR(HEX(rules.target_uuid), 13, 4), '-',
+                  SUBSTR(HEX(rules.target_uuid), 17, 4), '-',
+                  SUBSTR(HEX(rules.target_uuid), 21)
                 ))
-              FROM guardian_rules
-              %s
+              FROM guardian_rules AS rules
             |sql}
         ;;
 
@@ -160,15 +158,17 @@ struct
           match target_spec with
           | Guard.TargetSpec.Id (role, uuid) ->
             let query =
-              {sql|WHERE target_role = ? AND target_uuid = UNHEX(REPLACE(?, '-', ''))|sql}
-              |> select_rule_sql
+              select_rule_sql
+              |> Format.asprintf
+                   {sql|%s WHERE target_role = ? AND target_uuid = UNHEX(REPLACE(?, '-', ''))|sql}
               |> Caqti_type.(tup2 Kind.t Uuid.Target.t ->* t)
             in
             Database.collect ?ctx query (role, uuid)
           | Guard.TargetSpec.Entity role ->
             let query =
-              {sql|WHERE target_role = ? AND target_uuid IS NULL |sql}
-              |> select_rule_sql
+              select_rule_sql
+              |> Format.asprintf
+                   {sql|%s WHERE target_role = ? AND target_uuid IS NULL |sql}
               |> Kind.t ->* t
             in
             Database.collect ?ctx query role
@@ -178,8 +178,8 @@ struct
           match target_spec with
           | Guard.TargetSpec.Id (role, _) | Guard.TargetSpec.Entity role ->
             let query =
-              {sql|WHERE target_role = ? |sql}
-              |> select_rule_sql
+              select_rule_sql
+              |> Format.asprintf {sql|%s WHERE target_role = ? |sql}
               |> Kind.t ->* t
             in
             Database.collect ?ctx query role
@@ -450,26 +450,34 @@ struct
           |> Lwt_result.ok
         ;;
 
-        let find_rec_request =
+        let cte_relations_sql =
           {sql|
-              WITH RECURSIVE cte_relations AS (
-                SELECT origin, target, query
-                FROM guardian_relations
-                WHERE origin = ?
-                UNION ALL
-                SELECT r.origin, r.target, r.query
-                FROM guardian_relations r
-                JOIN cte_relations n ON r.origin = n.target
-              )
+            WITH RECURSIVE cte_relations AS (
               SELECT origin, target, query
-              FROM cte_relations
-            |sql}
+              FROM guardian_relations
+              WHERE origin = ?
+              UNION ALL
+              SELECT r.origin, r.target, r.query
+              FROM guardian_relations r
+              JOIN cte_relations n ON r.origin = n.target
+            )
+          |sql}
+        ;;
+
+        let find_rec_request =
+          cte_relations_sql
+          |> Format.asprintf
+               {sql|
+                  %s
+                  SELECT origin, target, query
+                  FROM cte_relations
+                |sql}
           |> Caqti_type.(Kind.t ->* tup3 Kind.t Kind.t (option string))
         ;;
 
         let find_rec ?ctx = Database.collect ?ctx find_rec_request
 
-        let create_rec_request relations =
+        let create_rec_sql select_sql relations =
           let format_role =
             CCString.(
               TargetRoles.show %> replace ~sub:"`" ~by:"" %> lowercase_ascii)
@@ -516,6 +524,17 @@ struct
                 WHERE kind = ? AND uuid = UNHEX(REPLACE(?, '-', ''))
                 %s
               )
+              %s
+            |sql}
+            origin_id
+            combined_sql
+            select_sql
+        ;;
+
+        let create_rec_request =
+          let open Caqti_type in
+          let select_sql =
+            {sql|
               SELECT
                 kind,
                 LOWER(CONCAT(
@@ -527,10 +546,9 @@ struct
                 ))
               FROM cte_find_effects
             |sql}
-            origin_id
-            combined_sql
-          |> Caqti_type.(
-               tup2 Kind.t Uuid.Target.t ->* tup2 Kind.t Uuid.Target.t)
+          in
+          create_rec_sql select_sql
+          %> (tup2 Kind.t Uuid.Target.t ->* tup2 Kind.t Uuid.Target.t)
         ;;
 
         let find_effects_rec ?ctx ((action, target_spec) : effect)
@@ -557,6 +575,43 @@ struct
             >|= CCList.map (fun spec -> action, spec)
         ;;
       end
+
+      let find_rules_of_spec_request =
+        let open Caqti_type in
+        Relation.create_rec_sql
+          (Format.asprintf
+             {sql|
+                %s
+                JOIN cte_find_effects as eff ON rules.target_role = eff.kind AND (target_uuid = eff.uuid OR target_uuid IS NULL)
+              |sql}
+             Rule.select_rule_sql)
+        %> (tup2 Kind.t Uuid.Target.t ->* Rule.t)
+      ;;
+
+      let find_rules_of_spec ?ctx ?(any_id = false) =
+        let open Guard.TargetSpec in
+        function
+        | Entity kind ->
+          let filter_uuid =
+            if any_id then "" else {sql| AND rules.target_uuid IS NULL |sql}
+          in
+          let request =
+            Format.asprintf
+              {sql|
+                %s
+                %s
+                JOIN cte_relations AS rel ON rules.target_role = rel.origin OR rules.target_role = rel.target %s
+              |sql}
+              Relation.cte_relations_sql
+              Rule.select_rule_sql
+              filter_uuid
+            |> Kind.t ->* Rule.t
+          in
+          Database.collect ?ctx request kind
+        | Id (kind, id) ->
+          let%lwt relations = Relation.find_rec ?ctx kind in
+          Database.collect ?ctx (find_rules_of_spec_request relations) (kind, id)
+      ;;
     end
 
     (** [find_migrations ()] returns a list of all migrations as a tuple with

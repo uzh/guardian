@@ -461,40 +461,32 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
           Lwt.return_ok entity
      ;;
 
-      (** [find_checker] find checker function for a specific target id *)
-      let find_checker ?ctx { Target.uuid; owner; _ } =
+      (** [find_checker] find checker function for a specific target spec *)
+      let find_checker ?ctx ?any_id spec
+        : ('a actor -> Action.t -> bool, 'b) result Lwt.t
+        =
         let open Lwt_result.Syntax in
-        let* kind = find_kind ?ctx uuid in
-        let%lwt rules =
-          TargetSpec.[ Entity kind; Id (kind, uuid) ]
-          |> Lwt_list.map_s (Rule.find_all ?ctx)
-          |> Lwt.map CCList.flatten
-        in
-        Lwt.return_ok
-        @@ fun actor action ->
-        let is_owner =
-          owner
-          |> CCOption.map_or ~default:false (Uuid.Actor.equal actor.Actor.uuid)
-        in
-        let is_self target_id { Actor.uuid; _ } =
-          let open Uuid in
-          target_id
-          |> Target.equal (uuid |> Actor.to_string |> Target.of_string_exn)
-        in
-        if is_self uuid actor || is_owner
-        then true
-        else Utils.exists_in rules actor action
-      ;;
-
-      (** [find_kind_checker] find checker function for a specific target entity *)
-      let find_kind_checker ?ctx kind =
-        let%lwt rules = Rule.find_all ?ctx (TargetSpec.Entity kind) in
-        Lwt.return_ok @@ Utils.exists_in rules
-      ;;
-
-      let find_any_kind_checker ?ctx kind =
-        let%lwt rules = Rule.find_all_of_entity ?ctx (TargetSpec.Entity kind) in
-        Lwt.return_ok @@ Utils.exists_in rules
+        let%lwt rules = Repo.find_rules_of_spec ?ctx ?any_id spec in
+        match spec with
+        | TargetSpec.Entity _ -> Lwt.return_ok @@ Utils.exists_in rules
+        | TargetSpec.Id (kind, id) ->
+          let* { Target.uuid; owner; _ } = find ?ctx kind id in
+          Lwt.return_ok
+          @@ fun actor action ->
+          let is_owner =
+            owner
+            |> CCOption.map_or
+                 ~default:false
+                 (Uuid.Actor.equal actor.Actor.uuid)
+          in
+          let is_self target_id { Actor.uuid; _ } =
+            let open Uuid in
+            target_id
+            |> Target.equal (uuid |> Actor.to_string |> Target.of_string_exn)
+          in
+          if is_self uuid actor || is_owner
+          then true
+          else Utils.exists_in rules actor action
       ;;
     end
 
@@ -545,7 +537,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
         [actor] actor object who'd like to perform the action *)
     let validate
       ?ctx
-      ?(any_id = false)
+      ?any_id
       (error : string -> 'etyp)
       (validation_set : ValidationSet.t)
       (actor : 'a actor)
@@ -564,12 +556,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
                 (string_of_bool valid)
                 ([%show: Effect.t] effect))
           in
-          (match spec with
-           | (TargetSpec.Id (kind, _) | TargetSpec.Entity kind) when any_id ->
-             Target.find_any_kind_checker ?ctx kind
-           | TargetSpec.Id (kind, uuid) ->
-             Target.(find ?ctx kind uuid >>= find_checker ?ctx)
-           | TargetSpec.Entity kind -> Target.find_kind_checker ?ctx kind)
+          Target.find_checker ?ctx ?any_id spec
           >|= (fun checker_fcn -> checker_fcn actor action)
           >|= tap log_debug
         in

@@ -117,6 +117,12 @@ module type Backend = sig
 
       val find_effects_rec : ?ctx:context -> effect -> effect list Lwt.t
     end
+
+    val find_rules_of_spec
+      :  ?ctx:(string * string) list
+      -> ?any_id:bool
+      -> target_spec
+      -> rule list Lwt.t
   end
 
   val find_migrations : unit -> (string * string * string) list
@@ -216,13 +222,9 @@ module type Contract = sig
 
     val find_checker
       :  ?ctx:context
-      -> kind target
-      -> ('a actor -> Action.t -> bool, string) monad
-
-    val find_kind_checker
-      :  ?ctx:context
-      -> kind
-      -> ('b actor -> Action.t -> bool, string) monad
+      -> ?any_id:bool
+      -> target_spec
+      -> ('a actor -> Action.t -> bool, query) result Lwt.t
   end
 
   val wrap_function
