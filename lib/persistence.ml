@@ -39,7 +39,7 @@ module type Backend = sig
         -> Uuid.Actor.t
         -> ('kind actor, string) monad
 
-      val find_roles : ?ctx:context -> Uuid.Actor.t -> (role_set, string) monad
+      val find_roles : ?ctx:context -> Uuid.Actor.t -> role_set Lwt.t
 
       val find_owner
         :  ?ctx:context
@@ -123,6 +123,21 @@ module type Backend = sig
       -> ?any_id:bool
       -> target_spec
       -> rule list Lwt.t
+
+    val find_sql_for_kind
+      :  ?ctx:(string * string) list
+      -> ?custom_where:string
+      -> kind
+      -> ((Action.t * Uuid.Actor.t) Caqti_type.t * string) Lwt.t
+
+    val exists_for_kind
+      :  ?ctx:(string * string) list
+      -> kind
+      -> Action.t
+      -> 'a actor
+      -> Uuid.Target.t list Lwt.t
+
+    val define_functions : ?ctx:(string * string) list -> unit -> unit Lwt.t
   end
 
   val find_migrations : unit -> (string * string * string) list
@@ -186,8 +201,6 @@ module type Contract = sig
       -> Uuid.Actor.t
       -> roles
       -> (unit, string) monad
-
-    val find_roles_exn : ?ctx:context -> Uuid.Actor.t -> role_set Lwt.t
 
     val find
       :  ?ctx:context

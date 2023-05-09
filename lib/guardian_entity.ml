@@ -414,8 +414,6 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
           let* () = create ?ctx ?owner roles uuid in
           Lwt.return_ok entity
      ;;
-
-      let find_roles_exn ?ctx = Utils.with_exn find_roles ?ctx "find_roles_exn"
     end
 
     module Target = struct
@@ -563,7 +561,9 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
         function
         | One effect -> find effect
         | SpecificRole role ->
-          Actor.find_roles ?ctx (Actor.id actor) >|= RoleSet.(mem role)
+          Actor.find_roles ?ctx (Actor.id actor)
+          |> Lwt_result.ok
+          >|= RoleSet.(mem role)
         | Or (rule :: rules) ->
           let%lwt init = find_checker rule in
           Lwt_list.fold_left_s
@@ -585,7 +585,10 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
             init
             rules
         | NotRole role ->
-          Actor.find_roles ?ctx (Actor.id actor) >|= RoleSet.(mem role) >|= not
+          Actor.find_roles ?ctx (Actor.id actor)
+          |> Lwt_result.ok
+          >|= RoleSet.(mem role)
+          >|= not
         | Or [] | And [] -> Lwt.return_ok true
       in
       let validate = function

@@ -24,6 +24,9 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   module User = User.MakeActor (Backend)
   module Set = RoleSet
 
+  let testable_uuid = Uuid.Target.(Alcotest.testable pp equal)
+  let testable_set = Set.(Alcotest.testable pp equal)
+
   (* ensure that the `User` module conforms to the `ActorSig` and `UserTarget`
      conforms to `TargetSig` module type. *)
   let _ = (module Article : TargetSig)
@@ -106,12 +109,18 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   ;;
 
   let test_grant_roles ?ctx (_ : 'a) () =
-    Backend.Actor.grant_roles ?ctx (snd aron) (Set.singleton `Admin)
-    >|= Alcotest.(check (result unit string)) "Grant a role." (Ok ())
+    let%lwt () =
+      Backend.Actor.grant_roles ?ctx (snd aron) (Set.singleton `Admin)
+      >|= Alcotest.(check (result unit string)) "Grant a role." (Ok ())
+    in
+    Backend.Actor.find_roles ?ctx (snd aron)
+    >|= Alcotest.(check testable_set)
+          "Check if the role was granted."
+          Set.(empty |> add `User |> add `Admin)
   ;;
 
   let test_check_roles ?ctx (_ : 'a) () =
-    (let* roles = Backend.Actor.find_roles ?ctx (snd aron) in
+    (let%lwt roles = Backend.Actor.find_roles ?ctx (snd aron) in
      let expected = Set.of_list [ `User; `Admin ] in
      let diff =
        Set.(union (diff expected roles) (diff roles expected) |> elements)
@@ -139,7 +148,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
          (Set.singleton (`Editor Guard.Uuid.Target.nil))
      in
      let* () =
-       let* roles = Backend.Actor.find_roles ?ctx (snd aron) in
+       let%lwt roles = Backend.Actor.find_roles ?ctx (snd aron) in
        if Set.mem (`Editor Guard.Uuid.Target.nil) roles
        then Lwt.return_ok ()
        else
@@ -152,7 +161,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
          (snd aron)
          (Set.singleton (`Editor Guard.Uuid.Target.nil))
      in
-     let* roles = Backend.Actor.find_roles ?ctx (snd aron) in
+     let%lwt roles = Backend.Actor.find_roles ?ctx (snd aron) in
      Lwt.return_ok (Set.mem (`Editor Guard.Uuid.Target.nil) roles))
     >|= Alcotest.(check (result bool string)) "Check a user's roles." (Ok false)
   ;;
@@ -509,6 +518,17 @@ module Tests (Backend : Guard.PersistenceSig) = struct
           (Error "correct")
   ;;
 
+  let roles_exist_for_type ?ctx (_ : 'a) () =
+    let result =
+      let* actor = User.to_authorizable ?ctx chris in
+      Backend.Repo.exists_for_kind ?ctx `Post Action.Read actor |> Lwt_result.ok
+    in
+    result
+    >|= Alcotest.(check (result (list testable_uuid) string))
+          "Post should be readable by user."
+          (Ok [ thomas_chris_post_id ])
+  ;;
+
   (** IMPORTANT: the following tests should not compile! *)
   (* let hacker_cannot_update_article ?ctx (_:'a) () = let () = print_endline
      "about\n to run a test" in let%lwt ben = Hacker.to_authorizable ?ctx ben |>
@@ -612,6 +632,12 @@ let () =
             `Quick
             (T.transistency_deny ?ctx)
         ] )
+    ; ( Format.asprintf "(%s) Validate returned 'exists' sql for kinds." name
+      , [ Alcotest_lwt.test_case
+            "transistency"
+            `Quick
+            (T.roles_exist_for_type ?ctx)
+        ] )
     ]
   in
   let open Guardian_backend.Pools in
@@ -644,6 +670,7 @@ let () =
       [ Post.article_relation ~query:test_find_article_query () ]
     |> Lwt.map CCResult.get_or_failwith
   in
+  let%lwt () = Maria.Repo.define_functions ~ctx () in
   make_test_cases ~ctx (module Maria) "MariadDB Backend"
   |> Alcotest_lwt.run "Authorization"
 ;;
