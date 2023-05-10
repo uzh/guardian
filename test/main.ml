@@ -670,7 +670,7 @@ let () =
       [ Post.article_relation ~query:test_find_article_query () ]
     |> Lwt.map CCResult.get_or_failwith
   in
-  let%lwt () = Maria.Repo.define_functions ~ctx () in
+  let%lwt () = Maria.start ~ctx () in
   make_test_cases ~ctx (module Maria) "MariadDB Backend"
   |> Alcotest_lwt.run "Authorization"
 ;;

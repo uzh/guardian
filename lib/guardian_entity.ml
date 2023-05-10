@@ -121,7 +121,8 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
       type t = string [@@deriving eq, ord, show]
 
       let create m = m
-      let value m = m
+      let of_string m = m
+      let to_string m = m
     end
 
     type t = TargetRoles.t * TargetRoles.t * Query.t option

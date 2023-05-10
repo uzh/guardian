@@ -183,7 +183,8 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
       type t
 
       val create : string -> t
-      val value : t -> string
+      val of_string : string -> t
+      val to_string : t -> string
     end
 
     type t = TargetRoles.t * TargetRoles.t * Query.t option

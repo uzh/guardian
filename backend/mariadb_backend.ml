@@ -18,19 +18,6 @@ struct
     CCString.(TargetRoles.show %> replace ~sub:"`" ~by:"" %> capitalize_ascii)
   ;;
 
-  module BaseType (Core : Guardian.RoleSig) = struct
-    include Core
-
-    let t =
-      let open CCResult in
-      Caqti_type.(
-        custom
-          ~encode:(Core.show %> return)
-          ~decode:(of_string %> return)
-          string)
-    ;;
-  end
-
   module Uuid = struct
     module UuidBase (Core : Guard.Uuid.Sig) = struct
       include Core
@@ -66,9 +53,45 @@ struct
           ~decode:(of_string %> return)
           string)
     ;;
+
+    let roles =
+      let open CCResult in
+      Caqti_type.(
+        custom
+          ~encode:
+            (CCList.map (ActorRoles.show %> Format.asprintf "'%s'")
+             %> CCString.concat ", "
+             %> return)
+          ~decode:(Error "Retreive a list of roles isn't supported" |> const)
+          string)
+    ;;
   end
 
-  module Kind = BaseType (TargetRoles)
+  module Query = struct
+    include Guard.Relation.Query
+
+    let t =
+      let open CCResult in
+      Caqti_type.(
+        custom
+          ~encode:(to_string %> return)
+          ~decode:(of_string %> return)
+          string)
+    ;;
+  end
+
+  module Kind = struct
+    include TargetRoles
+
+    let t =
+      let open CCResult in
+      Caqti_type.(
+        custom
+          ~encode:(TargetRoles.show %> return)
+          ~decode:(of_string %> return)
+          string)
+    ;;
+  end
 
   module Action = struct
     include Guard.Action
@@ -100,7 +123,7 @@ struct
 
     module Repo = struct
       let define_encode_uuid =
-        let function_name = "encodeUuid" in
+        let function_name = "guardianEncodeUuid" in
         ( function_name
         , Format.asprintf
             {sql|
@@ -114,7 +137,7 @@ struct
       ;;
 
       let define_decode_uuid =
-        let function_name = "decodeUuid" in
+        let function_name = "guardianDecodeUuid" in
         ( function_name
         , Format.asprintf
             {sql|
@@ -137,7 +160,7 @@ struct
         let upsert_request =
           {sql|
             INSERT INTO guardian_actor_roles (actor_uuid, role)
-            VALUES (encodeUuid(?), ?)
+            VALUES (guardianEncodeUuid(?), ?)
             ON DUPLICATE KEY UPDATE
                 updated_at = NOW()
           |sql}
@@ -150,7 +173,7 @@ struct
           {sql|
             SELECT role
             FROM guardian_actor_roles AS roles
-            WHERE roles.actor_uuid = encodeUuid(?)
+            WHERE roles.actor_uuid = guardianEncodeUuid(?)
           |sql}
           |> Uuid.Actor.t ->* Role.t
         ;;
@@ -162,21 +185,47 @@ struct
 
         let find_actors_by_role_request =
           {sql|
-            SELECT decodeUuid(roles.actor_uuid)
+            SELECT guardianDecodeUuid(roles.actor_uuid)
             FROM guardian_actor_roles AS roles
             WHERE roles.role = ?
           |sql}
           |> Role.t ->* Uuid.Actor.t
         ;;
 
-        let _find_actors_by_role ?ctx =
+        let find_actors_by_role ?ctx =
           Database.collect ?ctx find_actors_by_role_request
+        ;;
+
+        let find_actors_by_roles_request =
+          {sql|
+            SELECT roles.role, guardianDecodeUuid(roles.actor_uuid)
+            FROM guardian_actor_roles AS roles
+            WHERE roles.role IN (?)
+          |sql}
+          |> Role.roles ->* Caqti_type.(tup2 Role.t Uuid.Actor.t)
+        ;;
+
+        let find_actors_by_roles ?ctx roles =
+          let%lwt find_actors =
+            Database.collect ?ctx find_actors_by_roles_request roles
+          in
+          CCList.map
+            (fun role ->
+              let actors =
+                CCList.filter_map
+                  (fun (arole, id) ->
+                    if Role.equal role arole then Some id else None)
+                  find_actors
+              in
+              role, actors)
+            roles
+          |> Lwt.return
         ;;
 
         let delete_request =
           {sql|
             DELETE FROM guardian_actor_roles
-            WHERE actor_uuid = encodeUuid(?) AND role = ?
+            WHERE actor_uuid = guardianEncodeUuid(?) AND role = ?
           |sql}
           |> Caqti_type.(tup2 Uuid.Actor.t Role.t ->. unit)
         ;;
@@ -227,10 +276,10 @@ struct
           {sql|
             SELECT
               rules.actor_role,
-              decodeUuid(rules.actor_uuid),
+              guardianDecodeUuid(rules.actor_uuid),
               rules.act,
               rules.target_role,
-              decodeUuid(rules.target_uuid)
+              guardianDecodeUuid(rules.target_uuid)
             FROM guardian_rules AS rules
           |sql}
         ;;
@@ -241,7 +290,7 @@ struct
             let query =
               select_rule_sql
               |> Format.asprintf
-                   {sql|%s WHERE target_role = ? AND target_uuid = encodeUuid(?)|sql}
+                   {sql|%s WHERE target_role = ? AND target_uuid = guardianEncodeUuid(?)|sql}
               |> Caqti_type.(tup2 Kind.t Uuid.Target.t ->* t)
             in
             Database.collect ?ctx query (role, uuid)
@@ -275,7 +324,7 @@ struct
           let query =
             {sql|
               INSERT INTO guardian_rules (actor_role, actor_uuid, act, target_role, target_uuid)
-              VALUES (?, encodeUuid(?), ?, ?, encodeUuid(?))
+              VALUES (?, guardianEncodeUuid(?), ?, ?, guardianEncodeUuid(?))
             |sql}
           in
           act_on_rule ?ctx query rule
@@ -287,10 +336,10 @@ struct
             {sql|
               DELETE FROM guardian_rules
               WHERE actor_role = ?
-                AND actor_uuid = encodeUuid(?)
+                AND actor_uuid = guardianEncodeUuid(?)
                 AND act = ?
                 AND target_role = ?
-                AND target_uuid = encodeUuid(?)
+                AND target_uuid = guardianEncodeUuid(?)
             |sql}
           in
           act_on_rule ?ctx query rule
@@ -302,7 +351,7 @@ struct
           let caqti =
             {sql|
               INSERT INTO guardian_actors (uuid, owner)
-              VALUES (encodeUuid(?), encodeUuid(?))
+              VALUES (guardianEncodeUuid(?), guardianEncodeUuid(?))
               ON DUPLICATE KEY UPDATE
                 updated_at = NOW()
             |sql}
@@ -317,7 +366,7 @@ struct
 
         let mem ?ctx id =
           let caqti =
-            {sql|SELECT TRUE FROM guardian_actors WHERE uuid = encodeUuid(?)|sql}
+            {sql|SELECT TRUE FROM guardian_actors WHERE uuid = guardianEncodeUuid(?)|sql}
             |> Uuid.Actor.t ->? Caqti_type.bool
           in
           Database.find_opt ?ctx caqti id
@@ -329,10 +378,10 @@ struct
           let caqti =
             {sql|
               SELECT
-                decodeUuid(uuid),
-                decodeUuid(owner)
+                guardianDecodeUuid(uuid),
+                guardianDecodeUuid(owner)
               FROM guardian_actors
-              WHERE uuid = encodeUuid(?)
+              WHERE uuid = guardianEncodeUuid(?)
             |sql}
             |> Uuid.Actor.t ->? Caqti_type.(tup2 Uuid.Actor.t (option Owner.t))
           in
@@ -348,6 +397,8 @@ struct
         ;;
 
         let find_roles = Roles.find_by_actor
+        let find_by_role = Roles.find_actors_by_role
+        let find_by_roles = Roles.find_actors_by_roles
 
         let grant_roles ?ctx id =
           Guard.RoleSet.to_list
@@ -366,9 +417,9 @@ struct
           let caqti =
             {sql|
               SELECT
-                decodeUuid(owner)
+                guardianDecodeUuid(owner)
               FROM guardian_actors
-              WHERE uuid = encodeUuid(?)
+              WHERE uuid = guardianEncodeUuid(?)
             |sql}
             |> Uuid.Actor.t ->? Owner.t
           in
@@ -380,8 +431,8 @@ struct
             Caqti_type.(tup2 (option Owner.t) Uuid.Actor.t ->. unit)
               {sql|
                 UPDATE guardian_actors
-                SET owner = encodeUuid(?)
-                WHERE uuid = encodeUuid(?)
+                SET owner = guardianEncodeUuid(?)
+                WHERE uuid = guardianEncodeUuid(?)
               |sql}
           in
           Database.exec ?ctx caqti (owner, id) |> Lwt_result.ok
@@ -393,7 +444,7 @@ struct
           let caqti =
             {sql|
               INSERT INTO guardian_targets (uuid, kind, owner)
-              VALUES (encodeUuid(?), ?, encodeUuid(?))
+              VALUES (guardianEncodeUuid(?), ?, guardianEncodeUuid(?))
               ON DUPLICATE KEY UPDATE
                 updated_at = NOW()
             |sql}
@@ -404,7 +455,7 @@ struct
 
         let mem ?ctx id =
           let caqti =
-            {sql|SELECT kind FROM guardian_targets WHERE uuid = encodeUuid(?)|sql}
+            {sql|SELECT kind FROM guardian_targets WHERE uuid = guardianEncodeUuid(?)|sql}
             |> Uuid.Target.t ->? Kind.t
           in
           Database.find_opt ?ctx caqti id >|= CCOption.is_some |> Lwt_result.ok
@@ -415,9 +466,9 @@ struct
           let caqti =
             {sql|
               SELECT
-                decodeUuid(owner)
+                guardianDecodeUuid(owner)
               FROM guardian_targets
-              WHERE uuid = encodeUuid(?) AND kind = ?
+              WHERE uuid = guardianEncodeUuid(?) AND kind = ?
             |sql}
             |> Caqti_type.(tup2 Uuid.Target.t Kind.t ->? option Owner.t)
           in
@@ -432,7 +483,7 @@ struct
         let find_kind ?ctx id =
           let open Lwt.Infix in
           let caqti =
-            {sql|SELECT kind FROM guardian_targets WHERE uuid = encodeUuid(?)|sql}
+            {sql|SELECT kind FROM guardian_targets WHERE uuid = guardianEncodeUuid(?)|sql}
             |> Uuid.Target.t ->? Kind.t
           in
           Database.find_opt ?ctx caqti id
@@ -448,8 +499,8 @@ struct
           let caqti =
             {sql|
               UPDATE guardian_targets
-              SET owner = encodeUuid(?)
-              WHERE uuid = encodeUuid(?)
+              SET owner = guardianEncodeUuid(?)
+              WHERE uuid = guardianEncodeUuid(?)
             |sql}
             |> Caqti_type.(tup2 (option Owner.t) Uuid.Target.t ->. unit)
           in
@@ -458,10 +509,10 @@ struct
       end
 
       module Relation = struct
-        let find_related_subquery =
+        let find_related_query =
           ( Kind.t
           , {sql|
-              (WITH RECURSIVE cte_relations AS (
+              WITH RECURSIVE cte_relations AS (
                 SELECT id, origin, target, `query`
                 FROM guardian_relations
                 WHERE origin = ?
@@ -470,7 +521,7 @@ struct
                 FROM guardian_relations r
                 JOIN cte_relations n ON r.origin = n.target
               )
-              SELECT id FROM cte_relations)
+              SELECT id FROM cte_relations
             |sql}
           )
         ;;
@@ -508,7 +559,7 @@ struct
                 query = VALUES(query),
                 updated_at = NOW()
             |sql}
-          |> Caqti_type.(tup3 Kind.t Kind.t (option string) ->. unit)
+          |> Caqti_type.(tup3 Kind.t Kind.t (option Query.t) ->. unit)
         ;;
 
         let upsert ?ctx ?query origin target =
@@ -517,15 +568,15 @@ struct
         ;;
 
         let find_rec_request =
-          let subquery_input, subquery = find_related_subquery in
+          let subquery_input, subquery = find_related_query in
           Format.asprintf
             {sql|
               SELECT origin, target, query
               FROM guardian_relations
-              WHERE id IN %s
+              WHERE id IN (%s)
             |sql}
             subquery
-          |> Caqti_type.(subquery_input ->* tup3 Kind.t Kind.t (option string))
+          |> Caqti_type.(subquery_input ->* tup3 Kind.t Kind.t (option Query.t))
         ;;
 
         let find_rec ?ctx kind = Database.collect ?ctx find_rec_request kind
@@ -536,9 +587,10 @@ struct
             |> CCList.mapi (fun iter (origin, target, query) ->
                  CCOption.map_or
                    ~default:{sql| IS NULL |sql}
-                   (CCString.replace
-                      ~sub:"?"
-                      ~by:(Format.asprintf "@id_%s" (lowercase_role origin))
+                   (Query.to_string
+                    %> CCString.replace
+                         ~sub:"?"
+                         ~by:(Format.asprintf "@id_%s" (lowercase_role origin))
                     %> Format.asprintf {sql| IN (%s) |sql})
                    query
                  |> Format.asprintf
@@ -581,7 +633,8 @@ struct
             |sql}
             origin_id
             (CCOption.value
-               ~default:{sql|WHERE kind = ? AND uuid = encodeUuid(?)|sql}
+               ~default:
+                 {sql|WHERE kind = ? AND uuid = guardianEncodeUuid(?)|sql}
                custom_where)
             combined_sql
             select_sql
@@ -593,7 +646,7 @@ struct
             {sql|
               SELECT
                 kind,
-                decodeUuid(uuid)
+                guardianDecodeUuid(uuid)
               FROM cte_find_effects
             |sql}
           in
@@ -680,69 +733,48 @@ struct
           Database.collect ?ctx (find_rules_of_spec_request relations) (kind, id)
       ;;
 
-      (** [find_sql_for_kind] Uuid list of kind as input parameter for returned
-          sql statement (variable [@id_<kind>])
+      (** [define_validate_function] defines a 'validate<TargetRole>Uuid'
+          function for mariadb.
 
-          statement returns 1 if combined spec (with id) matches the
-          requirements *)
-      let find_sql_for_kind ?ctx ?custom_where (kind : TargetRoles.t) =
-        let%lwt relations = Relation.find_rec ?ctx kind in
-        let custom_where =
-          CCOption.value
-            ~default:{sql|WHERE uuid = encodeUuid(?) |sql}
-            custom_where
-        in
-        Relation.create_rec_sql
-          ~custom_where
-          (Format.asprintf
-             {sql|
-                SELECT TRUE FROM guardian_rules AS rules
-                JOIN cte_find_effects as eff
-                  ON rules.target_role = eff.kind
-                    AND (rules.act = '?' OR rules.act = 'manage')
-                    AND (target_uuid = eff.uuid OR target_uuid IS NULL)
-                    AND rules.actor_role IN (
-                      SELECT roles.role
-                      FROM guardian_actor_roles AS roles
-                      WHERE roles.actor_uuid = encodeUuid(?)
-                    )
-                GROUP BY uuid
-              |sql})
-          relations
-        |> (fun sql -> Caqti_type.(tup2 Action.t Uuid.Actor.t), sql)
-        |> Lwt.return
-      ;;
+          INPUT:
 
+          - actor_uuid (binary 16)
+          - action (enum: 'create','read','update','delete','manage')
+          - target_uuid (binary 16, usually within the query)
+
+          OUTPUT (Boolean):
+
+          It returns true, if the actor has action rights on the specified
+          target uuid. *)
       let define_validate_function ?ctx kind =
         let function_name =
-          Format.asprintf "validate%sUuid" (kind |> capitalize_role)
+          Format.asprintf "guardianValidate%sUuid" (kind |> capitalize_role)
         in
         let%lwt post_sql =
           let%lwt relations = Relation.find_rec ?ctx kind in
           let custom_where = {sql|WHERE uuid = id|sql} in
           Relation.create_rec_sql
             ~custom_where
-            (Format.asprintf
-               {sql|
-                  SELECT TRUE FROM guardian_rules AS rules
-                  JOIN cte_find_effects as eff
-                    ON rules.target_role = eff.kind
-                      AND (rules.act = `action` OR rules.act = 'manage')
-                      AND (target_uuid = eff.uuid OR target_uuid IS NULL)
-                      AND rules.actor_role IN (
-                        SELECT roles.role
-                        FROM guardian_actor_roles AS roles
-                        WHERE roles.actor_uuid = actor_id
-                      )
-                  GROUP BY uuid
-                |sql})
+            {sql|
+              SELECT TRUE FROM guardian_rules AS rules
+              JOIN cte_find_effects as eff
+                ON rules.target_role = eff.kind
+                  AND (rules.act = `action` OR rules.act = 'manage')
+                  AND (target_uuid = eff.uuid OR target_uuid IS NULL)
+                  AND rules.actor_role IN (
+                    SELECT roles.role
+                    FROM guardian_actor_roles AS roles
+                    WHERE roles.actor_uuid = actor_id
+                  )
+              GROUP BY uuid
+            |sql}
             relations
           |> Lwt.return
         in
         ( function_name
         , Format.asprintf
             {sql|
-              CREATE FUNCTION %s(`action` enum('create','read','update','delete','manage'), id BINARY(16), actor_id BINARY(16)) RETURNS BOOLEAN
+              CREATE FUNCTION %s(actor_id BINARY(16), `action` enum('create','read','update','delete','manage'), id BINARY(16)) RETURNS BOOLEAN
               BEGIN
                 RETURN (%s);
               END
@@ -756,21 +788,29 @@ struct
         TargetRoles.all |> Lwt_list.map_s (define_validate_function ?ctx)
       ;;
 
-      let exists_for_kind ?ctx kind action actor : Uuid.Target.t list Lwt.t =
-        let request =
-          Format.asprintf
+      let validation_query ?(select_sql = "SELECT uuid") kind =
+        ( Caqti_type.(tup2 Uuid.Actor.t Action.t)
+        , Format.asprintf
             {sql|
-              SELECT decodeUuid(uuid)
+              %s
               FROM guardian_targets
               WHERE kind = '%s'
               GROUP BY uuid
-              HAVING validate%sUuid(?, uuid, encodeUuid(?))
+              HAVING guardianValidate%sUuid(guardianEncodeUuid(?), ?, uuid)
             |sql}
+            select_sql
             (TargetRoles.show kind)
-            (kind |> capitalize_role)
-          |> Caqti_type.(tup2 Action.t Uuid.Actor.t) ->* Uuid.Target.t
+            (kind |> capitalize_role) )
+      ;;
+
+      let exists_for_kind ?ctx kind action actor : Uuid.Target.t list Lwt.t =
+        let input_type, request =
+          validation_query ~select_sql:"SELECT guardianDecodeUuid(uuid)" kind
         in
-        Database.collect ?ctx request (action, Guard.Actor.id actor)
+        Database.collect
+          ?ctx
+          (request |> input_type ->* Uuid.Target.t)
+          (Guard.Actor.id actor, action)
       ;;
 
       let define_functions ?ctx () =
@@ -789,6 +829,10 @@ struct
       ;;
     end
 
+    (** [start ?ctx ()] runs needed actions to start the backend, e.g. redefines
+        needed functions **)
+    let start = Repo.define_functions
+
     (** [find_migrations ()] returns a list of all migrations as a tuple with
         key, datetime and sql query **)
     let find_migrations () = Migrations.all
@@ -800,7 +844,7 @@ struct
       |> CCList.map (fun m -> m, Format.asprintf "TRUNCATE TABLE %s" m)
     ;;
 
-    (** [migrate ()] runs all migration on a specified context [?ctx] **)
+    (** [migrate ?ctx ()] runs all migration on a specified context [?ctx] **)
     let migrate ?ctx () =
       ()
       |> find_migrations
@@ -809,7 +853,7 @@ struct
            Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
     ;;
 
-    (** [clean ()] runs clean on a specified context [?ctx] **)
+    (** [clean ?ctx ()] runs clean on a specified context [?ctx] **)
     let clean ?ctx () =
       ()
       |> find_clean

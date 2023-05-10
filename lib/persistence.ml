@@ -40,6 +40,12 @@ module type Backend = sig
         -> ('kind actor, string) monad
 
       val find_roles : ?ctx:context -> Uuid.Actor.t -> role_set Lwt.t
+      val find_by_role : ?ctx:context -> roles -> Uuid.Actor.t list Lwt.t
+
+      val find_by_roles
+        :  ?ctx:context
+        -> roles list
+        -> (roles * Uuid.Actor.t list) list Lwt.t
 
       val find_owner
         :  ?ctx:context
@@ -99,13 +105,13 @@ module type Backend = sig
     module Relation : sig
       val upsert
         :  ?ctx:context
-        -> ?query:string
+        -> ?query:query
         -> kind
         -> kind
         -> (unit, string) monad
 
       val find_query
-        :  ?ctx:(string * string) list
+        :  ?ctx:context
         -> kind
         -> kind
         -> (query option, string) monad
@@ -113,35 +119,28 @@ module type Backend = sig
       val find_rec
         :  ?ctx:context
         -> kind
-        -> (kind * kind * string option) list Lwt.t
+        -> (kind * kind * query option) list Lwt.t
 
       val find_effects_rec : ?ctx:context -> effect -> effect list Lwt.t
     end
 
     val find_rules_of_spec
-      :  ?ctx:(string * string) list
+      :  ?ctx:context
       -> ?any_id:bool
       -> target_spec
       -> rule list Lwt.t
 
-    val find_sql_for_kind
-      :  ?ctx:(string * string) list
-      -> ?custom_where:string
-      -> kind
-      -> ((Action.t * Uuid.Actor.t) Caqti_type.t * string) Lwt.t
-
     val exists_for_kind
-      :  ?ctx:(string * string) list
+      :  ?ctx:context
       -> kind
       -> Action.t
       -> 'a actor
       -> Uuid.Target.t list Lwt.t
-
-    val define_functions : ?ctx:(string * string) list -> unit -> unit Lwt.t
   end
 
+  val start : ?ctx:context -> unit -> unit Lwt.t
   val find_migrations : unit -> (string * string * string) list
-  val find_clean : unit -> (string * string) list
+  val find_clean : unit -> context
   val migrate : ?ctx:context -> unit -> unit Lwt.t
   val clean : ?ctx:context -> unit -> unit Lwt.t
 end
