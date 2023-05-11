@@ -1,18 +1,9 @@
+let article_relation ?query () = `Post, `Article, query
+
 module Make (Backend : Guard.PersistenceSig) = struct
   open Guard
   module User = User.MakeActor (Backend)
   module Article = Article.Make (Backend)
-
-  let (_ : (unit, string) result) =
-    Backend.Dependency.register
-      ~parent:`Article
-      `Post
-      (fun ?ctx:_ (action, spec) ->
-      match[@warning "-4"] spec with
-      | TargetSpec.Entity `Post | TargetSpec.Id (`Post, _) ->
-        Lwt.return_ok (Some (action, TargetSpec.Entity `Article))
-      | _ -> Lwt.return_error "Invalid entity provided")
-  ;;
 
   (* pretend that all these fields aren't publically visible *)
   type t =

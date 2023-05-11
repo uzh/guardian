@@ -6,6 +6,7 @@
   containers
   guardian
   guardian.backend
+  fmt
   logs
   result
   uri)

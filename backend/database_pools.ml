@@ -1,5 +1,7 @@
 exception Exception of string
 
+module type Sig = Database_pools_sig.Sig
+
 let src = Logs.Src.create "guardian.pools"
 let find_pool_name = CCList.assoc_opt ~eq:CCString.equal "pool"
 
@@ -223,39 +225,4 @@ module Make (Config : ConfigSig) = struct
       let module Connection = (val connection : Caqti_lwt.CONNECTION) in
       Connection.exec request input)
   ;;
-end
-
-module type Sig = sig
-  val initialize : unit -> unit
-
-  val fetch_pool
-    :  ?ctx:(string * string) list
-    -> unit
-    -> (Caqti_lwt.connection, Caqti_error.t) Caqti_lwt.Pool.t
-
-  val add_pool : ?pool_size:int -> string -> string -> unit
-
-  val find
-    :  ?ctx:(string * string) list
-    -> ('a, 'b, [< `One ]) Caqti_request.t
-    -> 'a
-    -> 'b Lwt.t
-
-  val find_opt
-    :  ?ctx:(string * string) list
-    -> ('a, 'b, [< `One | `Zero ]) Caqti_request.t
-    -> 'a
-    -> 'b option Lwt.t
-
-  val collect
-    :  ?ctx:(string * string) list
-    -> ('a, 'b, [< `Many | `One | `Zero ]) Caqti_request.t
-    -> 'a
-    -> 'b list Lwt.t
-
-  val exec
-    :  ?ctx:(string * string) list
-    -> ('a, unit, [< `Zero ]) Caqti_request.t
-    -> 'a
-    -> unit Lwt.t
 end

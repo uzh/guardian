@@ -6,6 +6,8 @@ module type Backend = sig
   type actor_spec
   type effect
   type kind
+  type query
+  type relation
   type role_set
   type roles
   type rule
@@ -37,7 +39,13 @@ module type Backend = sig
         -> Uuid.Actor.t
         -> ('kind actor, string) monad
 
-      val find_roles : ?ctx:context -> Uuid.Actor.t -> (role_set, string) monad
+      val find_roles : ?ctx:context -> Uuid.Actor.t -> role_set Lwt.t
+      val find_by_role : ?ctx:context -> roles -> Uuid.Actor.t list Lwt.t
+
+      val find_by_roles
+        :  ?ctx:context
+        -> roles list
+        -> (roles * Uuid.Actor.t list) list Lwt.t
 
       val find_owner
         :  ?ctx:context
@@ -93,10 +101,46 @@ module type Backend = sig
         -> Uuid.Target.t
         -> (unit, string) monad
     end
+
+    module Relation : sig
+      val upsert
+        :  ?ctx:context
+        -> ?query:query
+        -> kind
+        -> kind
+        -> (unit, string) monad
+
+      val find_query
+        :  ?ctx:context
+        -> kind
+        -> kind
+        -> (query option, string) monad
+
+      val find_rec
+        :  ?ctx:context
+        -> kind
+        -> (kind * kind * query option) list Lwt.t
+
+      val find_effects_rec : ?ctx:context -> effect -> effect list Lwt.t
+    end
+
+    val find_rules_of_spec
+      :  ?ctx:context
+      -> ?any_id:bool
+      -> target_spec
+      -> rule list Lwt.t
+
+    val exists_for_kind
+      :  ?ctx:context
+      -> kind
+      -> Action.t
+      -> 'a actor
+      -> Uuid.Target.t list Lwt.t
   end
 
+  val start : ?ctx:context -> unit -> unit Lwt.t
   val find_migrations : unit -> (string * string * string) list
-  val find_clean : unit -> (string * string) list
+  val find_clean : unit -> context
   val migrate : ?ctx:context -> unit -> unit Lwt.t
   val clean : ?ctx:context -> unit -> unit Lwt.t
 end
@@ -104,26 +148,32 @@ end
 module type Contract = sig
   include Backend
 
-  module Dependency : sig
-    type parent_fcn = ?ctx:context -> effect -> (effect option, string) monad
-
-    val register
-      :  ?tags:Logs.Tag.set
+  module Relation : sig
+    val add
+      :  ?ctx:context
+      -> ?tags:Logs.Tag.set
       -> ?ignore_duplicates:bool
-      -> parent:kind
+      -> ?to_target:query
+      -> target:kind
       -> kind
-      -> parent_fcn
-      -> (unit, string) result
+      -> (unit, string) monad
 
-    val find : ?default_fcn:parent_fcn -> parent:kind -> kind -> parent_fcn
-    val find_opt : parent:kind -> kind -> parent_fcn option
-    val find_all : kind -> parent_fcn list
+    val add_multiple
+      :  ?ctx:context
+      -> ?tags:Logs.Tag.set
+      -> ?ignore_duplicates:bool
+      -> relation list
+      -> (unit, string) monad
 
-    val find_all_combined
-      :  kind
-      -> ?ctx:context
-      -> effect
-      -> (effect list, string) monad
+    val find
+      :  ?ctx:context
+      -> ?default:query
+      -> target:kind
+      -> kind
+      -> (relation, string) monad
+
+    val find_opt : ?ctx:context -> target:kind -> kind -> relation option Lwt.t
+    val find_rec : ?ctx:context -> kind -> relation list Lwt.t
   end
 
   module Rule : sig
@@ -150,8 +200,6 @@ module type Contract = sig
       -> Uuid.Actor.t
       -> roles
       -> (unit, string) monad
-
-    val find_roles_exn : ?ctx:context -> Uuid.Actor.t -> role_set Lwt.t
 
     val find
       :  ?ctx:context
@@ -186,13 +234,9 @@ module type Contract = sig
 
     val find_checker
       :  ?ctx:context
-      -> kind target
-      -> ('a actor -> Action.t -> bool, string) monad
-
-    val find_kind_checker
-      :  ?ctx:context
-      -> kind
-      -> ('b actor -> Action.t -> bool, string) monad
+      -> ?any_id:bool
+      -> target_spec
+      -> ('a actor -> Action.t -> bool, query) result Lwt.t
   end
 
   val wrap_function

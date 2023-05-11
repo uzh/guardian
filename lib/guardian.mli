@@ -178,6 +178,18 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
       -> (unit, string) result
   end
 
+  module Relation : sig
+    module Query : sig
+      type t
+
+      val create : string -> t
+      val of_string : string -> t
+      val to_string : t -> string
+    end
+
+    type t = TargetRoles.t * TargetRoles.t * Query.t option
+  end
+
   module type PersistenceSig =
     Persistence.Contract
       with type 'a actor = 'a Actor.t
@@ -185,6 +197,8 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
        and type actor_spec = ActorSpec.t
        and type effect = Effect.t
        and type kind = TargetRoles.t
+       and type query = Relation.Query.t
+       and type relation = Relation.t
        and type role_set = RoleSet.t
        and type roles = ActorRoles.t
        and type rule = Rule.t
@@ -198,6 +212,8 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
                   and type actor_spec = ActorSpec.t
                   and type effect = Effect.t
                   and type kind = TargetRoles.t
+                  and type query = Relation.Query.t
+                  and type relation = Relation.t
                   and type role_set = RoleSet.t
                   and type roles = ActorRoles.t
                   and type rule = Rule.t
