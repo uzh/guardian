@@ -30,9 +30,9 @@
   "Defined actors can access targets according to specified rules (allowed actions: CRUD).")
  (depends
   (caqti-driver-mariadb
-   (>= 1.8.0))
+   (>= 1.9.0))
   (caqti-lwt
-   (>= 1.8.0))
+   (>= 1.9.0))
   (containers
    (>= 3.6))
   (containers-data
@@ -44,7 +44,7 @@
   (lwt_ppx
    (>= 2.1.0))
   (mariadb
-   (>= 1.1.4))
+   (>= 1.1.6))
   (ocaml
    (>= 4.12.0))
   (ppx_deriving
