@@ -206,19 +206,19 @@ struct
         ;;
 
         let find_actors_by_roles ?ctx roles =
-          let%lwt find_actors =
+          let%lwt actors =
             Database.collect ?ctx find_actors_by_roles_request roles
           in
-          CCList.map
-            (fun role ->
-              let actors =
-                CCList.filter_map
-                  (fun (arole, id) ->
-                    if Role.equal role arole then Some id else None)
-                  find_actors
-              in
-              role, actors)
-            roles
+          let tbl = Hashtbl.create (CCList.length roles) in
+          CCList.iter
+            (fun (roles, actor) ->
+              let open CCOption in
+              Hashtbl.find_opt tbl roles
+              >|= CCList.cons actor
+              |> value ~default:[ actor ]
+              |> Hashtbl.replace tbl roles)
+            actors;
+          Hashtbl.fold (fun roles actors acc -> (roles, actors) :: acc) tbl []
           |> Lwt.return
         ;;
 
@@ -668,14 +668,14 @@ struct
             let entity_specs =
               CCList.filter_map
                 (fun (_, target, query) ->
-                  if CCOption.is_none query then Some (Entity target) else None)
+                  if CCOption.is_none query
+                  then Some (action, Entity target)
+                  else None)
                 relations
             in
-            let request = create_rec_request relations in
-            Database.collect ?ctx request (kind, id)
-            >|= CCList.map (fun (kind, id) -> Id (kind, id))
+            Database.collect ?ctx (create_rec_request relations) (kind, id)
+            >|= CCList.map (fun (kind, id) -> action, Id (kind, id))
             >|= CCList.append entity_specs
-            >|= CCList.map (fun spec -> action, spec)
         ;;
       end
 
@@ -767,6 +767,7 @@ struct
                     WHERE roles.actor_uuid = actor_id
                   )
               GROUP BY uuid
+              LIMIT 1
             |sql}
             relations
           |> Lwt.return
