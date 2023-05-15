@@ -189,7 +189,9 @@ struct
           else
             Format.asprintf
               {sql|AND roles.role NOT IN (%s)|sql}
-              (CCString.concat ", " (CCList.map Role.show exclude))
+              (CCString.concat
+                 ", "
+                 (CCList.map (Role.show %> Format.asprintf "'%s'") exclude))
         ;;
 
         let find_actors_by_role_request ?(exclude = []) () =
