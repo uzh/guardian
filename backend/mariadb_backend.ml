@@ -188,7 +188,10 @@ struct
           then ""
           else
             Format.asprintf
-              {sql|AND roles.role NOT IN (%s)|sql}
+              {sql|AND roles.actor_uuid NOT IN (
+                SELECT exclude.actor_uuid FROM guardian_actor_roles AS exclude WHERE
+                  exclude.role IN (%s))
+              |sql}
               (CCString.concat
                  ", "
                  (CCList.map (Role.show %> Format.asprintf "'%s'") exclude))

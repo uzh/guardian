@@ -25,6 +25,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   module Set = RoleSet
 
   let testable_uuid = Uuid.Target.(Alcotest.testable pp equal)
+  let testable_actor_uuid = Uuid.Actor.(Alcotest.testable pp equal)
   let testable_set = Set.(Alcotest.testable pp equal)
 
   (* ensure that the `User` module conforms to the `ActorSig` and `UserTarget`
@@ -547,6 +548,19 @@ module Tests (Backend : Guard.PersistenceSig) = struct
           (Ok true)
   ;;
 
+  let test_find_by_role ?ctx (_ : 'a) () =
+    let sort = CCList.stable_sort Guard.Uuid.Actor.compare in
+    let%lwt roles =
+      Backend.Actor.find_by_role ?ctx ~exclude:[ `Hacker ] `User
+    in
+    let expect = [ snd aron; snd chris; snd thomas ] in
+    Alcotest.(check (list testable_actor_uuid))
+      "return correct list of actor uuid by role `User."
+      (expect |> sort)
+      (roles |> sort)
+    |> Lwt.return
+  ;;
+
   (** IMPORTANT: the following tests should not compile! *)
   (* let hacker_cannot_update_article ?ctx (_:'a) () = let () = print_endline
      "about\n to run a test" in let%lwt ben = Hacker.to_authorizable ?ctx ben |>
@@ -661,6 +675,12 @@ let () =
             "allow specific role to update posts"
             `Quick
             (T.test_specific_role ?ctx)
+        ] )
+    ; ( Format.asprintf "(%s) Find all actors of a specific role" name
+      , [ Alcotest_lwt.test_case
+            "find all actors of a specific role"
+            `Quick
+            (T.test_find_by_role ?ctx)
         ] )
     ]
   in
