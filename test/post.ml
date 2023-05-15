@@ -38,4 +38,21 @@ module Make (Backend : Guard.PersistenceSig) = struct
     in
     f new_comment
   ;;
+
+  let update_post_as_specific_role
+    ?ctx
+    (actor : [ `User ] Actor.t)
+    t
+    new_comment
+    =
+    let open Lwt_result.Syntax in
+    let f new_comment =
+      let () = t.comment <- new_comment in
+      Lwt.return_ok t
+    in
+    let* () =
+      Backend.validate ?ctx CCFun.id ValidationSet.(SpecificRole `Hacker) actor
+    in
+    f new_comment
+  ;;
 end

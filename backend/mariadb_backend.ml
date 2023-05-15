@@ -720,11 +720,13 @@ struct
               {sql|
                 %s
                 %s
-                JOIN cte_relations AS rel ON rules.target_role = rel.origin OR rules.target_role = rel.target %s
+                LEFT JOIN cte_relations AS rel ON rules.target_role = rel.origin OR rules.target_role = rel.target
+                WHERE rules.target_role = ? %s
               |sql}
               cte_relations_sql
               Rule.select_rule_sql
               filter_uuid
+            |> CCString.replace ~sub:"?" ~by:"$1"
             |> Kind.t ->* Rule.t
           in
           Database.collect ?ctx request kind

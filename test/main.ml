@@ -529,6 +529,24 @@ module Tests (Backend : Guard.PersistenceSig) = struct
           (Ok [ thomas_chris_post_id ])
   ;;
 
+  let test_specific_role ?ctx (_ : 'a) () =
+    (let* (_ : Backend.kind Guard.Target.t) =
+       Post.to_authorizable ?ctx thomas_aron_post
+     in
+     let* ben_authorizable = User.to_authorizable ?ctx ben in
+     let* _thomas_post' =
+       Post.update_post_as_specific_role
+         ?ctx
+         ben_authorizable
+         thomas_aron_post
+         "Update the post comment"
+     in
+     Lwt.return_ok true)
+    >|= Alcotest.(check (result bool string))
+          "User with specific role can update any post."
+          (Ok true)
+  ;;
+
   (** IMPORTANT: the following tests should not compile! *)
   (* let hacker_cannot_update_article ?ctx (_:'a) () = let () = print_endline
      "about\n to run a test" in let%lwt ben = Hacker.to_authorizable ?ctx ben |>
@@ -637,6 +655,12 @@ let () =
             "transistency"
             `Quick
             (T.roles_exist_for_type ?ctx)
+        ] )
+    ; ( Format.asprintf "(%s) Validate testing against specific role." name
+      , [ Alcotest_lwt.test_case
+            "allow specific role to update posts"
+            `Quick
+            (T.test_specific_role ?ctx)
         ] )
     ]
   in
