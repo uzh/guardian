@@ -183,31 +183,49 @@ struct
           %> Lwt.map Guard.RoleSet.of_list
         ;;
 
-        let find_actors_by_role_request =
-          {sql|
-            SELECT guardianDecodeUuid(roles.actor_uuid)
-            FROM guardian_actor_roles AS roles
-            WHERE roles.role = ?
-          |sql}
+        let exclude_sql exclude =
+          if CCList.is_empty exclude
+          then ""
+          else
+            Format.asprintf
+              {sql|AND roles.role NOT IN (%s)|sql}
+              (CCString.concat ", " (CCList.map Role.show exclude))
+        ;;
+
+        let find_actors_by_role_request ?(exclude = []) () =
+          Format.asprintf
+            {sql|
+              SELECT guardianDecodeUuid(roles.actor_uuid)
+              FROM guardian_actor_roles AS roles
+              WHERE roles.role = ?
+                %s
+            |sql}
+            (exclude_sql exclude)
           |> Role.t ->* Uuid.Actor.t
         ;;
 
-        let find_actors_by_role ?ctx =
-          Database.collect ?ctx find_actors_by_role_request
+        let find_actors_by_role ?ctx ?exclude =
+          Database.collect ?ctx (find_actors_by_role_request ?exclude ())
         ;;
 
-        let find_actors_by_roles_request =
-          {sql|
-            SELECT roles.role, guardianDecodeUuid(roles.actor_uuid)
-            FROM guardian_actor_roles AS roles
-            WHERE roles.role IN (?)
-          |sql}
+        let find_actors_by_roles_request ?(exclude = []) () =
+          Format.asprintf
+            {sql|
+              SELECT roles.role, guardianDecodeUuid(roles.actor_uuid)
+              FROM guardian_actor_roles AS roles
+              WHERE roles.role IN (?)
+                %s
+            |sql}
+            (exclude_sql exclude)
           |> Role.roles ->* Caqti_type.(tup2 Role.t Uuid.Actor.t)
         ;;
 
-        let find_actors_by_roles ?ctx roles =
+        let find_actors_by_roles ?ctx ?exclude roles =
           let%lwt actors =
-            Database.collect ?ctx find_actors_by_roles_request roles
+            Database.collect
+              ?ctx
+              (find_actors_by_roles_request ?exclude ())
+              roles
           in
           let tbl = Hashtbl.create (CCList.length roles) in
           CCList.iter

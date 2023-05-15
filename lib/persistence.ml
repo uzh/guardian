@@ -40,10 +40,16 @@ module type Backend = sig
         -> ('kind actor, string) monad
 
       val find_roles : ?ctx:context -> Uuid.Actor.t -> role_set Lwt.t
-      val find_by_role : ?ctx:context -> roles -> Uuid.Actor.t list Lwt.t
+
+      val find_by_role
+        :  ?ctx:context
+        -> ?exclude:roles list
+        -> roles
+        -> Uuid.Actor.t list Lwt.t
 
       val find_by_roles
         :  ?ctx:context
+        -> ?exclude:roles list
         -> roles list
         -> (roles * Uuid.Actor.t list) list Lwt.t
 
