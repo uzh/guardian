@@ -53,18 +53,6 @@ struct
           ~decode:(of_string %> return)
           string)
     ;;
-
-    let roles =
-      let open CCResult in
-      Caqti_type.(
-        custom
-          ~encode:
-            (CCList.map (ActorRoles.show %> Format.asprintf "'%s'")
-             %> CCString.concat ", "
-             %> return)
-          ~decode:(Error "Retreive a list of roles isn't supported" |> const)
-          string)
-    ;;
   end
 
   module Query = struct
@@ -183,21 +171,27 @@ struct
           %> Lwt.map Guard.RoleSet.of_list
         ;;
 
-        let exclude_sql exclude =
+        let create_exclude ?(dynparam = Guardian.Utils.Dynparam.empty) exclude =
+          let open Guardian.Utils.Dynparam in
           if CCList.is_empty exclude
-          then ""
-          else
-            Format.asprintf
-              {sql|AND roles.actor_uuid NOT IN (
-                SELECT exclude.actor_uuid FROM guardian_actor_roles AS exclude WHERE
-                  exclude.role IN (%s))
-              |sql}
-              (CCString.concat
-                 ", "
-                 (CCList.map (Role.show %> Format.asprintf "'%s'") exclude))
+          then dynparam, ""
+          else (
+            let arguments, params =
+              CCList.fold_left
+                (fun (args, dyn) role -> "?" :: args, dyn |> add Role.t role)
+                ([], dynparam)
+                exclude
+            in
+            ( params
+            , Format.asprintf
+                {sql|AND roles.actor_uuid NOT IN (
+                  SELECT exclude.actor_uuid FROM guardian_actor_roles AS exclude
+                  WHERE exclude.role IN (%s))
+                |sql}
+                (CCString.concat ", " arguments) ))
         ;;
 
-        let find_actors_by_role_request ?(exclude = []) () =
+        let find_actors_by_role_request ?(exclude_sql = "") params =
           Format.asprintf
             {sql|
               SELECT guardianDecodeUuid(roles.actor_uuid)
@@ -205,32 +199,47 @@ struct
               WHERE roles.role = ?
                 %s
             |sql}
-            (exclude_sql exclude)
-          |> Role.t ->* Uuid.Actor.t
+            exclude_sql
+          |> params ->* Uuid.Actor.t
         ;;
 
-        let find_actors_by_role ?ctx ?exclude =
-          Database.collect ?ctx (find_actors_by_role_request ?exclude ())
+        let find_actors_by_role ?ctx ?(exclude = []) role =
+          let open Guardian.Utils.Dynparam in
+          let dynparam = empty |> add Role.t role in
+          let Pack (pt, pv), exclude_sql = create_exclude ~dynparam exclude in
+          Database.collect ?ctx (find_actors_by_role_request ~exclude_sql pt) pv
         ;;
 
-        let find_actors_by_roles_request ?(exclude = []) () =
+        let find_actors_by_roles_request ?(exclude_sql = "") roles_args params =
           Format.asprintf
             {sql|
               SELECT roles.role, guardianDecodeUuid(roles.actor_uuid)
               FROM guardian_actor_roles AS roles
-              WHERE roles.role IN (?)
+              WHERE roles.role IN (%s)
                 %s
             |sql}
-            (exclude_sql exclude)
-          |> Role.roles ->* Caqti_type.(tup2 Role.t Uuid.Actor.t)
+            roles_args
+            exclude_sql
+          |> params ->* Caqti_type.(tup2 Role.t Uuid.Actor.t)
         ;;
 
-        let find_actors_by_roles ?ctx ?exclude roles =
+        let find_actors_by_roles ?ctx ?(exclude = []) roles =
+          let open Guardian.Utils.Dynparam in
+          let arguments, dynparam =
+            CCList.fold_left
+              (fun (args, dyn) role -> "?" :: args, dyn |> add Role.t role)
+              ([], empty)
+              roles
+          in
+          let Pack (pt, pv), exclude_sql = create_exclude ~dynparam exclude in
           let%lwt actors =
             Database.collect
               ?ctx
-              (find_actors_by_roles_request ?exclude ())
-              roles
+              (find_actors_by_roles_request
+                 ~exclude_sql
+                 (CCString.concat ", " arguments)
+                 pt)
+              pv
           in
           let tbl = Hashtbl.create (CCList.length roles) in
           CCList.iter

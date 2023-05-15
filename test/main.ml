@@ -561,6 +561,20 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     |> Lwt.return
   ;;
 
+  let test_find_by_roles ?ctx (_ : 'a) () =
+    let sort = CCList.stable_sort Guard.Uuid.Actor.compare in
+    let%lwt roles =
+      Backend.Actor.find_by_roles ?ctx [ `Admin; `Hacker ]
+      |> Lwt.map CCFun.(CCList.(map snd %> flatten))
+    in
+    let expect = [ snd aron; snd ben ] in
+    Alcotest.(check (list testable_actor_uuid))
+      "return correct list of actor uuid by roles."
+      (expect |> sort)
+      (roles |> sort)
+    |> Lwt.return
+  ;;
+
   (** IMPORTANT: the following tests should not compile! *)
   (* let hacker_cannot_update_article ?ctx (_:'a) () = let () = print_endline
      "about\n to run a test" in let%lwt ben = Hacker.to_authorizable ?ctx ben |>
@@ -677,10 +691,8 @@ let () =
             (T.test_specific_role ?ctx)
         ] )
     ; ( Format.asprintf "(%s) Find all actors of a specific role" name
-      , [ Alcotest_lwt.test_case
-            "find all actors of a specific role"
-            `Quick
-            (T.test_find_by_role ?ctx)
+      , [ Alcotest_lwt.test_case "role" `Quick (T.test_find_by_role ?ctx)
+        ; Alcotest_lwt.test_case "roles" `Quick (T.test_find_by_roles ?ctx)
         ] )
     ]
   in

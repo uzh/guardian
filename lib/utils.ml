@@ -27,3 +27,10 @@ let failwith_invalid_role ?(msg_prefix = "Invalid role") =
   %> Format.asprintf "%s: %s" msg_prefix
   %> failwith
 ;;
+
+module Dynparam = struct
+  type t = Pack : 'a Caqti_type.t * 'a -> t
+
+  let empty = Pack (Caqti_type.unit, ())
+  let add t x (Pack (t', x')) = Pack (Caqti_type.tup2 t' t, (x', x))
+end
