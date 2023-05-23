@@ -99,6 +99,25 @@ module Make (Config : ConfigSig) = struct
       database_url |> connect_or_failwith ?pool_size (Hashtbl.add pools name)
   ;;
 
+  let drop_pool name =
+    let tags = LogTag.create name in
+    match Config.database, Hashtbl.find_opt pools name with
+    | SinglePool _, _ ->
+      failwith "SinglePool is selected: Switch to 'MultiPools' first"
+    | MultiPools _, None ->
+      let msg =
+        Format.asprintf
+          "Failed to drop pool: connection to '%s' doesn't exist"
+          name
+      in
+      Logs.warn ~src (fun m -> m ~tags "%s" msg);
+      Lwt.return_unit
+    | MultiPools _, Some connection ->
+      let () = Hashtbl.remove pools name in
+      let%lwt () = Caqti_lwt.Pool.drain connection in
+      Lwt.return_unit
+  ;;
+
   let initialize () =
     match Config.database with
     | SinglePool database_url when CCOption.is_none !main_pool_ref ->
