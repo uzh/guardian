@@ -368,10 +368,10 @@ struct
             {sql|
               DELETE FROM guardian_rules
               WHERE actor_role = ?
-                AND actor_uuid = guardianEncodeUuid(?)
+                AND COALESCE(actor_uuid = guardianEncodeUuid(?), actor_uuid IS NULL)
                 AND act = ?
                 AND target_role = ?
-                AND target_uuid = guardianEncodeUuid(?)
+                AND COALESCE(target_uuid = guardianEncodeUuid(?), target_uuid IS NULL)
             |sql}
           in
           act_on_rule ?ctx query rule
