@@ -94,6 +94,21 @@ struct
     ;;
   end
 
+  module DBCache = struct
+    open CCCache
+
+    let equal_validate (c1, any1, a1, e1) (c2, any2, a2, e2) =
+      let ctx = [%show: (string * string) list] in
+      CCOption.equal (fun a b -> CCString.equal (ctx a) (ctx b)) c1 c2
+      && CCOption.equal CCBool.equal any1 any2
+      && Uuid.Actor.equal a1 a2
+      && Guard.Effect.equal e1 e2
+    ;;
+
+    let lru_validate = lru ~eq:equal_validate 2048
+    let clear () = clear lru_validate
+  end
+
   include Guard.MakePersistence (struct
     type 'a actor = 'a Guard.Actor.t
     type 'b target = 'b Guard.Target.t
@@ -110,6 +125,8 @@ struct
     type ('rv, 'err) monad = ('rv, 'err) Lwt_result.t
 
     module Repo = struct
+      let clear_cache = DBCache.clear
+
       let define_encode_uuid =
         let function_name = "guardianEncodeUuid" in
         ( function_name
@@ -155,7 +172,10 @@ struct
           |> Caqti_type.(tup2 Uuid.Actor.t Role.t ->. unit)
         ;;
 
-        let upsert ?ctx = Database.exec ?ctx upsert_request
+        let upsert ?ctx =
+          let () = clear_cache () in
+          Database.exec ?ctx upsert_request
+        ;;
 
         let find_by_actor_request =
           {sql|
@@ -262,7 +282,10 @@ struct
           |> Caqti_type.(tup2 Uuid.Actor.t Role.t ->. unit)
         ;;
 
-        let delete ?ctx = Database.exec ?ctx delete_request
+        let delete ?ctx =
+          let () = clear_cache () in
+          Database.exec ?ctx delete_request
+        ;;
       end
 
       module Rule = struct
@@ -348,6 +371,7 @@ struct
         ;;
 
         let act_on_rule ?ctx query rule =
+          let () = clear_cache () in
           let query = Caqti_type.(t ->. unit) query in
           Database.exec ?ctx query rule |> Lwt_result.ok
         ;;
@@ -433,12 +457,14 @@ struct
         let find_by_roles = Roles.find_actors_by_roles
 
         let grant_roles ?ctx id =
+          let () = clear_cache () in
           Guard.RoleSet.to_list
           %> Lwt_list.iter_s (fun role -> Roles.upsert ?ctx (id, role))
           %> Lwt_result.ok
         ;;
 
         let revoke_roles ?ctx id =
+          let () = clear_cache () in
           (* TODO: only mark as deleted *)
           Guard.RoleSet.to_list
           %> Lwt_list.iter_s (fun role -> Roles.delete ?ctx (id, role))
@@ -459,6 +485,7 @@ struct
         ;;
 
         let save_owner ?ctx ?owner id =
+          let () = clear_cache () in
           let caqti =
             Caqti_type.(tup2 (option Owner.t) Uuid.Actor.t ->. unit)
               {sql|
@@ -528,6 +555,7 @@ struct
         let find_owner ?ctx typ = find_owner_base ?ctx typ %> Lwt_result.ok
 
         let save_owner ?ctx ?owner id =
+          let () = clear_cache () in
           let caqti =
             {sql|
               UPDATE guardian_targets
@@ -765,6 +793,92 @@ struct
         | Id (kind, id) ->
           let%lwt relations = Relation.find_rec ?ctx kind in
           Database.collect ?ctx (find_rules_of_spec_request relations) (kind, id)
+      ;;
+
+      (** [validate] validates a specific effect *)
+      let validate_specific ?ctx ?(any_id = false) actor_id (action, spec) =
+        let open Lwt.Infix in
+        let open Guard.TargetSpec in
+        let request_sql filter_uuid =
+          Format.asprintf
+            {sql|
+              %s
+              SELECT TRUE
+              FROM guardian_rules AS rules
+              LEFT JOIN cte_relations AS rel ON rules.target_role = rel.origin OR rules.target_role = rel.target
+              LEFT JOIN guardian_actor_roles AS roles ON roles.`role` = rules.actor_role
+              LEFT JOIN guardian_targets AS target ON rules.target_uuid = target.uuid
+              LEFT JOIN guardian_actors AS actor ON roles.actor_uuid = actor.`uuid`
+              WHERE rules.target_role = $3 %s
+                AND (
+                  target.owner = guardianEncodeUuid($1) OR
+                  (act IN ($2, 'manage') AND actor.`uuid` = guardianEncodeUuid($1))
+                )
+              LIMIT 1
+            |sql}
+            (cte_relations_sql |> CCString.replace ~sub:"?" ~by:"$3")
+            filter_uuid
+        in
+        match spec with
+        | (Entity kind | Id (kind, _)) when any_id ->
+          let request =
+            request_sql ""
+            |> Caqti_type.(tup3 Uuid.Actor.t Action.t Kind.t ->? bool)
+          in
+          Database.find_opt ?ctx request (actor_id, action, kind)
+          >|= CCOption.value ~default:false
+        | Entity kind ->
+          let request =
+            request_sql {sql| AND rules.target_uuid IS NULL |sql}
+            |> Caqti_type.(tup3 Uuid.Actor.t Action.t Kind.t ->? bool)
+          in
+          Database.find_opt ?ctx request (actor_id, action, kind)
+          >|= CCOption.value ~default:false
+        | Id (_, id)
+          when Uuid.Target.to_bytes id
+               |> Uuid.Actor.of_bytes
+               |> CCOption.map_or ~default:false (actor_id |> Uuid.Actor.equal)
+          -> Lwt.return_true
+        | Id (kind, id) ->
+          let request =
+            {sql| AND ( target_uuid = guardianEncodeUuid($4) or target_uuid IS NULL) |sql}
+            |> request_sql
+            |> Caqti_type.(
+                 tup4 Uuid.Actor.t Action.t Kind.t Uuid.Target.t ->? bool)
+          in
+          Database.find_opt ?ctx request (actor_id, action, kind, id)
+          >|= CCOption.value ~default:false
+      ;;
+
+      (** [validate] validates an effect with its parent effects *)
+      let validate' ?ctx ?any_id actor_id (effect : Guard.Effect.t) =
+        let%lwt parents = Relation.find_effects_rec ?ctx effect in
+        Lwt_list.fold_left_s
+          (fun init effect ->
+            if init
+            then Lwt.return_true
+            else validate_specific ?ctx ?any_id actor_id effect)
+          false
+          (effect :: parents)
+      ;;
+
+      let validate ?ctx ?any_id actor (effect : Guard.Effect.t) =
+        let actor_id = Guard.Actor.id actor in
+        let cb ~in_cache _ _ =
+          if in_cache
+          then
+            Logs.debug (fun m ->
+              m
+                "Found in cache: Actor %s\nEffect %s"
+                (actor |> Guard.Actor.id |> Uuid.Actor.to_string)
+                ([%show: Guard.Effect.t] effect))
+          else ()
+        in
+        let cached_validate (ctx, any_id, actor_id, effect) =
+          validate' ?ctx ?any_id actor_id effect
+        in
+        (ctx, any_id, actor_id, effect)
+        |> CCCache.(with_cache ~cb DBCache.lru_validate cached_validate)
       ;;
 
       (** [define_validate_function] defines a 'validate<TargetRole>Uuid'

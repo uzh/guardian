@@ -251,12 +251,13 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
           && TargetRoles.equal t1 t2
         ;;
 
-        let lru
-          : ( context option * kind * kind
-          , (Query.t option, string) Lwt_result.t ) t
+        let lru_relation
+          : (context option * kind * kind, (query option, string) monad) t
           =
           lru ~eq:equal_relation 2048
         ;;
+
+        let clear () = clear lru_relation
       end
 
       let add
@@ -297,7 +298,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
         let find' (context, origin, target) =
           Repo.Relation.find_query ?ctx:context origin target
         in
-        CCCache.with_cache Cache.lru find' (ctx, origin, target)
+        CCCache.with_cache Cache.lru_relation find' (ctx, origin, target)
       ;;
 
       let find ?ctx ?default ~target origin =
@@ -314,7 +315,6 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
       ;;
 
       let find_rec = Repo.Relation.find_rec
-      let find_effects_rec = Repo.Relation.find_effects_rec
     end
 
     module Utils = struct
@@ -336,6 +336,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
     end
 
     module Rule = struct
+      include Rule
       include Repo.Rule
 
       (** [save_all ?ctx rules] adds all the permissions [rules] to the backend.
@@ -460,13 +461,11 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
           Lwt.return_ok entity
      ;;
 
-      (** [find_checker] find checker function for a specific target spec *)
-      let find_checker ?ctx ?any_id spec
-        : ('a actor -> Action.t -> bool, 'b) result Lwt.t
-        =
+      (** [generate_checker] generate checker function for a specific target
+          spec with the provided rules*)
+      let generate_checker ?ctx rules =
         let open Lwt_result.Syntax in
-        let%lwt rules = Repo.find_rules_of_spec ?ctx ?any_id spec in
-        match spec with
+        function
         | TargetSpec.Entity _ -> Lwt.return_ok @@ Utils.exists_in rules
         | TargetSpec.Id (kind, id) ->
           let* { Target.uuid; owner; _ } = find ?ctx kind id in
@@ -487,40 +486,13 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
           then true
           else Utils.exists_in rules actor action
       ;;
-    end
 
-    (** [expand_set] For transitional effects, uses the registered dependencies
-        to look for the parent object. Update and return the passed
-        [validation_set] *)
-    let expand_set ?ctx (validation_set : ValidationSet.t)
-      : ValidationSet.t Lwt.t
-      =
-      let open Lwt.Infix in
-      let rec expand set : validation_set Lwt.t =
-        let open ValidationSet in
-        let find_all = Lwt_list.map_s expand in
-        match set with
-        | One effect ->
-          Relation.find_effects_rec ?ctx effect
-          >|= (function
-          | [] ->
-            Logs.debug ~src (fun m ->
-              m "Expand: %s (No parents) " ([%show: Effect.t] effect));
-            One effect
-          | parent_effects ->
-            Logs.debug ~src (fun m ->
-              m
-                "Expand: %s with parent %s "
-                ([%show: Effect.t] effect)
-                ([%show: Effect.t list] parent_effects));
-            One effect :: CCList.map one parent_effects |> or_)
-        | Or effects -> effects |> find_all >|= or_
-        | And effects -> effects |> find_all >|= and_
-        | SpecificRole role -> SpecificRole role |> Lwt.return
-        | NotRole role -> NotRole role |> Lwt.return
-      in
-      validation_set |> expand
-    ;;
+      (** [find_checker] find checker function for a specific target spec *)
+      let find_checker ?ctx ?any_id spec =
+        let%lwt rules = Repo.find_rules_of_spec ?ctx ?any_id spec in
+        generate_checker ?ctx rules spec
+      ;;
+    end
 
     (** [validate ?ctx error validation_set actor] checks permissions and
         gracefully reports authorization errors.
@@ -539,7 +511,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
       ?any_id
       (error : string -> 'etyp)
       (validation_set : ValidationSet.t)
-      (actor : 'a actor)
+      actor
       : (unit, 'etyp) Lwt_result.t
       =
       let open Lwt_result.Infix in
@@ -547,20 +519,8 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
       let map_error = Lwt_result.map_error error in
       let rec find_checker =
         let open ValidationSet in
-        let find ((action, spec) as effect : Action.t * TargetSpec.t) =
-          let log_debug valid =
-            Logs.debug ~src (fun m ->
-              m
-                "Validated: %s (%s)"
-                (string_of_bool valid)
-                ([%show: Effect.t] effect))
-          in
-          Target.find_checker ?ctx ?any_id spec
-          >|= (fun checker_fcn -> checker_fcn actor action)
-          >|= tap log_debug
-        in
         function
-        | One effect -> find effect
+        | One effect -> Repo.validate ?ctx ?any_id actor effect |> Lwt_result.ok
         | SpecificRole role ->
           Actor.find_roles ?ctx (Actor.id actor)
           |> Lwt_result.ok
@@ -597,16 +557,11 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
         | false ->
           Error
             (Format.asprintf
-               "Entity %s: Permission denied for %s"
+               "Actor %s: Permission denied for %s"
                ([%show: Actor.t] actor)
                ([%show: ValidationSet.t] validation_set))
       in
-      validation_set
-      |> expand_set ?ctx
-      |> Lwt_result.ok
-      >>= find_checker
-      >>> validate
-      |> map_error
+      validation_set |> find_checker >>> validate |> map_error
     ;;
 
     (** [wrap_function ?ctx error validation_set f] produces a wrapped version
@@ -628,6 +583,11 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
       Lwt.return_ok (fun actor param ->
         let* () = can actor in
         fcn param)
+    ;;
+
+    let clear_cache () =
+      let () = Relation.Cache.clear () in
+      Repo.clear_cache ()
     ;;
   end
 end

@@ -142,6 +142,15 @@ module type Backend = sig
       -> Action.t
       -> 'a actor
       -> Uuid.Target.t list Lwt.t
+
+    val validate
+      :  ?ctx:context
+      -> ?any_id:bool
+      -> 'a actor
+      -> effect
+      -> bool Lwt.t
+
+    val clear_cache : unit -> unit
   end
 
   val start : ?ctx:context -> unit -> unit Lwt.t
@@ -153,6 +162,8 @@ end
 
 module type Contract = sig
   include Backend
+
+  val clear_cache : unit -> unit
 
   module Relation : sig
     val add
@@ -242,7 +253,7 @@ module type Contract = sig
       :  ?ctx:context
       -> ?any_id:bool
       -> target_spec
-      -> ('a actor -> Action.t -> bool, query) result Lwt.t
+      -> ('a actor -> Action.t -> bool, string) result Lwt.t
   end
 
   val wrap_function
