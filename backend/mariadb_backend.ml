@@ -105,7 +105,7 @@ struct
       && Guard.Effect.equal e1 e2
     ;;
 
-    let lru_validate = lru ~eq:equal_validate 2048
+    let lru_validate = lru ~eq:equal_validate 16384
     let clear () = clear lru_validate
   end
 
