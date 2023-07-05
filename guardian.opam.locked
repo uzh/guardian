@@ -1,5 +1,5 @@
 opam-version: "2.0"
-version: "0.1.1"
+version: "0.2.0"
 synopsis: "Role-based access control for OCaml"
 description:
   "Defined actors can access targets according to specified rules (allowed actions: CRUD)."
@@ -17,7 +17,7 @@ depends: [
   "base-threads" {= "base"}
   "base-unix" {= "base"}
   "bigarray-compat" {= "1.1.0"}
-  "bigstringaf" {= "0.9.0"}
+  "bigstringaf" {= "0.9.1"}
   "caqti" {= "1.9.0"}
   "caqti-driver-mariadb" {= "1.9.0"}
   "caqti-lwt" {= "1.9.0"}
@@ -25,12 +25,13 @@ depends: [
   "conf-gcc" {= "1.0"}
   "conf-mariadb" {= "2"}
   "conf-pkg-config" {= "2"}
-  "containers" {= "3.11"}
+  "containers" {= "3.12"}
+  "containers-data" {= "3.12"}
   "cppo" {= "1.6.9"}
-  "csexp" {= "1.5.1"}
-  "ctypes" {= "0.20.1"}
-  "dune" {= "3.7.0"}
-  "dune-configurator" {= "3.7.0"}
+  "csexp" {= "1.5.2"}
+  "ctypes" {= "0.20.2"}
+  "dune" {= "3.9.0"}
+  "dune-configurator" {= "3.9.0"}
   "either" {= "1.0.0"}
   "fmt" {= "0.9.0"}
   "integers" {= "0.7.0"}
@@ -47,7 +48,7 @@ depends: [
   "ppx_derivers" {= "1.2.1"}
   "ppx_deriving" {= "5.2.1"}
   "ppx_deriving_yojson" {= "3.7.0"}
-  "ppxlib" {= "0.29.1"}
+  "ppxlib" {= "0.30.0"}
   "ptime" {= "1.1.0"}
   "result" {= "1.5"}
   "seq" {= "base"}
@@ -56,7 +57,7 @@ depends: [
   "stringext" {= "1.6.0"}
   "topkg" {= "1.0.7"}
   "uri" {= "4.2.0"}
-  "yojson" {= "2.0.2"}
+  "yojson" {= "2.1.0"}
 ]
 build: [
   ["dune" "subst"] {dev}
