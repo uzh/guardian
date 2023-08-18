@@ -29,15 +29,11 @@ module Utils : sig
   val deny_message_model : Uuid.Actor.t -> Permission.t -> string -> string
 end
 
-module Contract : sig
-  module Uuid = Uuid
-end
-
 module Make : functor
-  (ActorModel : RoleSig)
-  (Role : RoleSig)
-  (TargetModel : RoleSig)
-  -> sig
+    (ActorModel : RoleSig)
+    (Role : RoleSig)
+    (TargetModel : RoleSig)
+    -> sig
   module Uuid = Uuid
   module Permission = Permission
 
@@ -52,6 +48,8 @@ module Make : functor
     val compare : t -> t -> int
     val to_yojson : t -> Yojson.Safe.t
     val of_yojson : Yojson.Safe.t -> t Ppx_deriving_yojson_runtime.error_or
+    val model : TargetModel.t -> t
+    val id : Uuid.Target.t -> t
   end
 
   module Actor : sig
@@ -177,16 +175,16 @@ module Make : functor
        and type validation_set = ValidationSet.t
 
   module MakePersistence : functor
-    (Backend : Persistence.Backend
-                 with type actor = Actor.t
-                  and type actor_model = ActorModel.t
-                  and type actor_permission = ActorPermission.t
-                  and type actor_role = ActorRole.t
-                  and type role = Role.t
-                  and type role_permission = RolePermission.t
-                  and type target = Target.t
-                  and type target_entity = TargetEntity.t
-                  and type target_model = TargetModel.t
-                  and type validation_set = ValidationSet.t)
-    -> PersistenceSig
+      (Backend : Persistence.Backend
+                   with type actor = Actor.t
+                    and type actor_model = ActorModel.t
+                    and type actor_permission = ActorPermission.t
+                    and type actor_role = ActorRole.t
+                    and type role = Role.t
+                    and type role_permission = RolePermission.t
+                    and type target = Target.t
+                    and type target_entity = TargetEntity.t
+                    and type target_model = TargetModel.t
+                    and type validation_set = ValidationSet.t)
+      -> PersistenceSig
 end [@warning "-67"]

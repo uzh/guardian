@@ -14,6 +14,9 @@ struct
       | Model of TargetModel.t
       | Id of Uuid.Target.t
     [@@deriving eq, show, ord, yojson]
+
+    let model m = Model m
+    let id uuid = Id uuid
   end
 
   module Actor = struct
@@ -174,9 +177,9 @@ struct
           the authorizable's roles and ownership * are consistent in both
           spaces. *)
       let decorate ?ctx (to_actor : 'a -> actor)
-          : 'a -> (actor, string) Lwt_result.t
+        : 'a -> (actor, string) Lwt_result.t
         =
-       fun x ->
+        fun x ->
         let open Lwt_result.Syntax in
         let ({ Actor.uuid; _ } as entity : actor) = to_actor x in
         let* mem = mem ?ctx uuid in
@@ -185,7 +188,7 @@ struct
         else
           let* () = insert ?ctx entity in
           Lwt.return_ok entity
-     ;;
+      ;;
     end
 
     module ActorRole = struct
@@ -203,9 +206,9 @@ struct
           the authorizable's roles and ownership * are consistent in both
           spaces. *)
       let decorate ?ctx (to_target : 'a -> target)
-          : 'a -> (target, string) Lwt_result.t
+        : 'a -> (target, string) Lwt_result.t
         =
-       fun x ->
+        fun x ->
         let open Lwt_result.Syntax in
         let ({ Target.uuid; _ } as entity : target) = to_target x in
         let* mem = mem ?ctx uuid in
@@ -214,7 +217,7 @@ struct
         else
           let* () = insert ?ctx entity in
           Lwt.return_ok entity
-     ;;
+      ;;
     end
 
     (** [validate ?ctx error validation_set actor] checks permissions and
@@ -230,12 +233,12 @@ struct
 
         [actor] actor object who'd like to perform the action *)
     let validate
-        ?ctx
-        ?any_id
-        (error : string -> 'etyp)
-        (validation_set : ValidationSet.t)
-        actor
-        : (unit, 'etyp) Lwt_result.t
+      ?ctx
+      ?any_id
+      (error : string -> 'etyp)
+      (validation_set : ValidationSet.t)
+      actor
+      : (unit, 'etyp) Lwt_result.t
       =
       let open CCFun in
       let ( |>> ) = flip Lwt.map in
@@ -248,24 +251,24 @@ struct
           Repo.validate ?ctx ?any_id ~model permission actor
         | Or (rule :: rules) ->
           (match%lwt find_checker rule with
-          | true -> Lwt.return_true
-          | false ->
-            Lwt_list.fold_left_s
-              (flip (fun rule -> function
-                 | true -> Lwt.return_true
-                 | false -> find_checker rule))
-              false
-              rules)
+           | true -> Lwt.return_true
+           | false ->
+             Lwt_list.fold_left_s
+               (flip (fun rule -> function
+                  | true -> Lwt.return_true
+                  | false -> find_checker rule))
+               false
+               rules)
         | And (rule :: rules) ->
           (match%lwt find_checker rule with
-          | false -> Lwt.return_false
-          | true ->
-            Lwt_list.fold_left_s
-              (flip (fun rule -> function
-                 | true -> find_checker rule
-                 | false -> Lwt.return_false))
-              true
-              rules)
+           | false -> Lwt.return_false
+           | true ->
+             Lwt_list.fold_left_s
+               (flip (fun rule -> function
+                  | true -> find_checker rule
+                  | false -> Lwt.return_false))
+               true
+               rules)
         | Or [] | And [] -> Lwt.return_true
       in
       let validate = function
@@ -289,16 +292,16 @@ struct
 
         [validation_set] effect set to check the permissions against *)
     let wrap_function
-        ?ctx
-        (error : string -> 'etyp)
-        (validation_set : ValidationSet.t)
-        (fcn : 'param -> ('rval, 'etyp) Lwt_result.t)
+      ?ctx
+      (error : string -> 'etyp)
+      (validation_set : ValidationSet.t)
+      (fcn : 'param -> ('rval, 'etyp) Lwt_result.t)
       =
       let open Lwt_result.Syntax in
       let can = validate ?ctx error validation_set in
       Lwt.return_ok (fun actor param ->
-          let* () = can actor in
-          fcn param)
+        let* () = can actor in
+        fcn param)
     ;;
   end
 end
