@@ -16,12 +16,16 @@ module Make (Backend : Guard.PersistenceSig) = struct
     { id; title; content; author }
   ;;
 
-  let to_authorizable ?ctx =
-    Backend.Target.decorate ?ctx (fun t ->
-      Target.make ~owner:(snd t.author) `Article t.id)
+  let to_authorizable ?ctx { id; author; _ } =
+    let%lwt auth = Backend.Target.decorate ?ctx (Target.create `Article) id in
+    let%lwt () =
+      Guard.ActorRole.create ~target_uuid:id (snd author) `Author
+      |> Backend.ActorRole.upsert ?ctx
+    in
+    Lwt.return auth
   ;;
 
-  let update_title ?ctx (actor : [ `User ] Actor.t) t new_title =
+  let update_title ?ctx (actor : Actor.t) t new_title =
     let open Lwt_result.Syntax in
     let f new_title =
       let () = t.title <- new_title in
@@ -31,45 +35,35 @@ module Make (Backend : Guard.PersistenceSig) = struct
       Backend.wrap_function
         ?ctx
         CCFun.id
-        ValidationSet.(One (Action.Update, TargetSpec.Id (`Article, t.id)))
+        ValidationSet.(One (Permission.Update, TargetEntity.Id t.id))
         f
     in
     wrapped actor new_title
   ;;
 
-  let update_title_by_role ?ctx (actor : [ `User ] Actor.t) t new_title =
+  let update_author
+      ?ctx
+      (actor : Actor.t)
+      ({ id; _ } as article)
+      old_author
+      new_author
+    =
     let open Lwt_result.Syntax in
-    let f new_title =
-      let () = t.title <- new_title in
-      Lwt.return_ok t
-    in
-    let* wrapped =
-      Backend.wrap_function
-        ?ctx
-        CCFun.id
-        ValidationSet.(SpecificRole (`Editor t.id))
-        f
-    in
-    wrapped actor new_title
-  ;;
-
-  let update_author ?ctx (actor : [ `User ] Actor.t) t new_author =
-    let open Lwt_result.Syntax in
-    let f new_author =
-      let () = t.author <- new_author in
-      let* ent = to_authorizable ?ctx t in
-      let* () =
-        Backend.Target.save_owner ?ctx ~owner:(snd new_author) (ent |> Target.id)
+    let fcn (old_author, new_author) =
+      let create_role author =
+        Guard.ActorRole.create ~target_uuid:id (snd author) `Author
       in
-      Lwt.return_ok t
+      let%lwt () = create_role old_author |> Backend.ActorRole.delete ?ctx in
+      let%lwt () = create_role new_author |> Backend.ActorRole.upsert ?ctx in
+      Lwt.return_ok article
     in
     let* wrapped =
       Backend.wrap_function
         ?ctx
         CCFun.id
-        ValidationSet.(One (Action.Manage, TargetSpec.Id (`Article, t.id)))
-        f
+        ValidationSet.(One (Permission.Manage, TargetEntity.Id id))
+        fcn
     in
-    wrapped actor new_author
+    wrapped actor (old_author, new_author)
   ;;
 end

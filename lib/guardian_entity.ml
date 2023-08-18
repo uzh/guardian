@@ -1,107 +1,59 @@
-open CCFun
-
 let src = Logs.Src.create "guardian"
 
 type context = Persistence.context
 
 module type RoleSig = Role.Sig
 
-module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
+module Make (ActorModel : RoleSig) (Role : RoleSig) (TargetModel : RoleSig) =
+struct
   module Uuid = Uuid
-  module Action = Action
-  module RoleSet = Role_set.Make (ActorRoles)
-  module ActorSpec = Spec.Make (ActorRoles) (Uuid.Actor)
-  module TargetSpec = Spec.Make (TargetRoles) (Uuid.Target)
+  module Permission = Permission
 
-  module Rule = struct
-    module Core = struct
-      type t = ActorSpec.t * Action.t * TargetSpec.t
-      [@@deriving eq, show, ord, yojson]
-    end
-
-    module Set = CCSet.Make (Core)
-    include Core
-  end
-
-  module Effect = struct
-    (** [action, target] Denotes an effect a function may have on and therefore
-        which permissions an actor needs to invoke it. *)
-
-    type t = Action.t * TargetSpec.t [@@deriving eq, show, ord, yojson]
-
-    let create action target_spec = action, target_spec
-
-    let is_valid ((t_action, t_spec) : t) ((action, spec) : t) =
-      Action.is_valid ~matches:t_action action
-      && TargetSpec.is_valid t_spec spec
-    ;;
-  end
-
-  module ValidationSet = struct
+  module TargetEntity = struct
     type t =
-      | And of t list
-      | Or of t list
-      | One of Effect.t
-      | SpecificRole of ActorRoles.t
-      | NotRole of ActorRoles.t
+      | Model of TargetModel.t
+      | Id of Uuid.Target.t
     [@@deriving eq, show, ord, yojson]
-
-    let and_ m = And m
-    let or_ m = Or m
-    let one m = One m
-    let specific_role m = SpecificRole m
-    let not_role m = NotRole m
-    let empty = Or []
   end
 
   module Actor = struct
-    type 'a t =
+    type t =
       { uuid : Uuid.Actor.t
-      ; owner : Uuid.Actor.t option
-      ; roles : RoleSet.t
-      ; typ : 'a
+      ; model : ActorModel.t
       }
-    [@@deriving eq, ord, show, yojson]
+    [@@deriving eq, show, ord, yojson]
 
-    let id { uuid; _ } = uuid
-    let owner { owner; _ } = owner
-    let roles { roles; _ } = roles
-    let show t = show Utils.hide_typ t
-    let pp t = pp Utils.hide_typ t
-    let make ?owner roles typ uuid = { uuid; owner; roles; typ }
-
-    let a_owns_b a b =
-      CCOption.map_or ~default:false (fun b' -> a.uuid = b') b.owner
-    ;;
-
-    let has_role { roles; _ } = flip RoleSet.mem roles
+    let create model uuid = { uuid; model }
   end
 
   module type ActorSig = sig
     type t
 
     (** [to_authorizable x] converts [x] to a uniquely identifiable object,
-        complete * with roles. The [authorizable] may not, however, be converted
-        back into type [t]. **)
-    val to_authorizable
-      :  ?ctx:context
-      -> t
-      -> (ActorRoles.t Actor.t, string) Lwt_result.t
+        complete * with roles. The [authorizable] can't be converted back into
+        type [t]. **)
+    val to_authorizable : ?ctx:context -> t -> (Actor.t, string) Lwt_result.t
+  end
+
+  module ActorRole = struct
+    type t =
+      { actor_uuid : Uuid.Actor.t
+      ; role : Role.t
+      ; target_uuid : Uuid.Target.t option
+      }
+    [@@deriving eq, show, ord, yojson]
+
+    let create ?target_uuid actor_uuid role = { actor_uuid; role; target_uuid }
   end
 
   module Target = struct
-    type 'a t =
+    type t =
       { uuid : Uuid.Target.t
-      ; owner : Uuid.Actor.t option
-      ; typ : 'a
+      ; model : TargetModel.t
       }
-    [@@deriving eq, ord, show, yojson]
+    [@@deriving eq, show, ord, yojson]
 
-    let id { uuid; _ } = uuid
-    let owner { owner; _ } = owner
-    let show t = show Utils.hide_typ t
-    let pp t = pp Utils.hide_typ t
-    let make ?owner typ uuid = { uuid; owner; typ }
+    let create model uuid = { uuid; model }
   end
 
   module type TargetSig = sig
@@ -110,312 +62,135 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
     (** [to_authorizable x] converts [x] to a uniquely identifiable object,
         complete * with roles. The [authorizable] may not, however, be converted
         back into type [t]. **)
-    val to_authorizable
-      :  ?ctx:context
-      -> t
-      -> (TargetRoles.t Target.t, string) Lwt_result.t
+    val to_authorizable : ?ctx:context -> t -> (Target.t, string) Lwt_result.t
   end
 
-  module Relation = struct
-    module Query = struct
-      type t = string [@@deriving eq, ord, show]
+  module RolePermission = struct
+    type t =
+      { role : Role.t
+      ; permission : Permission.t
+      ; model : TargetModel.t
+      }
+    [@@deriving eq, show, ord, yojson]
 
-      let create m = m
-      let of_string m = m
-      let to_string m = m
-    end
-
-    type t = TargetRoles.t * TargetRoles.t * Query.t option
-    [@@deriving eq, ord, show]
+    let create role permission model = { role; permission; model }
   end
 
-  module Authorizer = struct
-    let check_effect ?(tags : Logs.Tag.set option) all_rules actor effect =
-      let is_matched = function
-        | ActorSpec.Id (role, uuid) ->
-          uuid = actor.Actor.uuid && RoleSet.mem role actor.Actor.roles
-        | ActorSpec.Entity role -> RoleSet.mem role actor.Actor.roles
-      in
-      let rule =
-        CCList.filter
-          (fun ((actor', action, target) : Rule.t) ->
-            Effect.create action target |> Effect.is_valid effect
-            && is_matched actor')
-          all_rules
-      in
-      if CCList.is_empty rule |> not
-      then Ok ()
-      else (
-        let msg =
-          Format.asprintf
-            "Actor %s does not have permission to %s"
-            ([%show: Actor.t] actor)
-            ([%show: Effect.t] effect)
-        in
-        Logs.info ~src (fun m -> m ?tags "%s" msg);
-        Error msg)
+  module ActorPermission = struct
+    type t =
+      { actor_uuid : Uuid.Actor.t
+      ; permission : Permission.t
+      ; target : TargetEntity.t
+      }
+    [@@deriving eq, show, ord, yojson]
+
+    let create_for_model uuid permission model =
+      { actor_uuid = uuid; permission; target = TargetEntity.Model model }
     ;;
 
-    let actor_in_rule actor ((actor', _, _) : Rule.t) =
-      match actor' with
-      | ActorSpec.Id (role, uuid) ->
-        uuid = actor.Actor.uuid && RoleSet.mem role actor.Actor.roles
-      | ActorSpec.Entity role -> RoleSet.mem role actor.Actor.roles
+    let create_for_id uuid permission target_uuid =
+      { actor_uuid = uuid; permission; target = TargetEntity.Id target_uuid }
     ;;
+  end
 
-    let actor_in_rule_res actor (rule : Rule.t) =
-      let open CCResult in
-      if actor_in_rule actor rule
-      then Ok ()
-      else (
-        let msg =
-          Format.asprintf
-            "Actor %s does not have permission to %s"
-            ([%show: Actor.t] actor)
-            ([%show: Rule.t] rule)
-        in
-        Logs.info ~src (fun m -> m "%s" msg);
-        Error msg)
-    ;;
+  module ValidationSet = struct
+    type t =
+      | And of t list
+      | Or of t list
+      | One of Permission.t * TargetEntity.t
+    [@@deriving eq, show, ord, yojson]
 
-    (** [can_for_rules ?any_of rules] Convenience function to return a [can]
-        function. Takes an optional target specification (for error reporting
-        purposes) and a list of [guardian] rules of the form
-        [actor, action, target] and returns a function that looks like:
-
-        [val can : actor:\[ whatever \] Guard.Actor.t -> (unit, string) result]
-
-        [any_of]: indicates that the checker should pass if any of the rules in
-        the list is satisfied. The default behaviour is to only pass if all
-        rules are. *)
-    let can_for_rules ?(any_of = false) (rules : Rule.t list) actor =
-      let open CCResult in
-      let results = rules |> CCList.map (actor_in_rule_res actor) in
-      match any_of with
-      | true when CCList.exists (( = ) (Ok ())) results -> Ok ()
-      | true ->
-        Error
-          (Format.asprintf
-             "Actor %s does not satisfy any of the following rules: %s"
-             ([%show: Actor.t] actor)
-             ([%show: Rule.t list] rules))
-      | false ->
-        results
-        |> CCResult.flatten_l
-        |> CCResult.map (fun (_ : unit list) -> ())
-    ;;
+    let and_ m = And m
+    let or_ m = Or m
+    let one (m, k) = One (m, k)
+    let empty = Or []
   end
 
   module type PersistenceSig =
     Persistence.Contract
-      with type 'a actor = 'a Actor.t
-       and type 'b target = 'b Target.t
-       and type actor_spec = ActorSpec.t
-       and type effect = Effect.t
-       and type kind = TargetRoles.t
-       and type query = Relation.Query.t
-       and type relation = Relation.t
-       and type role_set = RoleSet.t
-       and type roles = ActorRoles.t
-       and type rule = Rule.t
-       and type target_spec = TargetSpec.t
+      with type actor = Actor.t
+       and type actor_model = ActorModel.t
+       and type actor_role = ActorRole.t
+       and type actor_permission = ActorPermission.t
+       and type role = Role.t
+       and type role_permission = RolePermission.t
+       and type target = Target.t
+       and type target_entity = TargetEntity.t
+       and type target_model = TargetModel.t
        and type validation_set = ValidationSet.t
 
   module MakePersistence
-    (Backend : Persistence.Backend
-                 with type 'a actor = 'a Actor.t
-                  and type 'b target = 'b Target.t
-                  and type actor_spec = ActorSpec.t
-                  and type effect = Effect.t
-                  and type kind = TargetRoles.t
-                  and type query = Relation.Query.t
-                  and type relation = Relation.t
-                  and type role_set = RoleSet.t
-                  and type roles = ActorRoles.t
-                  and type rule = Rule.t
-                  and type target_spec = TargetSpec.t
-                  and type validation_set = ValidationSet.t) : PersistenceSig =
-  struct
+      (Backend : Persistence.Backend
+                   with type actor = Actor.t
+                    and type actor_model = ActorModel.t
+                    and type actor_role = ActorRole.t
+                    and type actor_permission = ActorPermission.t
+                    and type role = Role.t
+                    and type role_permission = RolePermission.t
+                    and type target = Target.t
+                    and type target_entity = TargetEntity.t
+                    and type target_model = TargetModel.t
+                    and type validation_set = ValidationSet.t) :
+    PersistenceSig = struct
     include Backend
 
-    module Relation = struct
-      include Relation
+    let clear_cache () = Repo.clear_cache ()
 
-      module Cache = struct
-        open CCCache
+    module RolePermission = struct
+      include Repo.RolePermission
 
-        let equal_relation (c1, o1, t1) (c2, o2, t2) =
-          let ctx = [%show: (string * string) list] in
-          CCOption.equal (fun a b -> CCString.equal (ctx a) (ctx b)) c1 c2
-          && TargetRoles.equal o1 o2
-          && TargetRoles.equal t1 t2
-        ;;
-
-        let lru_relation
-          : (context option * kind * kind, (query option, string) monad) t
-          =
-          lru ~eq:equal_relation 2048
-        ;;
-
-        let clear () = clear lru_relation
-      end
-
-      let add
-        ?ctx
-        ?(tags : Logs.Tag.set option)
-        ?(ignore_duplicates = false)
-        ?to_target
-        ~target
-        origin
-        =
-        let%lwt found = Repo.Relation.find_query ?ctx origin target in
-        let msg =
-          Format.asprintf
-            "Found duplicate registration: (%s, %s)"
-            ([%show: TargetRoles.t] origin)
-            ([%show: TargetRoles.t] target)
-        in
-        match found, ignore_duplicates with
-        | Error _, _ -> Repo.Relation.upsert ?ctx ?query:to_target origin target
-        | Ok _, true ->
-          Logs.debug (fun m -> m ?tags "%s" msg);
-          Lwt.return_ok ()
-        | Ok _, false -> Lwt.return_error msg
-      ;;
-
-      let add_multiple ?ctx ?tags ?ignore_duplicates dependencies =
-        let open Lwt_result.Infix in
-        dependencies
-        |> Lwt_list.map_s (fun (origin, target, to_target) ->
-             add ?ctx ?tags ?ignore_duplicates ~target ?to_target origin)
-        |> Lwt.map CCResult.flatten_l
-        >|= fun (_ : unit list) -> ()
-      ;;
-
-      let find_query ?(ctx : context option) ~target origin
-        : (Query.t option, string) Lwt_result.t
-        =
-        let find' (context, origin, target) =
-          Repo.Relation.find_query ?ctx:context origin target
-        in
-        CCCache.with_cache Cache.lru_relation find' (ctx, origin, target)
-      ;;
-
-      let find ?ctx ?default ~target origin =
-        let open Lwt_result.Infix in
-        find_query ?ctx ~target origin
-        >|= fun query -> origin, target, CCOption.choice [ query; default ]
-      ;;
-
-      let find_opt ?ctx ~target origin =
-        let open Lwt.Infix in
-        find_query ?ctx ~target origin
-        >|= CCResult.map_or ~default:None (fun query ->
-              Some (origin, target, query))
-      ;;
-
-      let find_rec = Repo.Relation.find_rec
-    end
-
-    module Utils = struct
-      include Utils
-
-      let exists_in (rules : rule list) actor action =
-        CCList.exists
-          (fun (actor', action', _) ->
-            match actor' with
-            | ActorSpec.Id (role, id) ->
-              actor.Actor.uuid = id
-              && Action.is_valid ~matches:action action'
-              && RoleSet.mem role actor.Actor.roles
-            | ActorSpec.Entity role ->
-              RoleSet.mem role actor.Actor.roles
-              && Action.is_valid ~matches:action action')
-          rules
-      ;;
-    end
-
-    module Rule = struct
-      include Rule
-      include Repo.Rule
-
-      (** [save_all ?ctx rules] adds all the permissions [rules] to the backend.
-          If there is an error at any point, it returns a `result` containing
-          all of the items that were not added. *)
-      let save_all ?ctx =
+      let insert_all ?ctx =
         Lwt_list.fold_left_s
           (fun acc x ->
-            match%lwt save ?ctx x with
+            match%lwt insert ?ctx x with
             | Ok () -> CCResult.map (CCList.cons x) acc |> Lwt_result.lift
             | Error (_ : string) ->
               CCResult.map_err (CCList.cons x) acc |> Lwt_result.lift)
           (Ok [])
       ;;
+    end
 
-      let delete_exn ?ctx = Utils.with_exn delete ?ctx "delete_exn"
+    module ActorPermission = struct
+      include Repo.ActorPermission
+
+      let insert_all ?ctx =
+        Lwt_list.fold_left_s
+          (fun acc x ->
+            match%lwt insert ?ctx x with
+            | Ok () -> CCResult.map (CCList.cons x) acc |> Lwt_result.lift
+            | Error (_ : string) ->
+              CCResult.map_err (CCList.cons x) acc |> Lwt_result.lift)
+          (Ok [])
+      ;;
     end
 
     module Actor = struct
       include Actor
       include Repo.Actor
 
-      let revoke_role ?ctx id role =
-        revoke_roles ?ctx id (RoleSet.singleton role)
-      ;;
-
-      let find ?ctx (typ : 'kind) (id : Uuid.Actor.t) =
-        let open Lwt_result.Infix in
-        mem ?ctx id
-        >>= fun exists ->
-        if exists
-        then find ?ctx typ id
-        else
-          Lwt_result.fail
-            (Format.asprintf
-               "Authorizable %s doesn't exist."
-               (Uuid.Actor.to_string id))
-      ;;
-
       (** [decorate ?ctx to_actor] This convenience function should be used to
           decorate the [actor] * functions of authorizable modules. The newly
           decorated function connects * to the persistent backend to ensure that
           the authorizable's roles and ownership * are consistent in both
           spaces. *)
-      let decorate ?ctx (to_actor : 'a -> 'kind actor)
-        : 'a -> ('kind actor, string) Lwt_result.t
+      let decorate ?ctx (to_actor : 'a -> actor)
+          : 'a -> (actor, string) Lwt_result.t
         =
        fun x ->
         let open Lwt_result.Syntax in
-        let ({ Actor.uuid; owner; roles; typ } as entity : 'kind actor) =
-          to_actor x
-        in
+        let ({ Actor.uuid; _ } as entity : actor) = to_actor x in
         let* mem = mem ?ctx uuid in
         if mem
-        then
-          let* entity' = find ?ctx typ uuid in
-          let roles = RoleSet.union roles entity'.Actor.roles in
-          let* () = grant_roles ?ctx uuid roles in
-          let* owner =
-            match owner, entity'.Actor.owner with
-            | Some owner, None ->
-              let* () = save_owner ?ctx ~owner uuid in
-              Lwt.return_ok (Some owner)
-            | None, Some owner -> Lwt.return_ok (Some owner)
-            | None, None -> Lwt.return_ok None
-            | Some x, Some y when x <> y ->
-              (* Still unclear what the desirable behaviour is in this case. *)
-              (* Lwt_result.fail( "decorate: both the database and the decorated
-                 function \ returned distinct values for the owner of
-                 authorizable " ^ Uuid.to_string uuid) *)
-              let* () = save_owner ?ctx ~owner:x uuid in
-              Lwt.return_ok (Some x)
-            | Some x, Some _ (* when x = y *) -> Lwt.return_ok (Some x)
-          in
-          Lwt.return_ok { Actor.uuid; roles; owner; typ }
+        then find ?ctx uuid
         else
-          let* () = create ?ctx ?owner roles uuid in
+          let* () = insert ?ctx entity in
           Lwt.return_ok entity
      ;;
+    end
+
+    module ActorRole = struct
+      include ActorRole
+      include Repo.ActorRole
     end
 
     module Target = struct
@@ -427,71 +202,19 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
           decorated function connects * to the persistent backend to ensure that
           the authorizable's roles and ownership * are consistent in both
           spaces. *)
-      let decorate ?ctx (to_target : 'a -> 'kind target)
-        : 'a -> ('kind target, string) Lwt_result.t
+      let decorate ?ctx (to_target : 'a -> target)
+          : 'a -> (target, string) Lwt_result.t
         =
        fun x ->
         let open Lwt_result.Syntax in
-        let ({ Target.uuid; owner; typ } as entity : 'kind target) =
-          to_target x
-        in
+        let ({ Target.uuid; _ } as entity : target) = to_target x in
         let* mem = mem ?ctx uuid in
         if mem
-        then
-          let* entity' = find ?ctx typ uuid in
-          let* owner =
-            match owner, entity'.Target.owner with
-            | Some owner, None ->
-              let* () = save_owner ?ctx ~owner uuid in
-              Lwt.return_ok (Some owner)
-            | None, Some owner -> Lwt.return_ok (Some owner)
-            | None, None -> Lwt.return_ok None
-            | Some x, Some y when x <> y ->
-              (* Still unclear what the desirable behaviour is in this case. *)
-              (* Lwt_result.fail( "decorate: both the database and the decorated
-                 function \ returned distinct values for the owner of
-                 authorizable " ^ Uuid.to_string entity.uuid) *)
-              let* () = save_owner ?ctx ~owner:x uuid in
-              Lwt.return_ok (Some x)
-            | Some x, Some _ (* when x = y *) -> Lwt.return_ok (Some x)
-          in
-          Target.make ?owner typ uuid |> Lwt.return_ok
+        then find ?ctx uuid
         else
-          let* () = create ?ctx ?owner typ uuid in
+          let* () = insert ?ctx entity in
           Lwt.return_ok entity
      ;;
-
-      (** [generate_checker] generate checker function for a specific target
-          spec with the provided rules*)
-      let generate_checker ?ctx rules =
-        let open Lwt_result.Syntax in
-        function
-        | TargetSpec.Entity _ -> Lwt.return_ok @@ Utils.exists_in rules
-        | TargetSpec.Id (kind, id) ->
-          let* { Target.uuid; owner; _ } = find ?ctx kind id in
-          Lwt.return_ok
-          @@ fun actor action ->
-          let is_owner =
-            owner
-            |> CCOption.map_or
-                 ~default:false
-                 (Uuid.Actor.equal actor.Actor.uuid)
-          in
-          let is_self target_id { Actor.uuid; _ } =
-            let open Uuid in
-            target_id
-            |> Target.equal (uuid |> Actor.to_string |> Target.of_string_exn)
-          in
-          if is_self uuid actor || is_owner
-          then true
-          else Utils.exists_in rules actor action
-      ;;
-
-      (** [find_checker] find checker function for a specific target spec *)
-      let find_checker ?ctx ?any_id spec =
-        let%lwt rules = Repo.find_rules_of_spec ?ctx ?any_id spec in
-        generate_checker ?ctx rules spec
-      ;;
     end
 
     (** [validate ?ctx error validation_set actor] checks permissions and
@@ -507,50 +230,43 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
 
         [actor] actor object who'd like to perform the action *)
     let validate
-      ?ctx
-      ?any_id
-      (error : string -> 'etyp)
-      (validation_set : ValidationSet.t)
-      actor
-      : (unit, 'etyp) Lwt_result.t
+        ?ctx
+        ?any_id
+        (error : string -> 'etyp)
+        (validation_set : ValidationSet.t)
+        actor
+        : (unit, 'etyp) Lwt_result.t
       =
-      let open Lwt_result.Infix in
-      let ( >>> ) = Lwt_result.bind_result in
-      let map_error = Lwt_result.map_error error in
+      let open CCFun in
+      let ( |>> ) = flip Lwt.map in
       let rec find_checker =
         let open ValidationSet in
         function
-        | One effect -> Repo.validate ?ctx ?any_id actor effect |> Lwt_result.ok
-        | SpecificRole role ->
-          Actor.find_roles ?ctx (Actor.id actor)
-          |> Lwt_result.ok
-          >|= RoleSet.(mem role)
+        | One (permission, TargetEntity.Id uuid) ->
+          Repo.validate ?ctx ?any_id ~target_uuid:uuid permission actor
+        | One (permission, TargetEntity.Model model) ->
+          Repo.validate ?ctx ?any_id ~model permission actor
         | Or (rule :: rules) ->
-          let%lwt init = find_checker rule in
-          Lwt_list.fold_left_s
-            (fun ini rule ->
-              match ini with
-              | Ok true -> Lwt.return_ok true
-              | Ok false -> find_checker rule
-              | Error err -> Lwt.return_error err)
-            init
-            rules
+          (match%lwt find_checker rule with
+          | true -> Lwt.return_true
+          | false ->
+            Lwt_list.fold_left_s
+              (flip (fun rule -> function
+                 | true -> Lwt.return_true
+                 | false -> find_checker rule))
+              false
+              rules)
         | And (rule :: rules) ->
-          let%lwt init = find_checker rule in
-          Lwt_list.fold_left_s
-            (fun ini rule ->
-              match ini with
-              | Ok true -> find_checker rule
-              | Ok false -> Lwt.return_ok false
-              | Error err -> Lwt.return_error err)
-            init
-            rules
-        | NotRole role ->
-          Actor.find_roles ?ctx (Actor.id actor)
-          |> Lwt_result.ok
-          >|= RoleSet.(mem role)
-          >|= not
-        | Or [] | And [] -> Lwt.return_ok true
+          (match%lwt find_checker rule with
+          | false -> Lwt.return_false
+          | true ->
+            Lwt_list.fold_left_s
+              (flip (fun rule -> function
+                 | true -> find_checker rule
+                 | false -> Lwt.return_false))
+              true
+              rules)
+        | Or [] | And [] -> Lwt.return_true
       in
       let validate = function
         | true -> Ok ()
@@ -561,7 +277,7 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
                ([%show: Actor.t] actor)
                ([%show: ValidationSet.t] validation_set))
       in
-      validation_set |> find_checker >>> validate |> map_error
+      validation_set |> find_checker |>> validate |> Lwt_result.map_error error
     ;;
 
     (** [wrap_function ?ctx error validation_set f] produces a wrapped version
@@ -573,21 +289,16 @@ module Make (ActorRoles : RoleSig) (TargetRoles : RoleSig) = struct
 
         [validation_set] effect set to check the permissions against *)
     let wrap_function
-      ?ctx
-      (error : string -> 'etyp)
-      (validation_set : ValidationSet.t)
-      (fcn : 'param -> ('rval, 'etyp) Lwt_result.t)
+        ?ctx
+        (error : string -> 'etyp)
+        (validation_set : ValidationSet.t)
+        (fcn : 'param -> ('rval, 'etyp) Lwt_result.t)
       =
       let open Lwt_result.Syntax in
       let can = validate ?ctx error validation_set in
       Lwt.return_ok (fun actor param ->
-        let* () = can actor in
-        fcn param)
-    ;;
-
-    let clear_cache () =
-      let () = Relation.Cache.clear () in
-      Repo.clear_cache ()
+          let* () = can actor in
+          fcn param)
     ;;
   end
 end

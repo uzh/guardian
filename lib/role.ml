@@ -10,8 +10,6 @@ module type Sig = sig
   type t [@@deriving eq, show, ord, yojson]
 
   val name : t -> string
-  val find_target : t -> Uuid.Target.t option
-  val find_target_exn : t -> Uuid.Target.t
   val of_string : string -> t
   val all : t list
 end

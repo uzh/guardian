@@ -12,12 +12,16 @@ module Make (Backend : Guard.PersistenceSig) = struct
 
   let make ?(id = Uuid.Target.create ()) author note = { id; note; author }
 
-  let to_authorizable ?ctx =
-    Backend.Target.decorate ?ctx (fun t ->
-      Target.make ~owner:(snd t.author) `Note t.id)
+  let to_authorizable ?ctx { id; author; _ } =
+    let%lwt auth = Backend.Target.decorate ?ctx (Target.create `Note) id in
+    let%lwt () =
+      Guard.ActorRole.create ~target_uuid:id (snd author) `Author
+      |> Backend.ActorRole.upsert ?ctx
+    in
+    Lwt.return auth
   ;;
 
-  let update_note ?ctx (actor : [ `User ] Actor.t) t new_note =
+  let update_note ?ctx (actor : Actor.t) t new_note =
     let open Lwt_result.Syntax in
     let f new_note =
       let () = t.note <- new_note in
@@ -27,7 +31,7 @@ module Make (Backend : Guard.PersistenceSig) = struct
       Backend.validate
         ?ctx
         CCFun.id
-        ValidationSet.(One (Action.Update, TargetSpec.Id (`Note, t.id)))
+        ValidationSet.(One (Permission.Update, TargetEntity.Id t.id))
         actor
     in
     f new_note
