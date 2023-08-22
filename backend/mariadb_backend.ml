@@ -448,50 +448,8 @@ struct
                 pv
           ;;
 
-          let permission_of_actor_sql ?(permissions = []) ?model ?uuid () =
-            let permission_filter table =
-              match permissions with
-              | [] -> ""
-              | filter_permission ->
-                filter_permission
-                |> CCList.map Guard.Permission.show
-                |> CCString.concat ","
-                |> Format.asprintf "AND %s.permission IN (%s, 'manage')" table
-            in
-            let model_filter table =
-              CCOption.map_or
-                ~default:""
-                (TargetModel.show
-                 %> Format.asprintf "AND %s.target_model = '%s'" table)
-                model
-            in
-            let uuid_filter table =
-              CCOption.map_or
-                ~default:""
-                (Guard.Uuid.Target.to_string
-                 %> Format.asprintf
-                      "AND %s.target_uuid = guardianEndodeUuid('%s')"
-                      table)
-                uuid
-            in
-            let actor_roles_filter =
-              CCString.concat
-                "\n"
-                [ permission_filter "role_permissions"
-                ; model_filter "role_permissions"
-                ; uuid_filter "role_permissions"
-                ]
-            in
-            let actor_permissions_filter =
-              CCString.concat
-                "\n"
-                [ permission_filter "actor_permissions"
-                ; model_filter "actor_permissions"
-                ; uuid_filter "actor_permissions"
-                ]
-            in
-            Format.asprintf
-              {sql|
+          let permission_of_actor_sql =
+            {sql|
                 SELECT
                   role_permissions.target_model,
                   role_permissions.permission,
@@ -503,7 +461,6 @@ struct
                   AND role_permissions.mark_as_deleted IS NULL
                 WHERE roles.mark_as_deleted IS NULL
                   AND roles.actor_uuid = guardianEncodeUuid($1)
-                  %s
                 UNION
                 SELECT
                   role_permissions.target_model,
@@ -516,7 +473,6 @@ struct
                   AND role_permissions.mark_as_deleted IS NULL
                 WHERE roles.mark_as_deleted IS NULL
                   AND roles.actor_uuid = guardianEncodeUuid($1)
-                  %s
                 UNION
                 SELECT
                   COALESCE(targets.model, actor_permissions.target_model),
@@ -529,16 +485,12 @@ struct
                   AND targets.mark_as_deleted IS NULL
                 WHERE actor_permissions.actor_uuid = guardianEncodeUuid($1)
                   AND actor_permissions.mark_as_deleted IS NULL
-                  %s
               |sql}
-              actor_roles_filter
-              actor_roles_filter
-              actor_permissions_filter
           ;;
 
           let permissions_of_actor_request =
             let open Entity in
-            permission_of_actor_sql ()
+            permission_of_actor_sql
             |> Uuid.Actor.t
                ->* Caqti_type.tup3 TargetModel.t Permission.t TargetEntity.t
           ;;
