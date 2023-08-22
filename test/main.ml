@@ -490,6 +490,24 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     |> Lwt.return
   ;;
 
+  let test_exists_fcn ?ctx:_ (_ : 'a) () =
+    let open TargetEntity in
+    let read = Read, Model `Article in
+    let manage = Manage, Model `Article in
+    let update = Update, Model `Article in
+    Backend.
+      [ true, exists read [ read ]
+      ; true, exists read [ manage ]
+      ; false, exists read [ update ]
+      ; false, exists manage [ read ]
+      ; false, exists update [ read ]
+      ; true, exists update [ read; manage; update ]
+      ]
+    |> CCList.iter (fun (expected, provided) ->
+      Alcotest.(check bool "Check if permission are correct" expected provided))
+    |> Lwt.return
+  ;;
+
   let hacker_cannot_update_article ?ctx (_ : 'a) () =
     let%lwt ben =
       Hacker.to_authorizable ?ctx ben |> Lwt.map CCResult.get_or_failwith
@@ -578,6 +596,7 @@ let () =
         , [ test_case "role" `Quick (test_find_by_role ?ctx) ] )
       ; ( Format.asprintf "(%s) Find all permissions of actor" name
         , [ test_case "permissions" `Quick (test_find_permissions_of_actor ?ctx)
+          ; test_case "validate existance" `Quick (test_exists_fcn ?ctx)
           ] )
       ]
   in

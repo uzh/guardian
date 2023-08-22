@@ -302,5 +302,12 @@ struct
         let* () = can actor in
         fcn param)
     ;;
+
+    let exists =
+      let eq (p1, e1) (p2, e2) =
+        Permission.(equal p1 p2 || equal Manage p2) && TargetEntity.equal e1 e2
+      in
+      CCList.mem ~eq
+    ;;
   end
 end

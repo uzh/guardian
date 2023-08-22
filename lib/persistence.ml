@@ -160,6 +160,11 @@ module type Contract = sig
       -> (actor_permission list, actor_permission list) Lwt_result.t
   end
 
+  val exists
+    :  Permission.t * target_entity
+    -> (Permission.t * target_entity) list
+    -> bool
+
   val wrap_function
     :  ?ctx:context
     -> (string -> 'etyp)
