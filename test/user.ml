@@ -8,19 +8,22 @@ module MakeActor (Backend : PersistenceSig) = struct
 
   let make s : t = s, Uuid.Actor.create ()
 
-  let to_authorizable ?ctx actor : (Backend.actor, string) result Lwt.t =
-    let open Lwt_result.Syntax in
-    let* actor =
-      Backend.Actor.decorate
-        ?ctx
-        (fun (t : t) : Actor.t -> Actor.create `User (snd t))
-        actor
-    in
+  let insert_roles ?ctx actor =
     let%lwt () =
-      Guard.ActorRole.create actor.Actor.uuid `Reader
-      |> Backend.ActorRole.upsert ?ctx
+      ActorRole.create actor.Actor.uuid `Reader |> Backend.ActorRole.upsert ?ctx
     in
-    Lwt.return_ok actor
+    ActorPermission.create_for_id
+      actor.Actor.uuid
+      Permission.Update
+      (actor.Actor.uuid |> Uuid.(Actor.to_string %> Target.of_string_exn))
+    |> Backend.ActorPermission.insert ?ctx
+  ;;
+
+  let to_authorizable ?ctx actor : (Backend.actor, string) result Lwt.t =
+    Backend.Actor.decorate
+      ?ctx
+      (fun (t : t) : Actor.t -> Actor.create `User (snd t))
+      actor
   ;;
 
   let update_name ?ctx (actor : Actor.t) t new_name =
@@ -42,7 +45,7 @@ module MakeTarget (Backend : PersistenceSig) = struct
 
   let to_authorizable ?ctx =
     Backend.Target.decorate ?ctx (fun t ->
-        let of_actor = Uuid.(snd %> Actor.to_string %> Target.of_string_exn) in
-        Target.create `User (of_actor t))
+      let of_actor = Uuid.(snd %> Actor.to_string %> Target.of_string_exn) in
+      Target.create `User (of_actor t))
   ;;
 end

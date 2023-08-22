@@ -14,7 +14,7 @@ let decompose_variant_string s =
   let fmt = format_of_string "`%s (%s@)" in
   try
     Scanf.sscanf s fmt (fun name params ->
-        lowercase_ascii name, CCList.map trim (split_on_char ',' params))
+      lowercase_ascii name, CCList.map trim (split_on_char ',' params))
   with
   | End_of_file ->
     let fmt = format_of_string "`%s" in
@@ -37,16 +37,23 @@ end
 
 let deny_message_uuid actor_uuid permission target_uuid =
   Format.asprintf
-    "Actor '%s' does not have permission to '%s' the target '%s'"
+    "Actor '%s': Permission ('%s') denied for the target '%s'"
     ([%show: Uuid.Actor.t] actor_uuid)
     ([%show: Permission.t] permission)
     ([%show: Uuid.Target.t] target_uuid)
 ;;
 
-let deny_message_model actor_uuid permission model =
+let deny_message_for_str_target actor_uuid permission str_target =
   Format.asprintf
-    "Actor '%s' does not have permission to '%s' the target '%s'"
+    "Actor '%s': Permission ('%s') denied for the target '%s'"
     ([%show: Uuid.Actor.t] actor_uuid)
     ([%show: Permission.t] permission)
-    model
+    str_target
+;;
+
+let deny_message_validation_set actor_uuid str_target =
+  Format.asprintf
+    "Actor '%s': Permission denied for the set '%s'"
+    ([%show: Uuid.Actor.t] actor_uuid)
+    str_target
 ;;

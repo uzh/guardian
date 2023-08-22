@@ -26,7 +26,13 @@ module Utils : sig
     -> Uuid.Target.t
     -> string
 
-  val deny_message_model : Uuid.Actor.t -> Permission.t -> string -> string
+  val deny_message_for_str_target
+    :  Uuid.Actor.t
+    -> Permission.t
+    -> string
+    -> string
+
+  val deny_message_validation_set : Uuid.Actor.t -> string -> string
 end
 
 module Make : functor

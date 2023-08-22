@@ -12,6 +12,11 @@ module Make (Backend : Guard.PersistenceSig) = struct
 
   let make ?(id = Uuid.Target.create ()) author note = { id; note; author }
 
+  let define_roles ?ctx { id; author; _ } =
+    Guard.ActorPermission.create_for_id (snd author) Permission.Manage id
+    |> Backend.ActorPermission.insert ?ctx
+  ;;
+
   let to_authorizable ?ctx { id; author; _ } =
     let%lwt auth = Backend.Target.decorate ?ctx (Target.create `Note) id in
     let%lwt () =

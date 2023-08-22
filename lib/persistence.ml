@@ -38,12 +38,6 @@ module type Backend = sig
         :  ?ctx:context
         -> Uuid.Actor.t
         -> (Permission.t * target_entity) list Lwt.t
-
-      val filtered_permissions_of_actor
-        :  ?ctx:context
-        -> Uuid.Actor.t
-        -> (Permission.t * Role.t * Uuid.Target.t option) list
-        -> bool list Lwt.t
     end
 
     module Actor : sig

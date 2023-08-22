@@ -275,9 +275,8 @@ struct
         | true -> Ok ()
         | false ->
           Error
-            (Format.asprintf
-               "Actor %s: Permission denied for %s"
-               ([%show: Actor.t] actor)
+            (Utils.deny_message_validation_set
+               actor.Actor.uuid
                ([%show: ValidationSet.t] validation_set))
       in
       validation_set |> find_checker |>> validate |> Lwt_result.map_error error
