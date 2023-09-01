@@ -7,20 +7,21 @@ module Role = struct
     | `Editor
     | `Reader
     ]
-  [@@deriving show, eq, ord, yojson]
+  [@@deriving show, eq, ord, yojson, sexp_of]
 
   let name = show %> Guardian.Utils.decompose_variant_string %> fst
 
-  let of_string =
+  let of_string_res =
     Guardian.Utils.decompose_variant_string
     %> function
-    | "admin", [] -> `Admin
-    | "author", [] -> `Author
-    | "editor", [] -> `Editor
-    | "reader", [] -> `Reader
-    | role -> Guardian.Utils.failwith_invalid_role role
+    | "admin", [] -> Ok `Admin
+    | "author", [] -> Ok `Author
+    | "editor", [] -> Ok `Editor
+    | "reader", [] -> Ok `Reader
+    | role -> Error (Guardian.Utils.invalid_role role)
   ;;
 
+  let of_string = of_string_res %> CCResult.get_or_failwith
   let all = [ `Admin; `Author; `Editor; `Reader ]
 end
 
@@ -30,19 +31,20 @@ module Actor = struct
     | `Hacker
     | `User
     ]
-  [@@deriving show, eq, ord, yojson]
+  [@@deriving show, eq, ord, yojson, sexp_of]
 
   let name = show %> Guardian.Utils.decompose_variant_string %> fst
 
-  let of_string =
+  let of_string_res =
     Guardian.Utils.decompose_variant_string
     %> function
-    | "admin", [] -> `Admin
-    | "hacker", [] -> `Hacker
-    | "user", [] -> `User
-    | role -> Guardian.Utils.failwith_invalid_role role
+    | "admin", [] -> Ok `Admin
+    | "hacker", [] -> Ok `Hacker
+    | "user", [] -> Ok `User
+    | role -> Error (Guardian.Utils.invalid_role role)
   ;;
 
+  let of_string = of_string_res %> CCResult.get_or_failwith
   let all = [ `Admin; `Hacker; `User ]
 end
 
@@ -53,18 +55,20 @@ module Target = struct
     | `Post
     | `User
     ]
-  [@@deriving show, eq, ord, yojson]
+  [@@deriving show, eq, ord, yojson, sexp_of]
 
   let name = show %> Guardian.Utils.decompose_variant_string %> fst
 
-  let of_string s =
-    match Guardian.Utils.decompose_variant_string s with
-    | "article", [] -> `Article
-    | "note", [] -> `Note
-    | "post", [] -> `Post
-    | "user", [] -> `User
-    | role -> Guardian.Utils.failwith_invalid_role role
+  let of_string_res =
+    Guardian.Utils.decompose_variant_string
+    %> function
+    | "article", [] -> Ok `Article
+    | "note", [] -> Ok `Note
+    | "post", [] -> Ok `Post
+    | "user", [] -> Ok `User
+    | role -> Error (Guardian.Utils.invalid_role role)
   ;;
 
+  let of_string = of_string_res %> CCResult.get_or_failwith
   let all = [ `Article; `Note; `Post; `User ]
 end

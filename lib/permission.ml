@@ -6,7 +6,7 @@ type t =
   | Update [@name "update"] [@printer ppx_printer "update"]
   | Delete [@name "delete"] [@printer ppx_printer "delete"]
   | Manage [@name "manage"] [@printer ppx_printer "manage"]
-[@@deriving eq, ord, show { with_path = false }, yojson]
+[@@deriving eq, ord, show { with_path = false }, yojson, sexp_of]
 
 let of_string = function
   | "create" -> Create

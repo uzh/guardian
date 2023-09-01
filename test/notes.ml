@@ -36,7 +36,7 @@ module Make (Backend : Guard.PersistenceSig) = struct
       Backend.validate
         ?ctx
         CCFun.id
-        ValidationSet.(One (Permission.Update, TargetEntity.Id t.id))
+        ValidationSet.(one_of_tuple (Permission.Update, `Note, Some t.id))
         actor
     in
     f new_note

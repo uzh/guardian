@@ -12,6 +12,7 @@ val show : t -> string
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> t Ppx_deriving_yojson_runtime.error_or
 val of_string : string -> t
+val sexp_of_t : t -> Sexplib0.Sexp.t
 
 (** [is_valid] checks the validity of the provided action [t] against action
     [matches] or action [Manage] *)

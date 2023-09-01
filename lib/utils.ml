@@ -1,3 +1,5 @@
+open CCFun
+
 let hide_typ f (_ : 'a) = Format.pp_print_string f ""
 
 (** turn a single argument function returning a [result] into one that raises a
@@ -21,12 +23,11 @@ let decompose_variant_string s =
     Scanf.sscanf s fmt (fun name -> lowercase_ascii name, [])
 ;;
 
-let failwith_invalid_role ?(msg_prefix = "Invalid role") =
-  let open CCFun in
-  [%show: string * string list]
-  %> Format.asprintf "%s: %s" msg_prefix
-  %> failwith
+let invalid_role ?(msg_prefix = "Invalid role") =
+  [%show: string * string list] %> Format.asprintf "%s: %s" msg_prefix
 ;;
+
+let failwith_invalid_role ?msg_prefix = invalid_role ?msg_prefix %> failwith
 
 module Dynparam = struct
   type t = Pack : 'a Caqti_type.t * 'a -> t

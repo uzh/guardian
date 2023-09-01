@@ -5,6 +5,7 @@ module type Backend = sig
   type actor_model
   type actor_permission
   type actor_role
+  type permission_on_target
   type role
   type role_permission
   type target
@@ -37,7 +38,7 @@ module type Backend = sig
       val permissions_of_actor
         :  ?ctx:context
         -> Uuid.Actor.t
-        -> (Permission.t * target_entity) list Lwt.t
+        -> permission_on_target list Lwt.t
     end
 
     module Actor : sig
@@ -55,6 +56,8 @@ module type Backend = sig
         :  ?ctx:context
         -> Uuid.Target.t
         -> (target_model, string) Lwt_result.t
+
+      val promote : ?ctx:context -> Uuid.Target.t -> target_model -> unit Lwt.t
     end
 
     module RolePermission : sig
@@ -160,10 +163,15 @@ module type Contract = sig
       -> (actor_permission list, actor_permission list) Lwt_result.t
   end
 
-  val exists
-    :  Permission.t * target_entity
-    -> (Permission.t * target_entity) list
-    -> bool
+  module PermissionOnTarget : sig
+    val validate_set
+      :  ?any_id:bool
+      -> permission_on_target list
+      -> (string -> 'etyp)
+      -> validation_set
+      -> actor
+      -> (unit, 'etyp) result
+  end
 
   val wrap_function
     :  ?ctx:context

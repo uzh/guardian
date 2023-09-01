@@ -208,6 +208,22 @@ struct
           custom ~encode ~decode (tup3 Uuid.Actor.t Permission.t TargetEntity.t))
       ;;
     end
+
+    module PermissionOnTarget = struct
+      include Guard.PermissionOnTarget
+
+      let t =
+        let encode m = Ok (m.permission, m.model, m.target_uuid) in
+        let decode (permission, model, target_uuid) =
+          Ok { permission; model; target_uuid }
+        in
+        Caqti_type.(
+          custom
+            ~encode
+            ~decode
+            (tup3 Permission.t TargetModel.t (option Uuid.Target.t)))
+      ;;
+    end
   end
 
   module DBCache = struct
@@ -241,6 +257,7 @@ struct
       type actor_model = ActorModel.t
       type actor_permission = Guard.ActorPermission.t
       type actor_role = Guard.ActorRole.t
+      type permission_on_target = Guard.PermissionOnTarget.t
       type role = Role.t
       type role_permission = Guard.RolePermission.t
       type target = Guard.Target.t
@@ -375,7 +392,7 @@ struct
                         :: args
                       , dyn |> add Entity.Role.t role )
                     | None ->
-                      "exclude.role = ?" :: args, dyn |> add Entity.Role.t role
+                      "exclude.role = ? AND exclude.target_uuid IS NULL" :: args, dyn |> add Entity.Role.t role
                     | Some uuid ->
                       ( "(exclude.role = ? AND exclude.target_uuid = \
                          guardianEncodeUuid(?))"
@@ -389,9 +406,15 @@ struct
               ( params
               , Format.asprintf
                   {sql|AND %s NOT IN (
-                    SELECT exclude.actor_uuid FROM guardian_actor_roles AS exclude
-                    WHERE exclude.mark_as_deleted IS NULL
-                      AND %s)
+                    SELECT actor_uuid
+                    FROM (
+                      SELECT actor_uuid, role, target_uuid FROM guardian_actor_role_targets
+                      WHERE mark_as_deleted IS NULL
+                      UNION ALL
+                      SELECT actor_uuid, role, NULL FROM guardian_actor_roles
+                      WHERE mark_as_deleted IS NULL
+                      ) AS exclude
+                    WHERE %s)
                   |sql}
                   field
                   (CCString.concat "\nAND " arguments) ))
@@ -417,6 +440,7 @@ struct
                 FROM guardian_actor_role_targets AS role_targets
                 WHERE role_targets.target_uuid = guardianEncodeUuid(?)
                   AND role_targets.mark_as_deleted IS NULL
+                  AND role_targets.role = ?
                   %s
               |sql}
               exclude_sql
@@ -428,7 +452,7 @@ struct
             match target_uuid with
             | Some uuid ->
               let field = "role_targets.actor_uuid" in
-              let dynparam = empty |> add Entity.Uuid.Target.t uuid in
+              let dynparam = empty |> add Entity.Uuid.Target.t uuid |> add Entity.Role.t role in
               let Pack (pt, pv), exclude_sql =
                 create_exclude ~field ~dynparam ~with_uuid:true exclude
               in
@@ -451,7 +475,6 @@ struct
           let permission_of_actor_sql =
             {sql|
                 SELECT
-                  role_permissions.target_model,
                   role_permissions.permission,
                   role_permissions.target_model,
                   NULL
@@ -463,21 +486,22 @@ struct
                   AND roles.actor_uuid = guardianEncodeUuid($1)
                 UNION
                 SELECT
-                  role_permissions.target_model,
                   role_permissions.permission,
-                  NULL,
+                  targets.model,
                   guardianDecodeUuid(roles.target_uuid)
                 FROM guardian_actor_role_targets AS roles
                 JOIN guardian_role_permissions AS role_permissions
                   ON role_permissions.role = roles.role
                   AND role_permissions.mark_as_deleted IS NULL
+                JOIN guardian_targets AS targets
+                  ON targets.uuid = roles.target_uuid
+                  AND targets.mark_as_deleted IS NULL
                 WHERE roles.mark_as_deleted IS NULL
                   AND roles.actor_uuid = guardianEncodeUuid($1)
                 UNION
                 SELECT
-                  COALESCE(targets.model, actor_permissions.target_model),
                   actor_permissions.permission,
-                  actor_permissions.target_model,
+                  targets.model,
                   guardianDecodeUuid(actor_permissions.target_uuid)
                 FROM guardian_actor_permissions AS actor_permissions
                 JOIN guardian_targets AS targets
@@ -490,53 +514,15 @@ struct
 
           let permissions_of_actor_request =
             let open Entity in
-            permission_of_actor_sql
-            |> Uuid.Actor.t
-               ->* Caqti_type.tup3 TargetModel.t Permission.t TargetEntity.t
+            permission_of_actor_sql |> Uuid.Actor.t ->* PermissionOnTarget.t
           ;;
 
           let permissions_of_actor ?ctx
-            :  Guard.Uuid.Actor.t
-            -> (Guard.Permission.t * target_entity) list Lwt.t
+            : Guard.Uuid.Actor.t -> permission_on_target list Lwt.t
             =
+            let open Guard in
             Database.collect ?ctx permissions_of_actor_request
-            %> Lwt.map (fun perms ->
-              CCList.fold_left
-                (fun (init : (Guard.Permission.t * target_entity) list)
-                     ( (model : TargetModel.t)
-                     , (permission : Guard.Permission.t)
-                     , (target : target_entity) ) ->
-                  let open Guard in
-                  let model_permission () =
-                    let in_list perm =
-                      CCList.mem (model, perm, TargetEntity.Model model) perms
-                    in
-                    in_list permission || in_list Permission.Manage
-                  in
-                  let manage_permission () =
-                    CCList.mem (model, Permission.Manage, target) perms
-                  in
-                  let manage_id_permission () =
-                    let eq (_, p1, t1) (_, p2, t2) =
-                      Permission.equal p1 p2 && TargetEntity.equal t1 t2
-                    in
-                    CCList.mem ~eq (model, Permission.Manage, target) perms
-                  in
-                  match target with
-                  | TargetEntity.Model _
-                    when Permission.(equal Manage permission) ->
-                    init @ [ permission, target ]
-                  | TargetEntity.Model _ when manage_permission () -> init
-                  | TargetEntity.Model _ -> init @ [ permission, target ]
-                  | TargetEntity.Id _
-                    when Permission.(equal Manage permission)
-                         && model_permission () |> not ->
-                    init @ [ permission, target ]
-                  | TargetEntity.Id _
-                    when model_permission () || manage_id_permission () -> init
-                  | TargetEntity.Id _ -> init @ [ permission, target ])
-                []
-                perms)
+            %> Lwt.map PermissionOnTarget.remove_duplicates
           ;;
 
           let delete_role_uuid_request =
@@ -901,6 +887,18 @@ struct
             Database.find_opt ?ctx find_model_request id
             >|= CCOption.to_result (not_found id)
           ;;
+
+          let promote_request =
+            let open Entity in
+            {sql|
+              UPDATE guardian_targets
+              SET model = $2, mark_as_deleted = NULL
+              WHERE uuid = guardianEncodeUuid($1)
+            |sql}
+            |> Caqti_type.(tup2 Uuid.Target.t TargetModel.t ->. unit)
+          ;;
+
+          let promote ?ctx = CCFun.curry (Database.exec ?ctx promote_request)
         end
 
         let validate_model ?ctx permission model actor_uuid =
@@ -1057,7 +1055,7 @@ struct
               JOIN guardian_targets AS targets ON actor_permissions.target_uuid = targets.uuid
               WHERE actor_permissions.actor_uuid = guardianEncodeUuid($1)
                 AND (actor_permissions.permission = $2 OR actor_permissions.permission = 'manage')
-                AND targets.model = $3)
+                AND targets.model = $3
             |sql}
             |> to_req
           in
@@ -1086,9 +1084,12 @@ struct
           (match any_id, target_uuid, model with
            | _, None, None ->
              failwith "At least a target uuid or model has to be specified!"
-           | true, Some _, None ->
-             failwith
-               "Validation with 'any_id' set on a 'uuid' doesn't make sense."
+           | true, Some target_uuid, None ->
+             Logs.warn (fun m ->
+               m
+                 "Validation with 'any_id' set on a 'uuid' doesn't make sense. \
+                  Validating uuid.");
+             validate_uuid ?ctx permission target_uuid uuid
            | true, _, Some model ->
              validate_any_of_model ?ctx permission model uuid
            | false, Some target_uuid, _ ->

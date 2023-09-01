@@ -14,8 +14,7 @@
   "remoteEnv": {
     "VERSION": "dev",
     "OPAMWORKINGDIR": "true",
-    "OPAMSOLVERTIMEOUT": "180",
-    "PATH": "/home/opam/.opam/4.11/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    "OPAMSOLVERTIMEOUT": "180"
   },
   "postCreateCommand": ".devcontainer/wait-for-database.sh test .devcontainer/postCreate.sh",
   // Use 'settings' to set *default* container specific settings.json values on container create.
@@ -37,7 +36,7 @@
         "git.mergeEditor": false,
         "ocaml.sandbox": {
           "kind": "opam",
-          "switch": "4.12"
+          "switch": "4.14"
         }
       },
       // Add the IDs of extensions you want installed when the container is created in the array below.

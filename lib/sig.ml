@@ -21,5 +21,6 @@ module type Uuid = sig
   val to_yojson : t -> [> `String of string ]
   val of_yojson : [> `String of string ] -> (t, string) result
   val of_string_exn : string -> t
+  val sexp_of_t : t -> Sexplib0.Sexp.t
   val create : unit -> t
 end

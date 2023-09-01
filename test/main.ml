@@ -30,15 +30,9 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     RolePermissionSet.(Alcotest.testable (pp RolePermission.pp) equal)
   ;;
 
-  module TestablePermissionTarget = struct
-    type t = Permission.t * TargetEntity.t [@@deriving eq, show]
-
-    let compare (p1, t1) (p2, t2) =
-      (TargetEntity.compare t1 t2 * 100) + Permission.compare p1 p2
-    ;;
-
-    let testable = Alcotest.testable pp equal
-  end
+  let testable_permission_on_target =
+    PermissionOnTarget.(Alcotest.testable pp equal)
+  ;;
 
   (* ensure that the `User` module conforms to the `ActorSig` and `UserTarget`
      conforms to `TargetSig` module type. *)
@@ -317,11 +311,11 @@ module Tests (Backend : Guard.PersistenceSig) = struct
        validate_test
          CCFun.id
          "Reader can read a note he's reader/owner of."
-         (One (Permission.Read, TargetEntity.Id thomas_note.Notes.id))
+         (one_of_tuple (Permission.Read, `Note, Some thomas_note.Notes.id))
          (Ok ())
      in
      let%lwt () =
-       let set = One (Permission.Read, TargetEntity.Model `Note) in
+       let set = one_of_tuple (Permission.Read, `Note, None) in
        validate_test
          (fun _ -> pp_error set)
          "Reader cannot read a note of anyone."
@@ -329,7 +323,9 @@ module Tests (Backend : Guard.PersistenceSig) = struct
          (Error (pp_error set))
      in
      let%lwt () =
-       let set = One (Permission.Read, TargetEntity.Id chris_note.Notes.id) in
+       let set =
+         one_of_tuple (Permission.Read, `Note, Some chris_note.Notes.id)
+       in
        validate_test
          (fun _ -> pp_error set)
          "Reader cannot read a note of someone else."
@@ -409,7 +405,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
         |> Backend.RolePermission.insert ?ctx
       in
       let effects =
-        ValidationSet.One (Permission.Manage, TargetEntity.Id target_uuid)
+        ValidationSet.one_of_tuple (Permission.Manage, `User, Some target_uuid)
       in
       Backend.validate ?ctx CCFun.id effects actor
     in
@@ -437,12 +433,13 @@ module Tests (Backend : Guard.PersistenceSig) = struct
              (Guardian.Utils.deny_message_validation_set
                 (snd chris)
                 ValidationSet.(
-                  One (Update, TargetEntity.Id thomas_chris_post_id) |> show)))
+                  one_of_tuple (Update, `Post, Some thomas_chris_post_id)
+                  |> show)))
   ;;
 
   let roles_exist_for_type ?ctx (_ : 'a) () =
     let result =
-      let validation_set = ValidationSet.One (Read, TargetEntity.Model `Post) in
+      let validation_set = ValidationSet.one_of_tuple (Read, `Post, None) in
       let* actor = User.to_authorizable ?ctx chris in
       Backend.validate ?ctx CCFun.id validation_set actor
     in
@@ -469,21 +466,22 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   ;;
 
   let test_find_permissions_of_actor ?ctx (_ : 'a) () =
-    let sort = CCList.stable_sort TestablePermissionTarget.compare in
+    let sort = CCList.stable_sort PermissionOnTarget.compare in
     let%lwt roles = Backend.ActorRole.permissions_of_actor ?ctx (snd thomas) in
     let expect =
-      TargetEntity.
-        [ Read, Model `Article
-        ; Read, Model `Post
-        ; Create, Id chris_article_id
-        ; Update, Id chris_article_id
-        ; Update, Id thomas_chris_post_id
-        ; ( Update
-          , Id (snd thomas |> Uuid.(Actor.to_string %> Target.of_string_exn)) )
-        ; Manage, Id thomas_note.Notes.id
-        ]
+      [ Read, `Article, None
+      ; Read, `Post, None
+      ; Create, `Article, Some chris_article_id
+      ; Update, `Article, Some chris_article_id
+      ; Update, `Post, Some thomas_chris_post_id
+      ; ( Update
+        , `User
+        , Some (snd thomas |> Uuid.(Actor.to_string %> Target.of_string_exn)) )
+      ; Manage, `Note, Some thomas_note.Notes.id
+      ]
+      |> CCList.map PermissionOnTarget.of_tuple
     in
-    Alcotest.(check (list TestablePermissionTarget.testable))
+    Alcotest.(check (list testable_permission_on_target))
       "return correct list of permissions for actor Aron."
       (expect |> sort)
       (roles |> sort)
@@ -491,20 +489,75 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   ;;
 
   let test_exists_fcn ?ctx:_ (_ : 'a) () =
-    let open TargetEntity in
-    let read = Read, Model `Article in
-    let manage = Manage, Model `Article in
-    let update = Update, Model `Article in
-    Backend.
-      [ true, exists read [ read ]
-      ; true, exists read [ manage ]
-      ; false, exists read [ update ]
-      ; false, exists manage [ read ]
-      ; false, exists update [ read ]
-      ; true, exists update [ read; manage; update ]
-      ]
-    |> CCList.iter (fun (expected, provided) ->
-      Alcotest.(check bool "Check if permission are correct" expected provided))
+    let open PermissionOnTarget in
+    let read = (Read, `Article, None) |> of_tuple in
+    let manage = (Manage, `Article, None) |> of_tuple in
+    let update = (Update, `Article, None) |> of_tuple in
+    [ true, validate read [ read ], "read in read"
+    ; true, validate read [ manage ], "read in manage"
+    ; false, validate read [ update ], "read in update"
+    ; false, validate manage [ read ], "manage in read"
+    ; false, validate update [ read ], "update in read"
+    ; ( true
+      , validate update [ read; manage; update ]
+      , "update in read, manage or update" )
+    ; ( true
+      , validate
+          ((Read, `Article, Some (Uuid.Target.create ())) |> of_tuple)
+          [ manage ]
+      , "read article id in manage article" )
+    ; ( false
+      , validate
+          ((Read, `Article, Some (Uuid.Target.create ())) |> of_tuple)
+          [ (Manage, `Article, Some (Uuid.Target.create ())) |> of_tuple ]
+      , "read article id in manage article id (another)" )
+    ; ( false
+      , validate
+          ((Read, `Article, None) |> of_tuple)
+          [ (Manage, `Article, Some (Uuid.Target.create ())) |> of_tuple ]
+      , "read article in manage article id (another)" )
+    ; ( true
+      , validate
+          ~any_id:true
+          ((Read, `Article, Some (Uuid.Target.create ())) |> of_tuple)
+          [ (Manage, `Article, Some (Uuid.Target.create ())) |> of_tuple ]
+      , "read article id in manage article id (another with 'any_id' active)" )
+    ; ( false
+      , validate
+          ((Read, `Note, Some (Uuid.Target.create ())) |> of_tuple)
+          [ manage ]
+      , "read note id in manage article" )
+    ]
+    |> CCList.iter (fun (expected, provided, msg) ->
+      Alcotest.(
+        check
+          bool
+          (Format.asprintf "Check if permission are correct: %s" msg)
+          expected
+          provided))
+    |> Lwt.return
+  ;;
+
+  let test_remove_duplicates ?ctx:_ (_ : 'a) () =
+    let open PermissionOnTarget in
+    let read = (Read, `Article, None) |> of_tuple in
+    let manage = (Manage, `Article, None) |> of_tuple in
+    let manage_id =
+      (Manage, `Article, Some (Uuid.Target.create ())) |> of_tuple
+    in
+    let update = (Update, `Article, None) |> of_tuple in
+    [ ( [ manage ]
+      , remove_duplicates [ read; manage; manage_id ]
+      , "remove read and manage_id" )
+    ; [ update ], remove_duplicates [ update ], "single enty"
+    ]
+    |> CCList.iter (fun (expected, provided, msg) ->
+      Alcotest.(
+        check
+          (list testable_permission_on_target)
+          (Format.asprintf "Check if permission are correct: %s" msg)
+          expected
+          provided))
     |> Lwt.return
   ;;
 
@@ -597,6 +650,7 @@ let () =
       ; ( Format.asprintf "(%s) Find all permissions of actor" name
         , [ test_case "permissions" `Quick (test_find_permissions_of_actor ?ctx)
           ; test_case "validate existance" `Quick (test_exists_fcn ?ctx)
+          ; test_case "remove duplicates" `Quick (test_remove_duplicates ?ctx)
           ] )
       ]
   in

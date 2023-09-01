@@ -35,7 +35,7 @@ module Make (Backend : Guard.PersistenceSig) = struct
       Backend.wrap_function
         ?ctx
         CCFun.id
-        ValidationSet.(One (Permission.Update, TargetEntity.Id t.id))
+        ValidationSet.(one_of_tuple (Permission.Update, `Article, Some t.id))
         f
     in
     wrapped actor new_title
@@ -61,7 +61,7 @@ module Make (Backend : Guard.PersistenceSig) = struct
       Backend.wrap_function
         ?ctx
         CCFun.id
-        ValidationSet.(One (Permission.Manage, TargetEntity.Id id))
+        ValidationSet.(one_of_tuple (Permission.Manage, `Article, Some id))
         fcn
     in
     wrapped actor (old_author, new_author)
