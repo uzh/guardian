@@ -473,7 +473,8 @@ module Tests (Backend : Guard.PersistenceSig) = struct
       ; Read, `Post, None
       ; Create, `Article, Some chris_article_id
       ; Update, `Article, Some chris_article_id
-      ; Update, `Post, Some thomas_chris_post_id
+      ; Update, `Article, Some thomas_chris_post_id
+      ; Update, `Article, Some thomas_note.Notes.id
       ; ( Update
         , `User
         , Some (snd thomas |> Uuid.(Actor.to_string %> Target.of_string_exn)) )

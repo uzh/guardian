@@ -392,7 +392,9 @@ struct
                         :: args
                       , dyn |> add Entity.Role.t role )
                     | None ->
-                      "exclude.role = ? AND exclude.target_uuid IS NULL" :: args, dyn |> add Entity.Role.t role
+                      ( "exclude.role = ? AND exclude.target_uuid IS NULL"
+                        :: args
+                      , dyn |> add Entity.Role.t role )
                     | Some uuid ->
                       ( "(exclude.role = ? AND exclude.target_uuid = \
                          guardianEncodeUuid(?))"
@@ -452,7 +454,9 @@ struct
             match target_uuid with
             | Some uuid ->
               let field = "role_targets.actor_uuid" in
-              let dynparam = empty |> add Entity.Uuid.Target.t uuid |> add Entity.Role.t role in
+              let dynparam =
+                empty |> add Entity.Uuid.Target.t uuid |> add Entity.Role.t role
+              in
               let Pack (pt, pv), exclude_sql =
                 create_exclude ~field ~dynparam ~with_uuid:true exclude
               in
@@ -472,49 +476,47 @@ struct
                 pv
           ;;
 
-          let permission_of_actor_sql =
-            {sql|
-                SELECT
-                  role_permissions.permission,
-                  role_permissions.target_model,
-                  NULL
-                FROM guardian_actor_roles AS roles
-                JOIN guardian_role_permissions AS role_permissions
-                  ON role_permissions.role = roles.role
-                  AND role_permissions.mark_as_deleted IS NULL
-                WHERE roles.mark_as_deleted IS NULL
-                  AND roles.actor_uuid = guardianEncodeUuid($1)
-                UNION
-                SELECT
-                  role_permissions.permission,
-                  targets.model,
-                  guardianDecodeUuid(roles.target_uuid)
-                FROM guardian_actor_role_targets AS roles
-                JOIN guardian_role_permissions AS role_permissions
-                  ON role_permissions.role = roles.role
-                  AND role_permissions.mark_as_deleted IS NULL
-                JOIN guardian_targets AS targets
-                  ON targets.uuid = roles.target_uuid
-                  AND targets.mark_as_deleted IS NULL
-                WHERE roles.mark_as_deleted IS NULL
-                  AND roles.actor_uuid = guardianEncodeUuid($1)
-                UNION
-                SELECT
-                  actor_permissions.permission,
-                  targets.model,
-                  guardianDecodeUuid(actor_permissions.target_uuid)
-                FROM guardian_actor_permissions AS actor_permissions
-                JOIN guardian_targets AS targets
-                  ON actor_permissions.target_uuid = targets.uuid
-                  AND targets.mark_as_deleted IS NULL
-                WHERE actor_permissions.actor_uuid = guardianEncodeUuid($1)
-                  AND actor_permissions.mark_as_deleted IS NULL
-              |sql}
-          ;;
-
           let permissions_of_actor_request =
             let open Entity in
-            permission_of_actor_sql |> Uuid.Actor.t ->* PermissionOnTarget.t
+            {sql|
+              SELECT
+                role_permissions.permission,
+                role_permissions.target_model,
+                NULL
+              FROM
+                guardian_actor_roles AS roles
+                JOIN guardian_role_permissions AS role_permissions ON role_permissions.role = roles.role
+                  AND role_permissions.mark_as_deleted IS NULL
+              WHERE
+                roles.mark_as_deleted IS NULL
+                AND roles.actor_uuid = guardianEncodeUuid($1)
+              UNION
+              SELECT
+                role_permissions.permission,
+                role_permissions.target_model,
+                guardianDecodeUuid(roles.target_uuid)
+              FROM
+                guardian_actor_role_targets AS roles
+                JOIN guardian_role_permissions AS role_permissions ON role_permissions.role = roles.role
+                  AND role_permissions.mark_as_deleted IS NULL
+              WHERE
+                roles.mark_as_deleted IS NULL
+                AND roles.actor_uuid = guardianEncodeUuid($1)
+              UNION
+              SELECT
+                actor_permissions.permission,
+                COALESCE (actor_permissions.target_model, targets.model),
+                guardianDecodeUuid(actor_permissions.target_uuid)
+              FROM
+                guardian_actor_permissions AS actor_permissions
+              JOIN guardian_targets AS targets
+                ON targets.uuid = actor_permissions.target_uuid
+                AND targets.mark_as_deleted IS NULL
+              WHERE
+                actor_permissions.actor_uuid = guardianEncodeUuid($1)
+                AND actor_permissions.mark_as_deleted IS NULL
+            |sql}
+            |> Uuid.Actor.t ->* PermissionOnTarget.t
           ;;
 
           let permissions_of_actor ?ctx
@@ -940,10 +942,15 @@ struct
                  ([%show: TargetModel.t] model))
         ;;
 
-        let validate_uuid ?ctx permission target_uuid actor_uuid =
+        let validate_uuid ?ctx ?model permission target_uuid actor_uuid =
           let open Lwt_result.Syntax in
           let open Lwt.Infix in
-          let* model = Target.find_model ?ctx target_uuid in
+          let* model =
+            model
+            |> CCOption.map_or
+                 ~default:(Target.find_model ?ctx target_uuid)
+                 Lwt.return_ok
+          in
           let validate_request =
             let open Entity in
             {sql|
@@ -1045,6 +1052,7 @@ struct
                 AND role_targets.actor_uuid = guardianEncodeUuid($1)
                 AND role_permissions.target_model = $3
                 AND (role_permissions.permission = $2 OR role_permissions.permission = 'manage')
+              LIMIT 1
             |sql}
             |> to_req
           in
@@ -1092,8 +1100,8 @@ struct
              validate_uuid ?ctx permission target_uuid uuid
            | true, _, Some model ->
              validate_any_of_model ?ctx permission model uuid
-           | false, Some target_uuid, _ ->
-             validate_uuid ?ctx permission target_uuid uuid
+           | false, Some target_uuid, model ->
+             validate_uuid ?ctx ?model permission target_uuid uuid
            | false, None, Some model ->
              validate_model ?ctx permission model uuid)
           >|= function
