@@ -16,7 +16,7 @@ let decompose_variant_string s =
   let fmt = format_of_string "`%s (%s@)" in
   try
     Scanf.sscanf s fmt (fun name params ->
-      lowercase_ascii name, CCList.map trim (split_on_char ',' params))
+        lowercase_ascii name, CCList.map trim (split_on_char ',' params))
   with
   | End_of_file ->
     let fmt = format_of_string "`%s" in
