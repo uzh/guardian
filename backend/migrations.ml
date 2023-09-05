@@ -101,7 +101,8 @@ let create_v2_guardian_actors_table =
       mark_as_deleted DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      PRIMARY KEY (id)
+      PRIMARY KEY (id),
+      INDEX guardian_actors_uuid_index (uuid)
     )
   |sql}
 ;;
@@ -116,7 +117,8 @@ let create_v2_guardian_targets_table =
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       CONSTRAINT unique_uuid_model UNIQUE (uuid, model),
-      PRIMARY KEY (id)
+      PRIMARY KEY (id),
+      INDEX guardian_targets_uuid_index (uuid)
     )
   |sql}
 ;;
@@ -132,7 +134,8 @@ let create_v2_guardian_actor_roles_table =
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       CONSTRAINT unique_actor_role UNIQUE (actor_uuid, role),
       CONSTRAINT fk_actor_roles_actor_uuid FOREIGN KEY (actor_uuid) REFERENCES guardian_actors (uuid),
-      PRIMARY KEY (id)
+      PRIMARY KEY (id),
+      INDEX guardian_actor_roles_actor_uuid_index (actor_uuid)
     )
   |sql}
 ;;
@@ -150,7 +153,9 @@ let create_v2_guardian_actor_role_targets_table =
       CONSTRAINT unique_actor_role UNIQUE (actor_uuid, role, target_uuid),
       CONSTRAINT fk_actor_role_targets_actor_uuid FOREIGN KEY (actor_uuid) REFERENCES guardian_actors (uuid),
       CONSTRAINT fk_actor_role_targets_target_uuid FOREIGN KEY (target_uuid) REFERENCES guardian_targets (uuid),
-      PRIMARY KEY (id)
+      PRIMARY KEY (id),
+      INDEX guardian_actor_role_targets_actor_uuid_index (actor_uuid),
+      INDEX guardian_actor_role_targets_target_uuid_index (target_uuid)
     )
   |sql}
 ;;
@@ -185,7 +190,9 @@ let create_v2_guardian_actor_permissions_table =
       CONSTRAINT unique_actor_permission UNIQUE (actor_uuid, permission, target_model, target_uuid),
       CONSTRAINT fk_actor_permissions_actor_uuid FOREIGN KEY (actor_uuid) REFERENCES guardian_actors (uuid),
       CONSTRAINT fk_actor_permissions_target_uuid FOREIGN KEY (target_uuid) REFERENCES guardian_targets (uuid),
-      PRIMARY KEY (id)
+      PRIMARY KEY (id),
+      INDEX guardian_actor_permissions_actor_uuid_index (actor_uuid),
+      INDEX guardian_actor_permissions_target_uuid_index (target_uuid)
     )
   |sql}
 ;;

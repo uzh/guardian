@@ -32,7 +32,9 @@
   (caqti-driver-mariadb
    (>= 1.9.0))
   (caqti-lwt
-   (>= 1.9.0))
+   (and
+    (>= 1.9.0)
+    (<= 2.0.0)))
   (containers
    (>= 3.6))
   (containers-data
