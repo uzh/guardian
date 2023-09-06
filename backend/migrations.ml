@@ -1,4 +1,4 @@
-let create_guardian_actors_table_sql =
+let create_guardian_actors_table =
   {sql|
     CREATE TABLE IF NOT EXISTS guardian_actors (
       id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -12,7 +12,7 @@ let create_guardian_actors_table_sql =
   |sql}
 ;;
 
-let create_guardian_targets_table_sql =
+let create_guardian_targets_table =
   {sql|
     CREATE TABLE IF NOT EXISTS guardian_targets (
       id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -28,7 +28,7 @@ let create_guardian_targets_table_sql =
   |sql}
 ;;
 
-let create_guardian_rules_table_sql =
+let create_guardian_rules_table =
   {sql|
     CREATE TABLE IF NOT EXISTS guardian_rules (
       id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -60,7 +60,7 @@ let create_guardian_relations_table =
   |sql}
 ;;
 
-let create_guardian_actor_roles_table_sql =
+let create_guardian_actor_roles_table =
   {sql|
     CREATE TABLE IF NOT EXISTS guardian_actor_roles (
       id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -81,33 +81,177 @@ let remove_actor_roles_column =
   |sql}
 ;;
 
+let change_table_names =
+  {sql|
+    RENAME TABLE
+      guardian_actors TO guardian_actors_old,
+      guardian_actor_roles TO guardian_actor_roles_old,
+      guardian_relations TO guardian_relations_old,
+      guardian_rules TO guardian_rules_old,
+      guardian_targets TO guardian_targets_old
+  |sql}
+;;
+
+let create_v2_guardian_actors_table =
+  {sql|
+    CREATE TABLE IF NOT EXISTS guardian_actors (
+      id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+      uuid binary(16) UNIQUE NOT NULL,
+      model varchar(255) NOT NULL,
+      mark_as_deleted DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      INDEX guardian_actors_uuid_index (uuid)
+    )
+  |sql}
+;;
+
+let create_v2_guardian_targets_table =
+  {sql|
+    CREATE TABLE IF NOT EXISTS guardian_targets (
+      id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+      uuid binary(16) UNIQUE NOT NULL,
+      model varchar(255) NOT NULL,
+      mark_as_deleted DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT unique_uuid_model UNIQUE (uuid, model),
+      PRIMARY KEY (id),
+      INDEX guardian_targets_uuid_index (uuid)
+    )
+  |sql}
+;;
+
+let create_v2_guardian_actor_roles_table =
+  {sql|
+    CREATE TABLE IF NOT EXISTS guardian_actor_roles (
+      id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+      actor_uuid binary(16) NOT NULL,
+      role varchar(255) NOT NULL,
+      mark_as_deleted DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT unique_actor_role UNIQUE (actor_uuid, role),
+      CONSTRAINT fk_actor_roles_actor_uuid FOREIGN KEY (actor_uuid) REFERENCES guardian_actors (uuid),
+      PRIMARY KEY (id),
+      INDEX guardian_actor_roles_actor_uuid_index (actor_uuid)
+    )
+  |sql}
+;;
+
+let create_v2_guardian_actor_role_targets_table =
+  {sql|
+    CREATE TABLE IF NOT EXISTS guardian_actor_role_targets (
+      id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+      actor_uuid binary(16) NOT NULL,
+      role varchar(255) NOT NULL,
+      target_uuid binary(16) NOT NULL,
+      mark_as_deleted DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT unique_actor_role UNIQUE (actor_uuid, role, target_uuid),
+      CONSTRAINT fk_actor_role_targets_actor_uuid FOREIGN KEY (actor_uuid) REFERENCES guardian_actors (uuid),
+      CONSTRAINT fk_actor_role_targets_target_uuid FOREIGN KEY (target_uuid) REFERENCES guardian_targets (uuid),
+      PRIMARY KEY (id),
+      INDEX guardian_actor_role_targets_actor_uuid_index (actor_uuid),
+      INDEX guardian_actor_role_targets_target_uuid_index (target_uuid)
+    )
+  |sql}
+;;
+
+let create_v2_guardian_role_permissions_table =
+  {sql|
+    CREATE TABLE IF NOT EXISTS guardian_role_permissions (
+      id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+      role varchar(255) NOT NULL,
+      permission ENUM('create', 'read', 'update', 'delete', 'manage') NOT NULL,
+      target_model varchar(255) NOT NULL,
+      mark_as_deleted DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT unique_role_permission_model UNIQUE (role, permission, target_model),
+      PRIMARY KEY (id)
+    )
+  |sql}
+;;
+
+let create_v2_guardian_actor_permissions_table =
+  {sql|
+    CREATE TABLE IF NOT EXISTS guardian_actor_permissions (
+      id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+      actor_uuid binary(16) NOT NULL,
+      permission ENUM('create', 'read', 'update', 'delete', 'manage') NOT NULL,
+      target_model varchar(255) NULL,
+      target_uuid binary(16) NULL,
+      mark_as_deleted DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT unique_actor_permission UNIQUE (actor_uuid, permission, target_model, target_uuid),
+      CONSTRAINT fk_actor_permissions_actor_uuid FOREIGN KEY (actor_uuid) REFERENCES guardian_actors (uuid),
+      CONSTRAINT fk_actor_permissions_target_uuid FOREIGN KEY (target_uuid) REFERENCES guardian_targets (uuid),
+      PRIMARY KEY (id),
+      INDEX guardian_actor_permissions_actor_uuid_index (actor_uuid),
+      INDEX guardian_actor_permissions_target_uuid_index (target_uuid)
+    )
+  |sql}
+;;
+
+let drop_relations = {sql|DROP TABLE IF EXISTS guardian_relations|sql}
+
 let all_tables =
   [ "guardian_actors"
   ; "guardian_actor_roles"
+  ; "guardian_actor_role_targets"
   ; "guardian_targets"
-  ; "guardian_rules"
-  ; "guardian_relations"
+  ; "guardian_role_permissions"
+  ; "guardian_actor_permissions"
+  ; "guardian_actors_old"
+  ; "guardian_actor_roles_old"
+  ; "guardian_targets_old"
+  ; "guardian_relations_old"
+  ; "guardian_rules_old"
   ]
 ;;
 
 let all =
   [ ( "create guardian actors table"
     , "2023-03-09T17:00"
-    , create_guardian_actors_table_sql )
+    , create_guardian_actors_table )
   ; ( "create guardian rule table"
     , "2023-03-09T17:01"
-    , create_guardian_rules_table_sql )
+    , create_guardian_rules_table )
   ; ( "create guardian targets table"
     , "2023-03-09T17:02"
-    , create_guardian_targets_table_sql )
+    , create_guardian_targets_table )
   ; ( "create guardian relations table"
     , "2023-05-03T08:30"
     , create_guardian_relations_table )
   ; ( "create guardian actor roles table"
     , "2023-05-09T10:30"
-    , create_guardian_actor_roles_table_sql )
+    , create_guardian_actor_roles_table )
   ; ( "remove roles from guardian actors table"
     , "2023-05-09T10:31"
     , remove_actor_roles_column )
+  ; "change table names", "2023-08-18T15:15", change_table_names
+  ; ( "create v2 guardian actors table"
+    , "2023-08-18T15:16"
+    , create_v2_guardian_actors_table )
+  ; ( "create v2 guardian targets table"
+    , "2023-08-18T15:17"
+    , create_v2_guardian_targets_table )
+  ; ( "create v2 guardian actor roles table"
+    , "2023-08-18T15:18"
+    , create_v2_guardian_actor_roles_table )
+  ; ( "create v2 guardian actor role targets table"
+    , "2023-08-18T15:19"
+    , create_v2_guardian_actor_role_targets_table )
+  ; ( "create v2 guardian role permissions table"
+    , "2023-08-18T15:20"
+    , create_v2_guardian_role_permissions_table )
+  ; ( "create v2 guardian actor permissions table"
+    , "2023-08-18T15:21"
+    , create_v2_guardian_actor_permissions_table )
+  ; "drop guardian relations table", "2023-08-18T15:22", drop_relations
   ]
 ;;

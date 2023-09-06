@@ -12,6 +12,7 @@ module Utils : sig
 
   val decompose_variant_string : string -> string * string list
   val failwith_invalid_role : ?msg_prefix:string -> string * string list -> 'a
+  val invalid_role : ?msg_prefix:string -> string * string list -> string
 
   module Dynparam : sig
     type t = Pack : 'a Caqti_type.t * 'a -> t
@@ -19,21 +20,38 @@ module Utils : sig
     val empty : t
     val add : 'a Caqti_type.t -> 'a -> t -> t
   end
+
+  val deny_message_uuid
+    :  Uuid.Actor.t
+    -> Permission.t
+    -> Uuid.Target.t
+    -> string
+
+  val deny_message_for_str_target
+    :  Uuid.Actor.t
+    -> Permission.t
+    -> string
+    -> string
+
+  val deny_message_validation_set : Uuid.Actor.t -> string -> string
 end
 
 module Contract : sig
   module Uuid = Uuid
 end
 
-module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
+module Make : functor
+    (ActorModel : RoleSig)
+    (Role : RoleSig)
+    (TargetModel : RoleSig)
+    -> sig
   module Uuid = Uuid
-  module Action = Action
-  module RoleSet : Role_set.Core with type elt = ActorRoles.t
+  module Permission = Permission
 
-  module ActorSpec : sig
+  module TargetEntity : sig
     type t =
-      | Entity of ActorRoles.t
-      | Id of ActorRoles.t * Uuid.Actor.t
+      | Model of TargetModel.t
+      | Id of Uuid.Target.t
 
     val equal : t -> t -> bool
     val pp : Format.formatter -> t -> unit
@@ -41,27 +59,35 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
     val compare : t -> t -> int
     val to_yojson : t -> Yojson.Safe.t
     val of_yojson : Yojson.Safe.t -> t Ppx_deriving_yojson_runtime.error_or
-    val value : ActorRoles.t -> string
-    val is_valid : t -> t -> bool
+    val sexp_of_t : t -> Sexplib0.Sexp.t
+    val model : TargetModel.t -> t
+    val id : Uuid.Target.t -> t
+    val is_id : t -> bool
+    val find_id : t -> Uuid.Target.t option
   end
 
-  module TargetSpec : sig
+  module Actor : sig
     type t =
-      | Entity of TargetRoles.t
-      | Id of TargetRoles.t * Uuid.Target.t
+      { uuid : Uuid.Actor.t
+      ; model : ActorModel.t
+      }
 
     val equal : t -> t -> bool
-    val pp : Format.formatter -> t -> unit
-    val show : t -> string
     val compare : t -> t -> int
     val to_yojson : t -> Yojson.Safe.t
     val of_yojson : Yojson.Safe.t -> t Ppx_deriving_yojson_runtime.error_or
-    val value : TargetRoles.t -> string
-    val is_valid : t -> t -> bool
+    val sexp_of_t : t -> Sexplib0.Sexp.t
+    val show : t -> string
+    val pp : Format.formatter -> t -> unit
+    val create : ActorModel.t -> Uuid.Actor.t -> t
   end
 
-  module Rule : sig
-    type t = ActorSpec.t * Action.t * TargetSpec.t
+  module ActorRole : sig
+    type t =
+      { actor_uuid : Uuid.Actor.t
+      ; role : Role.t
+      ; target_uuid : Uuid.Target.t option
+      }
 
     val equal : t -> t -> bool
     val pp : Format.formatter -> t -> unit
@@ -69,12 +95,45 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
     val compare : t -> t -> int
     val to_yojson : t -> Yojson.Safe.t
     val of_yojson : Yojson.Safe.t -> t Ppx_deriving_yojson_runtime.error_or
-
-    module Set : CCSet.S with type elt = t
+    val sexp_of_t : t -> Sexplib0.Sexp.t
+    val create : ?target_uuid:Uuid.Target.t -> Uuid.Actor.t -> Role.t -> t
+    val role_to_human : t -> string
   end
 
-  module Effect : sig
-    type t = Action.t * TargetSpec.t
+  module type ActorSig = sig
+    type t
+
+    val to_authorizable : ?ctx:context -> t -> (Actor.t, string) Lwt_result.t
+  end
+
+  module Target : sig
+    type t =
+      { uuid : Uuid.Target.t
+      ; model : TargetModel.t
+      }
+
+    val equal : t -> t -> bool
+    val compare : t -> t -> int
+    val to_yojson : t -> Yojson.Safe.t
+    val of_yojson : Yojson.Safe.t -> t Ppx_deriving_yojson_runtime.error_or
+    val sexp_of_t : t -> Sexplib0.Sexp.t
+    val show : t -> string
+    val pp : Format.formatter -> t -> unit
+    val create : TargetModel.t -> Uuid.Target.t -> t
+  end
+
+  module type TargetSig = sig
+    type t
+
+    val to_authorizable : ?ctx:context -> t -> (Target.t, string) Lwt_result.t
+  end
+
+  module RolePermission : sig
+    type t =
+      { role : Role.t
+      ; permission : Permission.t
+      ; model : TargetModel.t
+      }
 
     val equal : t -> t -> bool
     val pp : Format.formatter -> t -> unit
@@ -82,17 +141,72 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
     val compare : t -> t -> int
     val to_yojson : t -> Yojson.Safe.t
     val of_yojson : Yojson.Safe.t -> t Ppx_deriving_yojson_runtime.error_or
-    val create : 'a -> 'b -> 'a * 'b
-    val is_valid : t -> t -> bool
+    val sexp_of_t : t -> Sexplib0.Sexp.t
+    val create : Role.t -> Permission.t -> TargetModel.t -> t
+  end
+
+  module ActorPermission : sig
+    type t =
+      { actor_uuid : Uuid.Actor.t
+      ; permission : Permission.t
+      ; target : TargetEntity.t
+      }
+
+    val equal : t -> t -> bool
+    val pp : Format.formatter -> t -> unit
+    val show : t -> string
+    val compare : t -> t -> int
+    val to_yojson : t -> Yojson.Safe.t
+    val of_yojson : Yojson.Safe.t -> t Ppx_deriving_yojson_runtime.error_or
+    val sexp_of_t : t -> Sexplib0.Sexp.t
+    val create_for_model : Uuid.Actor.t -> Permission.t -> TargetModel.t -> t
+    val create_for_id : Uuid.Actor.t -> Permission.t -> Uuid.Target.t -> t
+  end
+
+  module PermissionOnTarget : sig
+    type t =
+      { permission : Permission.t
+      ; model : TargetModel.t
+      ; target_uuid : Uuid.Target.t option
+      }
+
+    val equal : t -> t -> bool
+    val pp : Format.formatter -> t -> unit
+    val show : t -> string
+    val compare : t -> t -> int
+    val to_yojson : t -> Yojson.Safe.t
+    val of_yojson : Yojson.Safe.t -> t Ppx_deriving_yojson_runtime.error_or
+    val sexp_of_t : t -> Sexplib0.Sexp.t
+
+    val create
+      :  ?target_uuid:Uuid.Target.t
+      -> Permission.t
+      -> TargetModel.t
+      -> t
+
+    val of_tuple : Permission.t * TargetModel.t * Uuid.Target.t option -> t
+    val remove_duplicates : t list -> t list
+
+    val filter_permission_on_model
+      :  Permission.t
+      -> TargetModel.t
+      -> t list
+      -> t list
+
+    val validate : ?any_id:bool -> t -> t list -> bool
+
+    val permission_of_model
+      :  Permission.t
+      -> TargetModel.t
+      -> t list
+      -> bool * Uuid.Target.t list
   end
 
   module ValidationSet : sig
     type t =
       | And of t list
       | Or of t list
-      | One of Effect.t
-      | SpecificRole of ActorRoles.t
-      | NotRole of ActorRoles.t
+      | One of PermissionOnTarget.t
 
     val equal : t -> t -> bool
     val pp : Format.formatter -> t -> unit
@@ -100,131 +214,40 @@ module Make : functor (ActorRoles : RoleSig) (TargetRoles : RoleSig) -> sig
     val compare : t -> t -> int
     val to_yojson : t -> Yojson.Safe.t
     val of_yojson : Yojson.Safe.t -> t Ppx_deriving_yojson_runtime.error_or
+    val sexp_of_t : t -> Sexplib0.Sexp.t
     val and_ : t list -> t
     val or_ : t list -> t
-    val one : Effect.t -> t
-    val specific_role : ActorRoles.t -> t
-    val not_role : ActorRoles.t -> t
+    val one : PermissionOnTarget.t -> t
+    val one_of_tuple : Permission.t * TargetModel.t * Uuid.Target.t option -> t
     val empty : t
-  end
-
-  module Actor : sig
-    type 'a t
-
-    val id : 'a t -> Uuid.Actor.t
-    val owner : 'a t -> Uuid.Actor.t option
-    val roles : 'a t -> RoleSet.t
-    val equal : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
-    val compare : ('a -> 'a -> int) -> 'a t -> 'a t -> int
-    val to_yojson : ('a -> Yojson.Safe.t) -> 'a t -> Yojson.Safe.t
-
-    val of_yojson
-      :  (Yojson.Safe.t -> 'a Ppx_deriving_yojson_runtime.error_or)
-      -> Yojson.Safe.t
-      -> 'a t Ppx_deriving_yojson_runtime.error_or
-
-    val show : 'a t -> string
-    val pp : Format.formatter -> 'a t -> unit
-    val make : ?owner:Uuid.Actor.t -> RoleSet.t -> 'a -> Uuid.Actor.t -> 'a t
-    val a_owns_b : 'a t -> 'b t -> bool
-    val has_role : 'a t -> ActorRoles.t -> bool
-  end
-
-  module type ActorSig = sig
-    type t
-
-    val to_authorizable
-      :  ?ctx:context
-      -> t
-      -> (ActorRoles.t Actor.t, string) Lwt_result.t
-  end
-
-  module Target : sig
-    type 'a t
-
-    val id : 'a t -> Uuid.Target.t
-    val owner : 'a t -> Uuid.Actor.t option
-    val equal : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
-    val compare : ('a -> 'a -> int) -> 'a t -> 'a t -> int
-    val to_yojson : ('a -> Yojson.Safe.t) -> 'a t -> Yojson.Safe.t
-
-    val of_yojson
-      :  (Yojson.Safe.t -> 'a Ppx_deriving_yojson_runtime.error_or)
-      -> Yojson.Safe.t
-      -> 'a t Ppx_deriving_yojson_runtime.error_or
-
-    val show : 'a t -> string
-    val pp : Format.formatter -> 'a t -> unit
-    val make : ?owner:Uuid.Actor.t -> 'a -> Uuid.Target.t -> 'a t
-  end
-
-  module type TargetSig = sig
-    type t
-
-    val to_authorizable
-      :  ?ctx:context
-      -> t
-      -> (TargetRoles.t Target.t, string) Lwt_result.t
-  end
-
-  module Authorizer : sig
-    val check_effect
-      :  ?tags:Logs.Tag.set
-      -> Rule.t list
-      -> 'a Actor.t
-      -> Effect.t
-      -> (unit, string) result
-
-    val actor_in_rule : 'a Actor.t -> Rule.t -> bool
-    val actor_in_rule_res : 'a Actor.t -> Rule.t -> (unit, string) result
-
-    val can_for_rules
-      :  ?any_of:bool
-      -> Rule.t list
-      -> 'a Actor.t
-      -> (unit, string) result
-  end
-
-  module Relation : sig
-    module Query : sig
-      type t
-
-      val create : string -> t
-      val of_string : string -> t
-      val to_string : t -> string
-    end
-
-    type t = TargetRoles.t * TargetRoles.t * Query.t option
   end
 
   module type PersistenceSig =
     Persistence.Contract
-      with type 'a actor = 'a Actor.t
-       and type 'b target = 'b Target.t
-       and type actor_spec = ActorSpec.t
-       and type effect = Effect.t
-       and type kind = TargetRoles.t
-       and type query = Relation.Query.t
-       and type relation = Relation.t
-       and type role_set = RoleSet.t
-       and type roles = ActorRoles.t
-       and type rule = Rule.t
-       and type target_spec = TargetSpec.t
+      with type actor = Actor.t
+       and type actor_model = ActorModel.t
+       and type actor_permission = ActorPermission.t
+       and type actor_role = ActorRole.t
+       and type permission_on_target = PermissionOnTarget.t
+       and type role = Role.t
+       and type role_permission = RolePermission.t
+       and type target = Target.t
+       and type target_entity = TargetEntity.t
+       and type target_model = TargetModel.t
        and type validation_set = ValidationSet.t
 
   module MakePersistence : functor
-    (Backend : Persistence.Backend
-                 with type 'a actor = 'a Actor.t
-                  and type 'b target = 'b Target.t
-                  and type actor_spec = ActorSpec.t
-                  and type effect = Effect.t
-                  and type kind = TargetRoles.t
-                  and type query = Relation.Query.t
-                  and type relation = Relation.t
-                  and type role_set = RoleSet.t
-                  and type roles = ActorRoles.t
-                  and type rule = Rule.t
-                  and type target_spec = TargetSpec.t
-                  and type validation_set = ValidationSet.t)
-    -> PersistenceSig
+      (Backend : Persistence.Backend
+                   with type actor = Actor.t
+                    and type actor_model = ActorModel.t
+                    and type actor_permission = ActorPermission.t
+                    and type actor_role = ActorRole.t
+                    and type permission_on_target = PermissionOnTarget.t
+                    and type role = Role.t
+                    and type role_permission = RolePermission.t
+                    and type target = Target.t
+                    and type target_entity = TargetEntity.t
+                    and type target_model = TargetModel.t
+                    and type validation_set = ValidationSet.t)
+      -> PersistenceSig
 end [@warning "-67"]

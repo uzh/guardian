@@ -1,6 +1,6 @@
 FROM node:16 AS node
 FROM hadolint/hadolint:latest-alpine AS hadolint
-FROM ocaml/opam:debian-10-ocaml-4.12
+FROM ocaml/opam:debian-10-ocaml-4.14
 
 # copy node from node container and link commands
 USER root

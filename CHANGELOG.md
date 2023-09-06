@@ -4,6 +4,18 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [unreleased](https://github.com/uzh/guardian/tree/HEAD)
 
+## Added
+
+- helper functions on backend for integrated guardian usage
+
+## Changed
+
+- performance update, reduce amount of needed role permissions
+
+## Removed
+
+- relations
+
 ## [0.2.0](https://github.com/uzh/guardian/tree/0.2.0) - 2023-07-05
 
 ## Added

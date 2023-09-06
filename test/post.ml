@@ -1,5 +1,3 @@
-let article_relation ?query () = `Post, `Article, query
-
 module Make (Backend : Guard.PersistenceSig) = struct
   open Guard
   module User = User.MakeActor (Backend)
@@ -18,12 +16,16 @@ module Make (Backend : Guard.PersistenceSig) = struct
     { id; comment; article; author }
   ;;
 
-  let to_authorizable ?ctx =
-    Backend.Target.decorate ?ctx (fun t ->
-      Target.make ~owner:(snd t.author) `Post t.id)
+  let to_authorizable ?ctx { id; author; _ } =
+    let%lwt auth = Backend.Target.decorate ?ctx (Target.create `Post) id in
+    let%lwt () =
+      Guard.ActorRole.create ~target_uuid:id (snd author) `Author
+      |> Backend.ActorRole.upsert ?ctx
+    in
+    Lwt.return auth
   ;;
 
-  let update_post ?ctx (actor : [ `User ] Actor.t) t new_comment =
+  let update_post ?ctx (actor : Actor.t) t new_comment =
     let open Lwt_result.Syntax in
     let f new_comment =
       let () = t.comment <- new_comment in
@@ -33,25 +35,8 @@ module Make (Backend : Guard.PersistenceSig) = struct
       Backend.validate
         ?ctx
         CCFun.id
-        ValidationSet.(One (Action.Update, TargetSpec.Id (`Post, t.id)))
+        ValidationSet.(one_of_tuple (Permission.Update, `Post, Some t.id))
         actor
-    in
-    f new_comment
-  ;;
-
-  let update_post_as_specific_role
-    ?ctx
-    (actor : [ `User ] Actor.t)
-    t
-    new_comment
-    =
-    let open Lwt_result.Syntax in
-    let f new_comment =
-      let () = t.comment <- new_comment in
-      Lwt.return_ok t
-    in
-    let* () =
-      Backend.validate ?ctx CCFun.id ValidationSet.(SpecificRole `Hacker) actor
     in
     f new_comment
   ;;

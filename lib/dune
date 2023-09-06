@@ -10,4 +10,5 @@
    ppx_deriving.eq
    ppx_deriving.make
    ppx_deriving.ord
-   ppx_deriving.show)))
+   ppx_deriving.show
+   ppx_sexp_conv)))

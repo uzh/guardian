@@ -32,7 +32,9 @@
   (caqti-driver-mariadb
    (>= 1.9.0))
   (caqti-lwt
-   (>= 1.9.0))
+   (and
+    (>= 1.9.0)
+    (<= 2.0.0)))
   (containers
    (>= 3.6))
   (containers-data
@@ -51,6 +53,8 @@
    (>= 5.2.1))
   (ppx_deriving_yojson
    (>= 3.6.1))
+  (ppx_sexp_conv
+   (>= 0.15.1))
   (uri
    (>= 4.2.0))
   (uuidm

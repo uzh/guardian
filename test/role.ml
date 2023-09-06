@@ -1,43 +1,51 @@
 open CCFun.Infix
-module Uuid = Guardian.Contract.Uuid
+
+module Role = struct
+  type t =
+    [ `Admin
+    | `Author
+    | `Editor
+    | `Reader
+    ]
+  [@@deriving show, eq, ord, yojson, sexp_of]
+
+  let name = show %> Guardian.Utils.decompose_variant_string %> fst
+
+  let of_string_res =
+    Guardian.Utils.decompose_variant_string
+    %> function
+    | "admin", [] -> Ok `Admin
+    | "author", [] -> Ok `Author
+    | "editor", [] -> Ok `Editor
+    | "reader", [] -> Ok `Reader
+    | role -> Error (Guardian.Utils.invalid_role role)
+  ;;
+
+  let of_string = of_string_res %> CCResult.get_or_failwith
+  let all = [ `Admin; `Author; `Editor; `Reader ]
+end
 
 module Actor = struct
   type t =
     [ `Admin
-    | `Editor of Uuid.Target.t
     | `Hacker
-    | `Reader of Uuid.Target.t
     | `User
     ]
-  [@@deriving show, eq, ord, yojson]
+  [@@deriving show, eq, ord, yojson, sexp_of]
 
   let name = show %> Guardian.Utils.decompose_variant_string %> fst
 
-  let find_target = function
-    | `Admin | `Hacker | `User -> None
-    | `Editor x | `Reader x -> Some x
-  ;;
-
-  let find_target_exn = find_target %> CCOption.get_exn_or "No target"
-
-  let all =
-    [ `Admin; `Editor Uuid.Target.nil; `Hacker; `Reader Uuid.Target.nil; `User ]
-  ;;
-
-  let of_string =
+  let of_string_res =
     Guardian.Utils.decompose_variant_string
     %> function
-    | "admin", [] -> `Admin
-    | "editor", [ id ] ->
-      Logs.debug (fun m -> m "Parsing role `Editor with id: %s" id);
-      `Editor (Uuid.Target.of_string_exn id)
-    | "hacker", [] -> `Hacker
-    | "reader", [ id ] ->
-      Logs.debug (fun m -> m "Parsing role `Reader with id: %s" id);
-      `Reader (Uuid.Target.of_string_exn id)
-    | "user", [] -> `User
-    | role -> Guardian.Utils.failwith_invalid_role role
+    | "admin", [] -> Ok `Admin
+    | "hacker", [] -> Ok `Hacker
+    | "user", [] -> Ok `User
+    | role -> Error (Guardian.Utils.invalid_role role)
   ;;
+
+  let of_string = of_string_res %> CCResult.get_or_failwith
+  let all = [ `Admin; `Hacker; `User ]
 end
 
 module Target = struct
@@ -47,23 +55,20 @@ module Target = struct
     | `Post
     | `User
     ]
-  [@@deriving show, eq, ord, yojson]
+  [@@deriving show, eq, ord, yojson, sexp_of]
 
   let name = show %> Guardian.Utils.decompose_variant_string %> fst
 
-  let find_target = function
-    | `Article | `Note | `Post | `User -> None
+  let of_string_res =
+    Guardian.Utils.decompose_variant_string
+    %> function
+    | "article", [] -> Ok `Article
+    | "note", [] -> Ok `Note
+    | "post", [] -> Ok `Post
+    | "user", [] -> Ok `User
+    | role -> Error (Guardian.Utils.invalid_role role)
   ;;
 
-  let find_target_exn = find_target %> CCOption.get_exn_or "No target"
+  let of_string = of_string_res %> CCResult.get_or_failwith
   let all = [ `Article; `Note; `Post; `User ]
-
-  let of_string s =
-    match Guardian.Utils.decompose_variant_string s with
-    | "article", [] -> `Article
-    | "note", [] -> `Note
-    | "post", [] -> `Post
-    | "user", [] -> `User
-    | role -> Guardian.Utils.failwith_invalid_role role
-  ;;
 end

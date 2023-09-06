@@ -16,6 +16,7 @@ module UuidBase = struct
     |> CCOption.get_exn_or (Format.asprintf "'%10s' is not a valid uuid" s)
   ;;
 
+  let sexp_of_t uuid = Sexplib0.Sexp.Atom (to_string uuid)
   let create () = v `V4
 end
 

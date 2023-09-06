@@ -123,15 +123,15 @@ module Make (Config : ConfigSig) = struct
     | SinglePool database_url when CCOption.is_none !main_pool_ref ->
       database_url
       |> connect_or_failwith (fun pool ->
-           main_pool_ref := Some pool;
-           ())
+        main_pool_ref := Some pool;
+        ())
     | SinglePool _ -> ()
     | MultiPools pools' ->
       pools'
       |> CCList.filter (fun (name, _) ->
-           CCOption.is_none (Hashtbl.find_opt pools name))
+        CCOption.is_none (Hashtbl.find_opt pools name))
       |> CCList.iter (fun (name, url) ->
-           url |> connect_or_failwith (Hashtbl.add pools name))
+        url |> connect_or_failwith (Hashtbl.add pools name))
   ;;
 
   let fetch_pool ?(ctx = []) () =

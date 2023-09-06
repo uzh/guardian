@@ -1,32 +1,38 @@
-module Guard = Guardian.Make (Role.Actor) (Role.Target)
+open CCFun
+module Guard = Guardian.Make (Role.Actor) (Role.Role) (Role.Target)
 
+let aron_article_id = Guard.Uuid.Target.create ()
 let chris_article_id = Guard.Uuid.Target.create ()
 let thomas_chris_post_id = Guard.Uuid.Target.create ()
 
-let test_find_article_query =
-  Format.asprintf
-    {sql|
-      SELECT UNHEX(REPLACE('%s', '-', ''))
-      WHERE UNHEX(REPLACE('%s', '-', '')) = ?
-    |sql}
-    (Guard.Uuid.Target.to_string chris_article_id)
-    (Guard.Uuid.Target.to_string thomas_chris_post_id)
-  |> Guard.Relation.Query.create
-;;
-
 module Tests (Backend : Guard.PersistenceSig) = struct
   open Guard
+  open Permission
   module Article = Article.Make (Backend)
   module Hacker = Hacker.Make (Backend)
   module Notes = Notes.Make (Backend)
   module Post = Post.Make (Backend)
   module UserTarget = User.MakeTarget (Backend)
   module User = User.MakeActor (Backend)
-  module Set = RoleSet
+  module ActorRoleSet = CCSet.Make (Guard.ActorRole)
+  module ActorPermissionSet = CCSet.Make (Guard.ActorPermission)
+  module RolePermissionSet = CCSet.Make (Guard.RolePermission)
 
   let testable_uuid = Uuid.Target.(Alcotest.testable pp equal)
   let testable_actor_uuid = Uuid.Actor.(Alcotest.testable pp equal)
-  let testable_set = Set.(Alcotest.testable pp equal)
+  let testable_actor_role = ActorRole.(Alcotest.testable pp equal)
+
+  let testable_actor_role_set =
+    ActorRoleSet.(Alcotest.testable (pp ActorRole.pp) equal)
+  ;;
+
+  let testable_role_permission_set =
+    RolePermissionSet.(Alcotest.testable (pp RolePermission.pp) equal)
+  ;;
+
+  let testable_permission_on_target =
+    PermissionOnTarget.(Alcotest.testable pp equal)
+  ;;
 
   (* ensure that the `User` module conforms to the `ActorSig` and `UserTarget`
      conforms to `TargetSig` module type. *)
@@ -39,7 +45,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   let thomas = "Thomas", Guard.Uuid.Actor.create ()
   let hugo = "Hugo", Guard.Uuid.Actor.create ()
   let chris_article = Article.make ~id:chris_article_id "Foo" "Bar" chris
-  let aron_article = Article.make "Fizz" "Buzz" aron
+  let aron_article = Article.make ~id:aron_article_id "Fizz" "Buzz" aron
 
   let thomas_chris_post =
     Post.make ~id:thomas_chris_post_id thomas chris_article "A first reaction"
@@ -48,227 +54,189 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   let thomas_aron_post = Post.make thomas aron_article "A second reaction"
   let thomas_note = Notes.make thomas "Hello world note"
   let chris_note = Notes.make chris "My private note"
+  let bad_role_permission = RolePermission.create `Editor Update `Note
 
-  let bad_rule =
-    ( ActorSpec.Id (`User, snd chris)
-    , Guard.Action.Update
-    , TargetSpec.Id (`Article, aron_article.Article.id) )
+  let bad_actor_permission =
+    ActorPermission.create_for_id (snd chris) Update aron_article.Article.id
   ;;
 
-  let global_rules : Rule.t list =
-    let open Guard.Action in
-    [ ActorSpec.Entity `User, Read, TargetSpec.Entity `Article
-    ; ActorSpec.Entity `Admin, Manage, TargetSpec.Entity `Article
-    ; ( ActorSpec.Entity (`Editor chris_article.Article.id)
-      , Update
-      , TargetSpec.Id (`Article, chris_article.Article.id) )
-      (* Explanation: Someone with actor rule "Editor of id X" has the
-         permission to update the "Target with id X" *)
-    ; ( ActorSpec.Entity (`Reader chris_note.Notes.id)
-      , Read
-      , TargetSpec.Id (`Note, chris_note.Notes.id) )
-    ; ( ActorSpec.Entity (`Reader thomas_note.Notes.id)
-      , Read
-      , TargetSpec.Id (`Note, thomas_note.Notes.id) )
+  let global_role_permission =
+    [ `Reader, Read, `Article
+    ; `Reader, Read, `Post
+    ; `Editor, Create, `Article
+    ; `Editor, Update, `Article
+    ; `Admin, Manage, `Article
+    ; `Admin, Manage, `Post
+    ; `Admin, Manage, `Note
+    ; `Author, Update, `Article
     ]
+    |> CCList.map (fun (role, perm, model) ->
+      RolePermission.create role perm model)
   ;;
 
   let ( let* ) = Lwt_result.bind
   let ( >|= ) = Lwt.Infix.( >|= )
 
   let test_create_authorizable ?ctx (_ : 'a) () =
-    (let* _aron_ent = User.to_authorizable ?ctx aron in
-     let* _chris_ent = User.to_authorizable ?ctx chris in
+    let expected =
+      ( ActorRole.create ~target_uuid:chris_article_id (snd chris) `Author
+      , ActorRole.create ~target_uuid:aron_article_id (snd aron) `Author )
+    in
+    (let* aron_ent = User.to_authorizable ?ctx aron in
+     let* () = User.insert_roles ?ctx aron_ent in
+     let* chris_ent = User.to_authorizable ?ctx chris in
+     let* () = User.insert_roles ?ctx chris_ent in
      let* _ben_ent = Hacker.to_authorizable ?ctx ben in
-     let* _tomas_ent = User.to_authorizable ?ctx thomas in
+     let* thomas_ent = User.to_authorizable ?ctx thomas in
+     let* () = User.insert_roles ?ctx thomas_ent in
      let* _chris_art_ent = Article.to_authorizable ?ctx chris_article in
      let* _aron_art_ent = Article.to_authorizable ?ctx aron_article in
      (* now we check to see that the authorizables have had ownership set *)
-     let find_owner_id article =
-       let* x = Backend.Target.find_owner ?ctx `Article article.Article.id in
-       x
-       |> CCOption.to_result
-            (Format.asprintf
-               "Couldn't get owner for article %s"
-               (Article.show article))
-       |> Lwt.return
+     let find_author_role ({ Article.id; _ } as article) =
+       Backend.ActorRole.find_by_target ?ctx (`Author, id)
+       >|= function
+       | [] ->
+         Error
+           (Article.show article
+            |> Format.asprintf "Couldn't get owner for article %s")
+       | roles -> Ok (CCList.hd roles)
      in
-     let* chris_art_owner = find_owner_id chris_article in
-     let* aron_art_owner = find_owner_id aron_article in
-     Lwt.return_ok
-       Guard.Uuid.Actor.(to_string chris_art_owner, to_string aron_art_owner))
-    >|= Alcotest.(check (result (pair string string) string))
+     let* chris_art_owner = find_author_role chris_article in
+     let* aron_art_owner = find_author_role aron_article in
+     Lwt.return_ok (chris_art_owner, aron_art_owner))
+    >|= Alcotest.(
+          check (result (pair testable_actor_role testable_actor_role) string))
           "Create an authorizable."
-          (Ok Guard.Uuid.Actor.(to_string (snd chris), to_string (snd aron)))
+          (Ok expected)
   ;;
 
   let test_find_authorizable ?ctx (_ : 'a) () =
-    (match%lwt Backend.Actor.find ?ctx `User (snd aron) with
+    (match%lwt Backend.Actor.find ?ctx (snd aron) with
      | Ok _ -> Lwt.return_true
      | Error err -> failwith err)
     >|= Alcotest.(check bool) "Fetch an authorizable." true
   ;;
 
   let test_grant_roles ?ctx (_ : 'a) () =
-    let%lwt () =
-      Backend.Actor.grant_roles ?ctx (snd aron) (Set.singleton `Admin)
-      >|= Alcotest.(check (result unit string)) "Grant a role." (Ok ())
+    let open ActorRoleSet in
+    let%lwt previous_roles =
+      Backend.ActorRole.find_by_actor ?ctx (snd aron) >|= of_list
     in
-    Backend.Actor.find_roles ?ctx (snd aron)
-    >|= Alcotest.(check testable_set)
+    let grant_role = ActorRole.create (snd aron) `Admin in
+    let%lwt () =
+      Backend.ActorRole.upsert ?ctx grant_role
+      >|= Alcotest.(check unit) "Grant a role." ()
+    in
+    Backend.ActorRole.find_by_actor ?ctx (snd aron)
+    >|= of_list
+    >|= CCFun.flip diff previous_roles
+    >|= Alcotest.(check testable_actor_role_set)
           "Check if the role was granted."
-          Set.(empty |> add `User |> add `Admin)
-  ;;
-
-  let test_check_roles ?ctx (_ : 'a) () =
-    (let%lwt roles = Backend.Actor.find_roles ?ctx (snd aron) in
-     let expected = Set.of_list [ `User; `Admin ] in
-     let diff =
-       Set.(union (diff expected roles) (diff roles expected) |> elements)
-     in
-     if diff = []
-     then Lwt.return_ok ()
-     else
-       let open Set in
-       let received = [%show: Role.Actor.t list] (elements roles) in
-       let expected = [%show: Role.Actor.t list] (elements expected) in
-       Lwt.return_error
-         (Format.asprintf
-            "Got %s for roles of authorizable %s, but expected %s."
-            received
-            (Guard.Uuid.Actor.to_string (snd aron))
-            expected))
-    >|= Alcotest.(check (result unit string)) "Check a user's roles." (Ok ())
+          (ActorRoleSet.singleton grant_role)
   ;;
 
   let test_revoke_roles ?ctx (_ : 'a) () =
-    (let* () =
-       Backend.Actor.grant_roles
-         ?ctx
-         (snd aron)
-         (Set.singleton (`Editor Guard.Uuid.Target.nil))
-     in
+    (let open ActorRoleSet in
+     let role = ActorRole.create (snd aron) `Editor in
+     let open Backend in
+     let find_role () = ActorRole.find_by_actor ?ctx (snd aron) >|= of_list in
+     let%lwt () = role |> ActorRole.upsert ?ctx in
      let* () =
-       let%lwt roles = Backend.Actor.find_roles ?ctx (snd aron) in
-       if Set.mem (`Editor Guard.Uuid.Target.nil) roles
+       let%lwt roles = find_role () in
+       if mem role roles
        then Lwt.return_ok ()
        else
          Lwt.return_error
            "Didn't successfully add the role we intended to remove."
      in
-     let* () =
-       Backend.Actor.revoke_roles
-         ?ctx
-         (snd aron)
-         (Set.singleton (`Editor Guard.Uuid.Target.nil))
-     in
-     let%lwt roles = Backend.Actor.find_roles ?ctx (snd aron) in
-     Lwt.return_ok (Set.mem (`Editor Guard.Uuid.Target.nil) roles))
+     let%lwt () = role |> ActorRole.delete ?ctx in
+     let%lwt roles = find_role () in
+     Lwt.return_ok (mem role roles))
     >|= Alcotest.(check (result bool string)) "Check a user's roles." (Ok false)
   ;;
 
-  let test_push_rules ?ctx (_ : 'a) () =
-    (let* put =
-       Backend.Rule.save_all ?ctx global_rules
-       |> Lwt_result.map_error [%show: Rule.t list]
-     in
-     Lwt.return_ok (CCList.map Rule.show put))
-    >|= Alcotest.(check (result (slist string CCString.compare) string))
+  let test_push_role_permission ?ctx (_ : 'a) () =
+    let open RolePermissionSet in
+    let testable_set = testable_role_permission_set in
+    Backend.RolePermission.insert_all ?ctx global_role_permission
+    |> Lwt_result.map_error of_list
+    |> Lwt_result.map of_list
+    >|= Alcotest.(check (result testable_set testable_set))
           "Push global permissions."
-          (Ok (CCList.map Rule.show global_rules))
+          (Ok (global_role_permission |> of_list))
   ;;
 
   let save_existing_rule ?ctx (_ : 'a) () =
-    let existing_rule = List.hd global_rules in
-    (let* () = Backend.Rule.save ?ctx existing_rule in
-     Backend.Rule.save ?ctx existing_rule)
-    >|= Alcotest.(check (result unit string)) "Push global permissions." (Ok ())
+    let existing_rule = List.hd global_role_permission in
+    (let* () = Backend.RolePermission.insert ?ctx existing_rule in
+     Backend.RolePermission.insert ?ctx existing_rule)
+    >|= Alcotest.(check (result unit string)) "Save existing permission" (Ok ())
   ;;
 
   let test_read_rules ?ctx (_ : 'a) () =
-    let open Guard in
-    (let spec_of_rules =
-       [ TargetSpec.Entity `Article
-       ; TargetSpec.Id (`Article, chris_article.Article.id)
-       ; TargetSpec.Id (`Note, chris_note.Notes.id)
-       ; TargetSpec.Id (`Note, thomas_note.Notes.id)
-       ]
+    let open ActorPermissionSet in
+    (let actor_permissions =
+       TargetEntity.
+         [ Model `Article
+         ; Id chris_article.Article.id
+         ; Id chris_note.Notes.id
+         ; Id thomas_note.Notes.id
+         ]
      in
      let%lwt perms =
-       Lwt_list.map_s (Backend.Rule.find_all ?ctx) spec_of_rules
+       Lwt_list.map_s
+         (Backend.ActorPermission.find_all_of_entity ?ctx)
+         actor_permissions
+       >|= CCList.flatten
      in
-     let global_set = Rule.Set.of_list global_rules in
-     let retrieved_set = Rule.Set.of_list (perms |> CCList.flatten) in
-     let diff = Rule.Set.diff global_set retrieved_set in
-     let diff' = Rule.Set.elements diff |> [%show: Rule.t list] in
-     if Rule.Set.compare global_set retrieved_set = 0
+     let expexted_set = of_list [] in
+     let retrieved_set = of_list perms in
+     let diff = diff expexted_set retrieved_set in
+     if compare expexted_set retrieved_set = 0
      then Lwt.return_ok ()
-     else Lwt.return_error (Format.asprintf "Permissions diff: %s." diff'))
+     else
+       Lwt.return_error
+         (elements diff
+          |> [%show: ActorPermission.t list]
+          |> Format.asprintf "Permissions diff: %s."))
     >|= Alcotest.(check (result unit string))
           "Read the global permissions we've just pushed."
           (Ok ())
   ;;
 
   let test_drop_rules ?ctx (_ : 'a) () =
-    (let* () = Backend.Rule.save ?ctx bad_rule in
-     let%lwt perms =
-       Backend.Rule.find_all
-         ?ctx
-         (TargetSpec.Id (`Article, aron_article.Article.id))
+    (let open Backend.RolePermission in
+     let open RolePermissionSet in
+     let* () = insert ?ctx bad_role_permission in
+     let* (_ : t) =
+       find_all_of_model ?ctx `Note
+       >|= of_list
+       >|= fun perms ->
+       if mem bad_role_permission perms
+       then Ok perms
+       else Error "Failed to push bad permission to test perm dropping."
      in
-     let* () =
-       match perms with
-       | [ perm ] when perm = bad_rule -> Lwt.return_ok ()
-       | [ _ ] ->
-         Lwt.return_error "Failed to push bad permission to test perm dropping."
-       | _ -> Lwt.return_error "Invalid permissions."
-     in
-     let* () = Backend.Rule.delete ?ctx bad_rule in
-     let%lwt perms' =
-       Backend.Rule.find_all
-         ?ctx
-         (TargetSpec.Id (`Article, aron_article.Article.id))
-     in
-     match perms' with
-     | [] -> Lwt.return_ok ()
-     | (_ : Rule.t list) -> Lwt.return_error "Failed to remove bad perm.")
+     let* () = delete ?ctx bad_role_permission in
+     find_all_of_model ?ctx `Article
+     >|= of_list
+     >|= fun perms ->
+     if mem bad_role_permission perms |> not
+     then Ok ()
+     else Error "Failed to remove bad permission.")
     >|= Alcotest.(check (result unit string))
           "Read the global permissions we've just pushed."
           (Ok ())
   ;;
 
-  let test_update_owned ?ctx (_ : 'a) () =
+  let test_update_by_author ?ctx (_ : 'a) () =
     (let* chris_ent = User.to_authorizable ?ctx chris in
      let* (_ : Article.t) =
        Article.update_title ?ctx chris_ent chris_article "Updated Title"
      in
      Lwt.return_ok true)
     >|= Alcotest.(check (result bool string))
-          "Chris can update an article owned by Chris."
+          "Chris can update an article where he is '`Author'."
           (Ok true)
-  ;;
-
-  let owner_can_update ?ctx (_ : 'a) () =
-    let open CCFun in
-    let%lwt article_owner =
-      let open Lwt.Infix in
-      Backend.Target.find_owner ?ctx `Article aron_article.Article.id
-      >|= CCResult.to_opt
-          %> CCOption.flatten
-          %> CCOption.get_exn_or "Owner not set"
-      >>= Backend.Actor.find ?ctx `User
-      >|= CCResult.get_or_failwith
-    in
-    let%lwt try_update =
-      Article.update_title ?ctx article_owner aron_article "Updated Title"
-    in
-    let () =
-      Alcotest.(check bool)
-        "Actor of article owner, should be allowed to do anything."
-        (CCResult.is_ok try_update)
-        true
-    in
-    Lwt.return_unit
   ;;
 
   let test_admin_update_others' ?ctx (_ : 'a) () =
@@ -298,7 +266,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   ;;
 
   let can_update_self ?ctx (_ : 'a) () =
-    (let%lwt (_ : ([> `User ] Backend.target, string) result) =
+    (let%lwt (_ : (Backend.target, string) result) =
        UserTarget.to_authorizable ?ctx thomas
      in
      let%lwt thomas_auth = User.to_authorizable ?ctx thomas in
@@ -326,13 +294,12 @@ module Tests (Backend : Guard.PersistenceSig) = struct
       Format.asprintf "Permission denied for %s" ([%show: ValidationSet.t] set)
     in
     (let* _ = Notes.to_authorizable ?ctx thomas_note in
+     let* _ = Notes.define_roles ?ctx thomas_note in
      let* _ = Notes.to_authorizable ?ctx chris_note in
+     let* _ = Notes.define_roles ?ctx chris_note in
      let* () =
-       Backend.Actor.grant_roles
-         ?ctx
-         (snd thomas)
-         (Set.singleton (`Reader thomas_note.Notes.id))
-       |> Lwt_result.map_error failwith
+       ActorPermission.create_for_id (snd thomas) Read thomas_note.Notes.id
+       |> Backend.ActorPermission.insert ?ctx
      in
      let* thomas_actor = User.to_authorizable ?ctx thomas in
      let validate_test (fcn : string -> string) msg set expected =
@@ -344,11 +311,11 @@ module Tests (Backend : Guard.PersistenceSig) = struct
        validate_test
          CCFun.id
          "Reader can read a note he's reader/owner of."
-         (One (Action.Read, TargetSpec.Id (`Note, thomas_note.Notes.id)))
+         (one_of_tuple (Permission.Read, `Note, Some thomas_note.Notes.id))
          (Ok ())
      in
      let%lwt () =
-       let set = One (Action.Read, TargetSpec.Entity `Note) in
+       let set = one_of_tuple (Permission.Read, `Note, None) in
        validate_test
          (fun _ -> pp_error set)
          "Reader cannot read a note of anyone."
@@ -357,7 +324,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
      in
      let%lwt () =
        let set =
-         One (Action.Read, TargetSpec.Id (`Note, chris_note.Notes.id))
+         one_of_tuple (Permission.Read, `Note, Some chris_note.Notes.id)
        in
        validate_test
          (fun _ -> pp_error set)
@@ -372,12 +339,12 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   ;;
 
   let editor_can_edit ?ctx (_ : 'a) () =
-    (let* () =
-       Backend.Actor.grant_roles
-         ?ctx
+    (let%lwt () =
+       ActorRole.create
+         ~target_uuid:chris_article.Article.id
          (snd thomas)
-         (Set.singleton (`Editor chris_article.Article.id))
-       |> Lwt_result.map_error failwith
+         `Editor
+       |> Backend.ActorRole.upsert ?ctx
      in
      let* thomas_actor = User.to_authorizable ?ctx thomas in
      let* _chris_article' =
@@ -393,35 +360,13 @@ module Tests (Backend : Guard.PersistenceSig) = struct
           (Ok true)
   ;;
 
-  let editor_role_can_edit ?ctx (_ : 'a) () =
-    (let* () =
-       Backend.Actor.grant_roles
-         ?ctx
-         (snd thomas)
-         (Set.singleton (`Editor chris_article.Article.id))
-       |> Lwt_result.map_error failwith
-     in
-     let* thomas_actor = User.to_authorizable ?ctx thomas in
-     let* _chris_article' =
-       Article.update_title_by_role
-         ?ctx
-         thomas_actor
-         chris_article
-         "Thomas set this one"
-     in
-     Lwt.return_ok true)
-    >|= Alcotest.(check (result bool string))
-          "Editor can edit an article he's has the specific editor role of."
-          (Ok true)
-  ;;
-
-  let set_owner ?ctx (_ : 'a) () =
+  let set_author ?ctx (_ : 'a) () =
     (let* aron' = User.to_authorizable ?ctx aron in
      let* chris_article' =
-       Article.update_author ?ctx aron' chris_article aron
+       Article.update_author ?ctx aron' chris_article chris aron
      in
      let* () =
-       if chris_article'.Article.author <> chris
+       if chris_article'.Article.author <> aron
        then Lwt.return_ok ()
        else Lwt_result.fail "Article didn't update"
      in
@@ -433,7 +378,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
      | Ok _ -> Lwt.return_error "Failed to set new owner"
      | Error _ ->
        let* (_ : Article.t) =
-         Article.update_author ?ctx aron' chris_article chris
+         Article.update_author ?ctx aron' chris_article aron chris
        in
        Lwt_result.return true)
     >|= Alcotest.(check (result bool string))
@@ -448,24 +393,19 @@ module Tests (Backend : Guard.PersistenceSig) = struct
       (* Note: a user can be an actor or a target, so 'to_authorizable' has to
          be called for both roles *)
       let* target' = UserTarget.to_authorizable ?ctx hugo in
-      let target_id = target' |> Target.id in
-      let* actor = User.to_authorizable ?ctx thomas in
-      let* () =
-        Backend.Actor.grant_roles
-          ?ctx
-          (actor |> Actor.id)
-          (RoleSet.singleton (`Editor target_id))
+      let target_uuid = target'.Target.uuid in
+      let* actor = User.to_authorizable ?ctx aron in
+      let%lwt () =
+        ActorRole.create ~target_uuid actor.Actor.uuid `Editor
+        |> Backend.ActorRole.upsert ?ctx
       in
-      let* actor = Backend.Actor.find ?ctx `User (snd thomas) in
+      let* actor = Backend.Actor.find ?ctx (snd aron) in
       let* () =
-        Backend.Rule.save
-          ?ctx
-          ( ActorSpec.Entity (`Editor target_id)
-          , Guard.Action.Manage
-          , TargetSpec.Id (`User, target_id) )
+        RolePermission.create `Admin Permission.Manage `User
+        |> Backend.RolePermission.insert ?ctx
       in
       let effects =
-        ValidationSet.One (Guard.Action.Manage, TargetSpec.Id (`User, target_id))
+        ValidationSet.one_of_tuple (Permission.Manage, `User, Some target_uuid)
       in
       Backend.validate ?ctx CCFun.id effects actor
     in
@@ -476,10 +416,8 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     |> Lwt.return
   ;;
 
-  let transistency ?ctx (_ : 'a) () =
-    (let* (_ : Backend.kind Guard.Target.t) =
-       Post.to_authorizable ?ctx thomas_chris_post
-     in
+  let transistency_deny ?ctx (_ : 'a) () =
+    (let* (_ : Guard.Target.t) = Post.to_authorizable ?ctx thomas_chris_post in
      let* chris_authorizable = User.to_authorizable ?ctx chris in
      let* _thomas_post' =
        Post.update_post
@@ -490,68 +428,34 @@ module Tests (Backend : Guard.PersistenceSig) = struct
      in
      Lwt.return_ok true)
     >|= Alcotest.(check (result bool string))
-          "User can edit an post of an article he's manager of."
-          (Ok true)
-  ;;
-
-  let transistency_deny ?ctx (_ : 'a) () =
-    (let* (_ : Backend.kind Guard.Target.t) =
-       Post.to_authorizable ?ctx thomas_aron_post
-     in
-     let* chris_authorizable = User.to_authorizable ?ctx chris in
-     let* _thomas_post' =
-       Post.update_post
-         ?ctx
-         chris_authorizable
-         thomas_aron_post
-         "Update the post comment"
-       |> Lwt_result.map_error (fun err ->
-            let check_err =
-              CCString.find
-                ~sub:"does not satisfy any of the following rules:"
-                err
-            in
-            if check_err |> CCBool.of_int then "correct" else err)
-     in
-     Lwt.return_ok true)
-    >|= Alcotest.(check (result bool string))
-          "User cannot edit an post of someone else article."
-          (Error "correct")
+          "User cannot edit a post of an article he's manager of."
+          (Error
+             (Guardian.Utils.deny_message_validation_set
+                (snd chris)
+                ValidationSet.(
+                  one_of_tuple (Update, `Post, Some thomas_chris_post_id)
+                  |> show)))
   ;;
 
   let roles_exist_for_type ?ctx (_ : 'a) () =
     let result =
+      let validation_set = ValidationSet.one_of_tuple (Read, `Post, None) in
       let* actor = User.to_authorizable ?ctx chris in
-      Backend.Repo.exists_for_kind ?ctx `Post Action.Read actor |> Lwt_result.ok
+      Backend.validate ?ctx CCFun.id validation_set actor
     in
     result
-    >|= Alcotest.(check (result (list testable_uuid) string))
+    >|= Alcotest.(check (result unit string))
           "Post should be readable by user."
-          (Ok [ thomas_chris_post_id ])
-  ;;
-
-  let test_specific_role ?ctx (_ : 'a) () =
-    (let* (_ : Backend.kind Guard.Target.t) =
-       Post.to_authorizable ?ctx thomas_aron_post
-     in
-     let* ben_authorizable = User.to_authorizable ?ctx ben in
-     let* _thomas_post' =
-       Post.update_post_as_specific_role
-         ?ctx
-         ben_authorizable
-         thomas_aron_post
-         "Update the post comment"
-     in
-     Lwt.return_ok true)
-    >|= Alcotest.(check (result bool string))
-          "User with specific role can update any post."
-          (Ok true)
+          (Ok ())
   ;;
 
   let test_find_by_role ?ctx (_ : 'a) () =
     let sort = CCList.stable_sort Guard.Uuid.Actor.compare in
     let%lwt roles =
-      Backend.Actor.find_by_role ?ctx ~exclude:[ `Hacker ] `User
+      Backend.ActorRole.find_actors_by_role
+        ?ctx
+        ~exclude:[ `Editor, None ]
+        (`Reader, None)
     in
     let expect = [ snd aron; snd chris; snd thomas ] in
     Alcotest.(check (list testable_actor_uuid))
@@ -561,140 +465,195 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     |> Lwt.return
   ;;
 
-  let test_find_by_roles ?ctx (_ : 'a) () =
-    let sort = CCList.stable_sort Guard.Uuid.Actor.compare in
-    let%lwt roles =
-      Backend.Actor.find_by_roles ?ctx [ `Admin; `Hacker ]
-      |> Lwt.map CCFun.(CCList.(map snd %> flatten))
+  let test_find_permissions_of_actor ?ctx (_ : 'a) () =
+    let sort = CCList.stable_sort PermissionOnTarget.compare in
+    let%lwt roles = Backend.ActorRole.permissions_of_actor ?ctx (snd thomas) in
+    let expect =
+      [ Read, `Article, None
+      ; Read, `Post, None
+      ; Create, `Article, Some chris_article_id
+      ; Update, `Article, Some chris_article_id
+      ; Update, `Article, Some thomas_chris_post_id
+      ; Update, `Article, Some thomas_note.Notes.id
+      ; ( Update
+        , `User
+        , Some (snd thomas |> Uuid.(Actor.to_string %> Target.of_string_exn)) )
+      ; Manage, `Note, Some thomas_note.Notes.id
+      ]
+      |> CCList.map PermissionOnTarget.of_tuple
     in
-    let expect = [ snd aron; snd ben ] in
-    Alcotest.(check (list testable_actor_uuid))
-      "return correct list of actor uuid by roles."
+    Alcotest.(check (list testable_permission_on_target))
+      "return correct list of permissions for actor Aron."
       (expect |> sort)
       (roles |> sort)
     |> Lwt.return
   ;;
 
-  (** IMPORTANT: the following tests should not compile! *)
-  (* let hacker_cannot_update_article ?ctx (_:'a) () = let () = print_endline
-     "about\n to run a test" in let%lwt ben = Hacker.to_authorizable ?ctx ben |>
-     Lwt.map CCResult.get_or_failwith in let%lwt try_update =
-     Article.update_title ben aron_article "Updated Title" in let () =
-     Alcotest.(check bool) "Article\n cannot update another article."
-     (CCResult.is_error try_update) true in Lwt.return_unit ;; *)
+  let test_exists_fcn ?ctx:_ (_ : 'a) () =
+    let open PermissionOnTarget in
+    let read = (Read, `Article, None) |> of_tuple in
+    let manage = (Manage, `Article, None) |> of_tuple in
+    let update = (Update, `Article, None) |> of_tuple in
+    [ true, validate read [ read ], "read in read"
+    ; true, validate read [ manage ], "read in manage"
+    ; false, validate read [ update ], "read in update"
+    ; false, validate manage [ read ], "manage in read"
+    ; false, validate update [ read ], "update in read"
+    ; ( true
+      , validate update [ read; manage; update ]
+      , "update in read, manage or update" )
+    ; ( true
+      , validate
+          ((Read, `Article, Some (Uuid.Target.create ())) |> of_tuple)
+          [ manage ]
+      , "read article id in manage article" )
+    ; ( false
+      , validate
+          ((Read, `Article, Some (Uuid.Target.create ())) |> of_tuple)
+          [ (Manage, `Article, Some (Uuid.Target.create ())) |> of_tuple ]
+      , "read article id in manage article id (another)" )
+    ; ( false
+      , validate
+          ((Read, `Article, None) |> of_tuple)
+          [ (Manage, `Article, Some (Uuid.Target.create ())) |> of_tuple ]
+      , "read article in manage article id (another)" )
+    ; ( true
+      , validate
+          ~any_id:true
+          ((Read, `Article, Some (Uuid.Target.create ())) |> of_tuple)
+          [ (Manage, `Article, Some (Uuid.Target.create ())) |> of_tuple ]
+      , "read article id in manage article id (another with 'any_id' active)" )
+    ; ( false
+      , validate
+          ((Read, `Note, Some (Uuid.Target.create ())) |> of_tuple)
+          [ manage ]
+      , "read note id in manage article" )
+    ]
+    |> CCList.iter (fun (expected, provided, msg) ->
+      Alcotest.(
+        check
+          bool
+          (Format.asprintf "Check if permission are correct: %s" msg)
+          expected
+          provided))
+    |> Lwt.return
+  ;;
+
+  let test_remove_duplicates ?ctx:_ (_ : 'a) () =
+    let open PermissionOnTarget in
+    let read = (Read, `Article, None) |> of_tuple in
+    let manage = (Manage, `Article, None) |> of_tuple in
+    let manage_id =
+      (Manage, `Article, Some (Uuid.Target.create ())) |> of_tuple
+    in
+    let update = (Update, `Article, None) |> of_tuple in
+    [ ( [ manage ]
+      , remove_duplicates [ read; manage; manage_id ]
+      , "remove read and manage_id" )
+    ; [ update ], remove_duplicates [ update ], "single enty"
+    ]
+    |> CCList.iter (fun (expected, provided, msg) ->
+      Alcotest.(
+        check
+          (list testable_permission_on_target)
+          (Format.asprintf "Check if permission are correct: %s" msg)
+          expected
+          provided))
+    |> Lwt.return
+  ;;
+
+  let hacker_cannot_update_article ?ctx (_ : 'a) () =
+    let%lwt ben =
+      Hacker.to_authorizable ?ctx ben |> Lwt.map CCResult.get_or_failwith
+    in
+    let%lwt try_update =
+      Article.update_title ?ctx ben aron_article "Updated Title"
+    in
+    let () =
+      Alcotest.(check bool)
+        "Ben cannot update another article."
+        (CCResult.is_error try_update)
+        true
+    in
+    Lwt.return_unit
+  ;;
 end
 
 let () =
   let make_test_cases ?ctx (module Backend : Guard.PersistenceSig) name =
     let module T = Tests (Backend) in
-    [ ( Format.asprintf "(%s) Managing authorizables." name
-      , [ Alcotest_lwt.test_case
-            "Create an authorizable."
-            `Quick
-            (T.test_create_authorizable ?ctx)
-        ; Alcotest_lwt.test_case
-            "Retrieve an authorizable."
-            `Quick
-            (T.test_find_authorizable ?ctx)
-        ] )
-    ; ( Format.asprintf "(%s) Managing roles." name
-      , [ Alcotest_lwt.test_case
-            "Grant a role."
-            `Quick
-            (T.test_grant_roles ?ctx)
-        ; Alcotest_lwt.test_case "Check roles." `Quick (T.test_check_roles ?ctx)
-        ; Alcotest_lwt.test_case
-            "Revoke a role."
-            `Quick
-            (T.test_revoke_roles ?ctx)
-        ] )
-    ; ( Format.asprintf "(%s) Managing authorization rules." name
-      , [ Alcotest_lwt.test_case "Push rules." `Quick (T.test_push_rules ?ctx)
-        ; Alcotest_lwt.test_case "Drop rules." `Quick (T.test_drop_rules ?ctx)
-        ; Alcotest_lwt.test_case "Read rules." `Quick (T.test_read_rules ?ctx)
-        ; Alcotest_lwt.test_case "Save rule." `Quick (T.save_existing_rule ?ctx)
-        ] )
-    ; ( Format.asprintf "(%s) Admins should be able to do everything." name
-      , [ Alcotest_lwt.test_case
-            "Update someone else's article."
-            `Quick
-            (T.test_admin_update_others' ?ctx)
-        ] )
-    ; ( Format.asprintf
-          "(%s) An authorizable should be able to do everything to entities it \
-           owns."
-          name
-      , [ Alcotest_lwt.test_case
-            "Update own article."
-            `Quick
-            (T.test_update_owned ?ctx)
-        ; Alcotest_lwt.test_case
-            "Update own article (via backend)"
-            `Quick
-            (T.owner_can_update ?ctx)
-        ] )
-    ; ( Format.asprintf
-          "(%s) An authorizable should be able to do everything to itself."
-          name
-      , [ Alcotest_lwt.test_case "Update" `Quick (T.can_update_self ?ctx) ] )
-    ; ( Format.asprintf
-          "(%s) Entities should be denied access to entities they shouldn't \
-           access."
-          name
-      , [ Alcotest_lwt.test_case "Cannot update" `Quick (T.cannot_update ?ctx)
-        ; Alcotest_lwt.test_case
-            "Cannot read"
-            `Quick
-            (T.editor_cannot_read_other_article ?ctx)
-          (* uncomment the next line to make sure compile-time invariants
-             work *)
-          (* ; Alcotest_lwt.test_case "Cannot update" `Quick
-             (T.hacker_cannot_update_article ?ctx) *)
-        ] )
-    ; ( Format.asprintf "(%s) Check access for targeted roles." name
-      , [ Alcotest_lwt.test_case
-            "Editor can edit"
-            `Quick
-            (T.editor_can_edit ?ctx)
-        ; Alcotest_lwt.test_case
-            "Editor can edit (by specific role)"
-            `Quick
-            (T.editor_role_can_edit ?ctx)
-        ] )
-    ; ( Format.asprintf "(%s) Managing ownership." name
-      , [ Alcotest_lwt.test_case "Set owner" `Quick (T.set_owner ?ctx) ] )
-    ; ( Format.asprintf "(%s) Use parametric roles." name
-      , [ Alcotest_lwt.test_case
-            "Parametric editor role"
-            `Quick
-            (T.operator_works ?ctx)
-        ] )
-    ; ( Format.asprintf
-          "(%s) Transistancy, manager of `x` should be able to update `x.a`."
-          name
-      , [ Alcotest_lwt.test_case "transistency" `Quick (T.transistency ?ctx)
-        ; Alcotest_lwt.test_case
-            "transistency fail"
-            `Quick
-            (T.transistency_deny ?ctx)
-        ] )
-    ; ( Format.asprintf "(%s) Validate returned 'exists' sql for kinds." name
-      , [ Alcotest_lwt.test_case
-            "transistency"
-            `Quick
-            (T.roles_exist_for_type ?ctx)
-        ] )
-    ; ( Format.asprintf "(%s) Validate testing against specific role." name
-      , [ Alcotest_lwt.test_case
-            "allow specific role to update posts"
-            `Quick
-            (T.test_specific_role ?ctx)
-        ] )
-    ; ( Format.asprintf "(%s) Find all actors of a specific role" name
-      , [ Alcotest_lwt.test_case "role" `Quick (T.test_find_by_role ?ctx)
-        ; Alcotest_lwt.test_case "roles" `Quick (T.test_find_by_roles ?ctx)
-        ] )
-    ]
+    let open Alcotest_lwt in
+    T.
+      [ ( Format.asprintf "(%s) Managing authorizables." name
+        , [ test_case
+              "Create an authorizable."
+              `Quick
+              (test_create_authorizable ?ctx)
+          ; test_case
+              "Retrieve an authorizable."
+              `Quick
+              (test_find_authorizable ?ctx)
+          ] )
+      ; ( Format.asprintf "(%s) Managing roles." name
+        , [ test_case "Grant a role." `Quick (test_grant_roles ?ctx)
+          ; test_case "Revoke a role." `Quick (test_revoke_roles ?ctx)
+          ] )
+      ; ( Format.asprintf "(%s) Managing authorization rules." name
+        , [ test_case "Push rules." `Quick (test_push_role_permission ?ctx)
+          ; test_case "Drop rules." `Quick (test_drop_rules ?ctx)
+          ; test_case "Read rules." `Quick (test_read_rules ?ctx)
+          ; test_case "Save rule." `Quick (save_existing_rule ?ctx)
+          ] )
+      ; ( Format.asprintf "(%s) Admins should be able to do everything." name
+        , [ test_case
+              "Update someone else's article."
+              `Quick
+              (test_admin_update_others' ?ctx)
+          ] )
+      ; ( Format.asprintf
+            "(%s) An authorizable should be able to do everything to entities \
+             it owns."
+            name
+        , [ test_case "Update own article." `Quick (test_update_by_author ?ctx)
+          ] )
+      ; ( Format.asprintf
+            "(%s) An authorizable should be able to do everything to itself."
+            name
+        , [ test_case "Update" `Quick (can_update_self ?ctx) ] )
+      ; ( Format.asprintf
+            "(%s) Entities should be denied access to entities they shouldn't \
+             access."
+            name
+        , [ test_case "Cannot update" `Quick (cannot_update ?ctx)
+          ; test_case
+              "Cannot read"
+              `Quick
+              (editor_cannot_read_other_article ?ctx)
+            (* uncomment the next line to make sure compile-time invariants
+               work *)
+          ; test_case "Cannot update" `Quick (hacker_cannot_update_article ?ctx)
+          ] )
+      ; ( Format.asprintf "(%s) Check access for targeted roles." name
+        , [ test_case "Editor can edit" `Quick (editor_can_edit ?ctx) ] )
+      ; ( Format.asprintf "(%s) Managing ownership." name
+        , [ test_case "Set owner" `Quick (set_author ?ctx) ] )
+      ; ( Format.asprintf "(%s) Use parametric roles." name
+        , [ test_case "Parametric editor role" `Quick (operator_works ?ctx) ] )
+      ; ( Format.asprintf
+            "(%s) Transistancy, manager of `x` shouldn't be able to update \
+             `x.a`."
+            name
+        , [ test_case "transistency fail" `Quick (transistency_deny ?ctx) ] )
+      ; ( Format.asprintf "(%s) Validate returned 'exists' sql for kinds." name
+        , [ test_case "transistency" `Quick (roles_exist_for_type ?ctx) ] )
+      ; ( Format.asprintf "(%s) Find all actors of a specific role" name
+        , [ test_case "role" `Quick (test_find_by_role ?ctx) ] )
+      ; ( Format.asprintf "(%s) Find all permissions of actor" name
+        , [ test_case "permissions" `Quick (test_find_permissions_of_actor ?ctx)
+          ; test_case "validate existance" `Quick (test_exists_fcn ?ctx)
+          ; test_case "remove duplicates" `Quick (test_remove_duplicates ?ctx)
+          ] )
+      ]
   in
   let open Guardian_backend.Pools in
   let test_database = "test" in
@@ -712,20 +671,14 @@ let () =
   end
   in
   let module Maria =
-    Guardian_backend.MariaDb.Make (Role.Actor) (Role.Target)
+    Guardian_backend.MariaDb.Make (Role.Actor) (Role.Role) (Role.Target)
       (Make (MariaConfig))
   in
   Lwt_main.run
   @@
+  let%lwt () = Maria.delete ~ctx () in
   let%lwt () = Maria.migrate ~ctx () in
   let%lwt () = Maria.clean ~ctx () in
-  let%lwt () =
-    Maria.Relation.add_multiple
-      ~ctx
-      ~ignore_duplicates:true
-      [ Post.article_relation ~query:test_find_article_query () ]
-    |> Lwt.map CCResult.get_or_failwith
-  in
   let%lwt () = Maria.start ~ctx () in
   make_test_cases ~ctx (module Maria) "MariadDB Backend"
   |> Alcotest_lwt.run "Authorization"
