@@ -45,7 +45,7 @@ module MakeTarget (Backend : PersistenceSig) = struct
 
   let to_authorizable ?ctx =
     Backend.Target.decorate ?ctx (fun t ->
-        let of_actor = Uuid.(snd %> Actor.to_string %> Target.of_string_exn) in
-        Target.create `User (of_actor t))
+      let of_actor = Uuid.(snd %> Actor.to_string %> Target.of_string_exn) in
+      Target.create `User (of_actor t))
   ;;
 end
