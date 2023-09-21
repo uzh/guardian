@@ -41,10 +41,10 @@ module Contract : sig
 end
 
 module Make : functor
-  (ActorModel : RoleSig)
-  (Role : RoleSig)
-  (TargetModel : RoleSig)
-  -> sig
+    (ActorModel : RoleSig)
+    (Role : RoleSig)
+    (TargetModel : RoleSig)
+    -> sig
   module Uuid = Uuid
   module Permission = Permission
 
@@ -224,20 +224,20 @@ module Make : functor
 
   module type PersistenceSig =
     Persistence.Contract
-      with type actor = Actor.t
-       and type actor_model = ActorModel.t
-       and type actor_permission = ActorPermission.t
-       and type actor_role = ActorRole.t
-       and type permission_on_target = PermissionOnTarget.t
-       and type role = Role.t
-       and type role_permission = RolePermission.t
-       and type target = Target.t
-       and type target_entity = TargetEntity.t
-       and type target_model = TargetModel.t
-       and type validation_set = ValidationSet.t
+    with type actor = Actor.t
+     and type actor_model = ActorModel.t
+     and type actor_permission = ActorPermission.t
+     and type actor_role = ActorRole.t
+     and type permission_on_target = PermissionOnTarget.t
+     and type role = Role.t
+     and type role_permission = RolePermission.t
+     and type target = Target.t
+     and type target_entity = TargetEntity.t
+     and type target_model = TargetModel.t
+     and type validation_set = ValidationSet.t
 
   module MakePersistence : functor
-    (Backend : Persistence.Backend
+      (Backend : Persistence.Backend
                  with type actor = Actor.t
                   and type actor_model = ActorModel.t
                   and type actor_permission = ActorPermission.t
@@ -249,5 +249,5 @@ module Make : functor
                   and type target_entity = TargetEntity.t
                   and type target_model = TargetModel.t
                   and type validation_set = ValidationSet.t)
-    -> PersistenceSig
+      -> PersistenceSig
 end [@warning "-67"]
