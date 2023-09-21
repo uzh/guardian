@@ -2,7 +2,7 @@
  (public_name guardian)
  (name guardian)
  (wrapped true)
- (libraries caqti containers containers-data logs lwt result uuidm)
+ (libraries caqti containers containers-data logs lwt result sexplib0 uuidm)
  (preprocess
   (pps
    lwt_ppx

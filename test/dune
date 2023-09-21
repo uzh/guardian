@@ -9,6 +9,7 @@
   fmt
   logs
   result
+  sexplib0
   uri)
  (preprocess
   (pps
