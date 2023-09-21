@@ -1,5 +1,5 @@
 opam-version: "2.0"
-version: "0.2.0"
+version: "0.3.0"
 synopsis: "Role-based access control for OCaml"
 description:
   "Defined actors can access targets according to specified rules (allowed actions: CRUD)."
@@ -13,7 +13,7 @@ doc: "https://uzh.github.io/guardian"
 bug-reports: "https://github.com/uzh/guardian/issues"
 depends: [
   "angstrom" {= "0.15.0"}
-  "base" {= "v0.15.1"}
+  "base" {= "v0.14.3"}
   "base-bytes" {= "base"}
   "base-threads" {= "base"}
   "base-unix" {= "base"}
@@ -40,7 +40,7 @@ depends: [
   "lwt" {= "5.7.0"}
   "lwt_ppx" {= "2.1.0"}
   "mariadb" {= "1.1.6"}
-  "ocaml" {= "4.12.1"}
+  "ocaml" {= "4.14.1"}
   "ocaml-compiler-libs" {= "v0.12.4"}
   "ocaml-syntax-shims" {= "1.0.0"}
   "ocamlbuild" {= "0.14.2"}
@@ -48,13 +48,13 @@ depends: [
   "ocplib-endian" {= "1.2"}
   "ppx_derivers" {= "1.2.1"}
   "ppx_deriving" {= "5.2.1"}
-  "ppx_deriving_yojson" {= "3.7.0"}
-  "ppx_sexp_conv" {= "v0.15.1"}
-  "ppxlib" {= "0.30.0"}
+  "ppx_deriving_yojson" {= "3.6.1"}
+  "ppx_sexp_conv" {= "v0.14.3"}
+  "ppxlib" {= "0.25.1"}
   "ptime" {= "1.1.0"}
   "result" {= "1.5"}
   "seq" {= "base"}
-  "sexplib0" {= "v0.15.1"}
+  "sexplib0" {= "v0.14.0"}
   "stdlib-shims" {= "0.3.0"}
   "stringext" {= "1.6.0"}
   "topkg" {= "1.0.7"}

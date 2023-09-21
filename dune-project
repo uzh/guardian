@@ -34,7 +34,7 @@
   (caqti-lwt
    (and
     (>= 1.9.0)
-    (<= 2.0.0)))
+    (< 2.0.0)))
   (containers
    (>= 3.6))
   (containers-data
