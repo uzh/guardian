@@ -334,11 +334,6 @@ struct
 
         let find_by_actor_request =
           {sql|
-              SELECT guardianDecodeUuid(roles.actor_uuid), roles.role, NULL
-              FROM guardian_actor_roles AS roles
-              WHERE roles.actor_uuid = guardianEncodeUuid($1)
-                AND roles.mark_as_deleted IS NULL
-              UNION ALL
               SELECT
                 guardianDecodeUuid(role_targets.actor_uuid),
                 role_targets.role,
@@ -346,6 +341,11 @@ struct
               FROM guardian_actor_role_targets AS role_targets
               WHERE role_targets.actor_uuid = guardianEncodeUuid($1)
                 AND role_targets.mark_as_deleted IS NULL
+              UNION ALL
+              SELECT guardianDecodeUuid(roles.actor_uuid), roles.role, NULL
+              FROM guardian_actor_roles AS roles
+              WHERE roles.actor_uuid = guardianEncodeUuid($1)
+                AND roles.mark_as_deleted IS NULL
             |sql}
           |> Entity.(Uuid.Actor.t ->* ActorRole.t)
         ;;
@@ -354,11 +354,6 @@ struct
 
         let find_by_target_request =
           {sql|
-              SELECT guardianDecodeUuid(roles.actor_uuid), roles.role, NULL
-              FROM guardian_actor_roles AS roles
-              WHERE roles.role = $1
-                AND roles.mark_as_deleted IS NULL
-              UNION ALL
               SELECT
                 guardianDecodeUuid(role_targets.actor_uuid),
                 role_targets.role,
@@ -367,6 +362,11 @@ struct
               WHERE role_targets.role = $1
                 AND role_targets.target_uuid = guardianEncodeUuid($2)
                 AND role_targets.mark_as_deleted IS NULL
+              UNION ALL
+              SELECT guardianDecodeUuid(roles.actor_uuid), roles.role, NULL
+              FROM guardian_actor_roles AS roles
+              WHERE roles.role = $1
+                AND roles.mark_as_deleted IS NULL
             |sql}
           |> Entity.(Caqti_type.tup2 Role.t Uuid.Target.t ->* ActorRole.t)
         ;;
@@ -481,9 +481,9 @@ struct
               SELECT
                 role_permissions.permission,
                 role_permissions.target_model,
-                NULL
+                guardianDecodeUuid(roles.target_uuid)
               FROM
-                guardian_actor_roles AS roles
+                guardian_actor_role_targets AS roles
                 JOIN guardian_role_permissions AS role_permissions ON role_permissions.role = roles.role
                   AND role_permissions.mark_as_deleted IS NULL
               WHERE
@@ -493,9 +493,9 @@ struct
               SELECT
                 role_permissions.permission,
                 role_permissions.target_model,
-                guardianDecodeUuid(roles.target_uuid)
+                NULL
               FROM
-                guardian_actor_role_targets AS roles
+                guardian_actor_roles AS roles
                 JOIN guardian_role_permissions AS role_permissions ON role_permissions.role = roles.role
                   AND role_permissions.mark_as_deleted IS NULL
               WHERE

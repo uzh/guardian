@@ -20,7 +20,7 @@ services:
 
   database:
     container_name: guardian_database
-    image: mariadb:10.6
+    image: mariadb:10.6.3
     command: --max_allowed_packet=629145600
     ports: [3320:3306]
     environment:
