@@ -918,6 +918,7 @@ struct
                   AND roles.actor_uuid = guardianEncodeUuid($1)
                   AND role_permissions.target_model = $3
                   AND (role_permissions.permission = $2 OR role_permissions.permission = 'manage')
+                LIMIT 1
               ) OR (
                 SELECT TRUE
                 FROM guardian_actor_permissions AS actor_permissions
@@ -925,6 +926,7 @@ struct
                   AND actor_permissions.actor_uuid = guardianEncodeUuid($1)
                   AND actor_permissions.target_model = $3
                   AND (actor_permissions.permission = $2 OR actor_permissions.permission = 'manage')
+                LIMIT 1
               )
             |sql}
             |> Caqti_type.(
@@ -1038,6 +1040,7 @@ struct
                 AND roles.actor_uuid = guardianEncodeUuid($1)
                 AND role_permissions.target_model = $3
                 AND (role_permissions.permission = $2 OR role_permissions.permission = 'manage')
+              LIMIT 1
             |sql}
             |> to_req
           in
@@ -1064,6 +1067,7 @@ struct
               WHERE actor_permissions.actor_uuid = guardianEncodeUuid($1)
                 AND (actor_permissions.permission = $2 OR actor_permissions.permission = 'manage')
                 AND targets.model = $3
+              LIMIT 1
             |sql}
             |> to_req
           in

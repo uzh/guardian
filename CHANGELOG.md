@@ -4,6 +4,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [unreleased](https://github.com/uzh/guardian/tree/HEAD)
 
+## [0.3.0](https://github.com/uzh/guardian/tree/0.3.0) - 2023-09-21
+
 ## Added
 
 - helper functions on backend for integrated guardian usage
