@@ -342,7 +342,7 @@ struct
               FROM guardian_actor_role_targets AS role_targets
               WHERE role_targets.actor_uuid = guardianEncodeUuid($1)
                 AND role_targets.mark_as_deleted IS NULL
-              UNION ALL
+              UNION
               SELECT guardianDecodeUuid(roles.actor_uuid), roles.role, NULL
               FROM guardian_actor_roles AS roles
               WHERE roles.actor_uuid = guardianEncodeUuid($1)
@@ -363,7 +363,7 @@ struct
               WHERE role_targets.role = $1
                 AND role_targets.target_uuid = guardianEncodeUuid($2)
                 AND role_targets.mark_as_deleted IS NULL
-              UNION ALL
+              UNION
               SELECT guardianDecodeUuid(roles.actor_uuid), roles.role, NULL
               FROM guardian_actor_roles AS roles
               WHERE roles.role = $1
@@ -413,7 +413,7 @@ struct
                     FROM (
                       SELECT actor_uuid, role, target_uuid FROM guardian_actor_role_targets
                       WHERE mark_as_deleted IS NULL
-                      UNION ALL
+                      UNION
                       SELECT actor_uuid, role, NULL FROM guardian_actor_roles
                       WHERE mark_as_deleted IS NULL
                       ) AS exclude
