@@ -491,6 +491,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
 
   let test_exists_fcn ?ctx:_ (_ : 'a) () =
     let open PermissionOnTarget in
+    let target_id = Uuid.Target.create () in
     let read = (Read, `Article, None) |> of_tuple in
     let manage = (Manage, `Article, None) |> of_tuple in
     let update = (Update, `Article, None) |> of_tuple in
@@ -528,6 +529,21 @@ module Tests (Backend : Guard.PersistenceSig) = struct
           ((Read, `Note, Some (Uuid.Target.create ())) |> of_tuple)
           [ manage ]
       , "read note id in manage article" )
+    ; ( false
+      , validate
+          ((Update, `Article, Some target_id) |> of_tuple)
+          [ (Read, `Article, Some target_id) |> of_tuple ]
+      , "update article is not allowed with read rights" )
+    ; ( false
+      , validate
+          ((Update, `Article, Some target_id) |> of_tuple)
+          [ (Update, `Note, Some target_id) |> of_tuple ]
+      , "update article is not allowed with update note rights" )
+    ; ( true
+      , validate
+          ((Update, `Article, Some target_id) |> of_tuple)
+          [ (Manage, `Article, Some target_id) |> of_tuple ]
+      , "update article is allowed with manage rights" )
     ]
     |> CCList.iter (fun (expected, provided, msg) ->
       Alcotest.(

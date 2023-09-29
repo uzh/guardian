@@ -180,7 +180,8 @@ struct
         | None, Some _ when any_id -> TargetModel.equal pot1.model pot2.model
         | None, Some _ -> false
         | Some _, _ when any_id -> TargetModel.equal pot1.model pot2.model
-        | Some u1, Some u2 -> Uuid.Target.equal u1 u2
+        | Some u1, Some u2 ->
+          TargetModel.equal pot1.model pot2.model && Uuid.Target.equal u1 u2
         | None, None | Some _, None -> TargetModel.equal pot1.model pot2.model
       in
       CCList.mem ~eq
