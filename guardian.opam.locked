@@ -13,7 +13,7 @@ doc: "https://uzh.github.io/guardian"
 bug-reports: "https://github.com/uzh/guardian/issues"
 depends: [
   "angstrom" {= "0.15.0"}
-  "base" {= "v0.16.3"}
+  "base" {= "v0.14.3"}
   "base-bytes" {= "base"}
   "base-threads" {= "base"}
   "base-unix" {= "base"}
@@ -22,7 +22,7 @@ depends: [
   "caqti" {= "1.9.0"}
   "caqti-driver-mariadb" {= "1.9.0"}
   "caqti-lwt" {= "1.9.0"}
-  "cmdliner" {= "1.2.0"}
+  "cmdliner" {= "1.0.4"}
   "conf-gcc" {= "1.0"}
   "conf-mariadb" {= "2"}
   "conf-pkg-config" {= "3"}
@@ -31,8 +31,8 @@ depends: [
   "cppo" {= "1.6.9"}
   "csexp" {= "1.5.2"}
   "ctypes" {= "0.20.2"}
-  "dune" {= "3.10.0"}
-  "dune-configurator" {= "3.10.0"}
+  "dune" {= "3.11.0"}
+  "dune-configurator" {= "3.11.0"}
   "either" {= "1.0.0"}
   "fmt" {= "0.9.0"}
   "integers" {= "0.7.0"}
@@ -48,18 +48,17 @@ depends: [
   "ocplib-endian" {= "1.2"}
   "ppx_derivers" {= "1.2.1"}
   "ppx_deriving" {= "5.2.1"}
-  "ppx_deriving_yojson" {= "3.7.0"}
-  "ppx_sexp_conv" {= "v0.16.0"}
-  "ppxlib" {= "0.30.0"}
+  "ppx_deriving_yojson" {= "3.6.1"}
+  "ppx_sexp_conv" {= "v0.14.3"}
+  "ppxlib" {= "0.25.1"}
   "ptime" {= "1.1.0"}
   "result" {= "1.5"}
   "seq" {= "base"}
-  "sexplib0" {= "v0.16.0"}
+  "sexplib0" {= "v0.14.0"}
   "stdlib-shims" {= "0.3.0"}
   "stringext" {= "1.6.0"}
   "topkg" {= "1.0.7"}
-  "uri" {= "4.2.0"}
-  "uuidm" {= "0.9.8"}
+  "uri" {= "4.4.0"}
   "yojson" {= "2.1.0"}
 ]
 build: [
