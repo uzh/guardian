@@ -32,4 +32,9 @@ module type Sig = sig
     -> ('a, unit, [< `Zero ]) Caqti_request.t
     -> 'a
     -> unit Lwt.t
+
+  val transaction
+    :  ?ctx:(string * string) list
+    -> (Caqti_lwt.connection -> 'a)
+    -> 'a Lwt.t
 end
