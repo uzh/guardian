@@ -7,6 +7,6 @@ module Make (Backend : Guard.PersistenceSig) = struct
 
   let to_authorizable ?ctx =
     Backend.Actor.decorate ?ctx (fun (t : t) : Actor.t ->
-        Actor.create `Hacker (snd t))
+      Actor.create `Hacker (snd t))
   ;;
 end

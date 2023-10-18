@@ -71,7 +71,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     ; `Author, Update, `Article
     ]
     |> CCList.map (fun (role, perm, model) ->
-           RolePermission.create role perm model)
+      RolePermission.create role perm model)
   ;;
 
   let ( let* ) = Lwt_result.bind
@@ -98,7 +98,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
        | [] ->
          Error
            (Article.show article
-           |> Format.asprintf "Couldn't get owner for article %s")
+            |> Format.asprintf "Couldn't get owner for article %s")
        | roles -> Ok (CCList.hd roles)
      in
      let* chris_art_owner = find_author_role chris_article in
@@ -112,8 +112,8 @@ module Tests (Backend : Guard.PersistenceSig) = struct
 
   let test_find_authorizable ?ctx (_ : 'a) () =
     (match%lwt Backend.Actor.find ?ctx (snd aron) with
-    | Ok _ -> Lwt.return_true
-    | Error err -> failwith err)
+     | Ok _ -> Lwt.return_true
+     | Error err -> failwith err)
     >|= Alcotest.(check bool) "Fetch an authorizable." true
   ;;
 
@@ -137,21 +137,21 @@ module Tests (Backend : Guard.PersistenceSig) = struct
 
   let test_revoke_roles ?ctx (_ : 'a) () =
     (let open ActorRoleSet in
-    let role = ActorRole.create (snd aron) `Editor in
-    let open Backend in
-    let find_role () = ActorRole.find_by_actor ?ctx (snd aron) >|= of_list in
-    let%lwt () = role |> ActorRole.upsert ?ctx in
-    let* () =
-      let%lwt roles = find_role () in
-      if mem role roles
-      then Lwt.return_ok ()
-      else
-        Lwt.return_error
-          "Didn't successfully add the role we intended to remove."
-    in
-    let%lwt () = role |> ActorRole.delete ?ctx in
-    let%lwt roles = find_role () in
-    Lwt.return_ok (mem role roles))
+     let role = ActorRole.create (snd aron) `Editor in
+     let open Backend in
+     let find_role () = ActorRole.find_by_actor ?ctx (snd aron) >|= of_list in
+     let%lwt () = role |> ActorRole.upsert ?ctx in
+     let* () =
+       let%lwt roles = find_role () in
+       if mem role roles
+       then Lwt.return_ok ()
+       else
+         Lwt.return_error
+           "Didn't successfully add the role we intended to remove."
+     in
+     let%lwt () = role |> ActorRole.delete ?ctx in
+     let%lwt roles = find_role () in
+     Lwt.return_ok (mem role roles))
     >|= Alcotest.(check (result bool string)) "Check a user's roles." (Ok false)
   ;;
 
@@ -197,8 +197,8 @@ module Tests (Backend : Guard.PersistenceSig) = struct
      else
        Lwt.return_error
          (elements diff
-         |> [%show: ActorPermission.t list]
-         |> Format.asprintf "Permissions diff: %s."))
+          |> [%show: ActorPermission.t list]
+          |> Format.asprintf "Permissions diff: %s."))
     >|= Alcotest.(check (result unit string))
           "Read the global permissions we've just pushed."
           (Ok ())
@@ -206,23 +206,23 @@ module Tests (Backend : Guard.PersistenceSig) = struct
 
   let test_drop_rules ?ctx (_ : 'a) () =
     (let open Backend.RolePermission in
-    let open RolePermissionSet in
-    let* () = insert ?ctx bad_role_permission in
-    let* (_ : t) =
-      find_all_of_model ?ctx `Note
-      >|= of_list
-      >|= fun perms ->
-      if mem bad_role_permission perms
-      then Ok perms
-      else Error "Failed to push bad permission to test perm dropping."
-    in
-    let* () = delete ?ctx bad_role_permission in
-    find_all_of_model ?ctx `Article
-    >|= of_list
-    >|= fun perms ->
-    if mem bad_role_permission perms |> not
-    then Ok ()
-    else Error "Failed to remove bad permission.")
+     let open RolePermissionSet in
+     let* () = insert ?ctx bad_role_permission in
+     let* (_ : t) =
+       find_all_of_model ?ctx `Note
+       >|= of_list
+       >|= fun perms ->
+       if mem bad_role_permission perms
+       then Ok perms
+       else Error "Failed to push bad permission to test perm dropping."
+     in
+     let* () = delete ?ctx bad_role_permission in
+     find_all_of_model ?ctx `Article
+     >|= of_list
+     >|= fun perms ->
+     if mem bad_role_permission perms |> not
+     then Ok ()
+     else Error "Failed to remove bad permission.")
     >|= Alcotest.(check (result unit string))
           "Read the global permissions we've just pushed."
           (Ok ())
@@ -546,12 +546,12 @@ module Tests (Backend : Guard.PersistenceSig) = struct
       , "update article is allowed with manage rights" )
     ]
     |> CCList.iter (fun (expected, provided, msg) ->
-           Alcotest.(
-             check
-               bool
-               (Format.asprintf "Check if permission are correct: %s" msg)
-               expected
-               provided))
+      Alcotest.(
+        check
+          bool
+          (Format.asprintf "Check if permission are correct: %s" msg)
+          expected
+          provided))
     |> Lwt.return
   ;;
 
@@ -569,12 +569,12 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     ; [ update ], remove_duplicates [ update ], "single enty"
     ]
     |> CCList.iter (fun (expected, provided, msg) ->
-           Alcotest.(
-             check
-               (list testable_permission_on_target)
-               (Format.asprintf "Check if permission are correct: %s" msg)
-               expected
-               provided))
+      Alcotest.(
+        check
+          (list testable_permission_on_target)
+          (Format.asprintf "Check if permission are correct: %s" msg)
+          expected
+          provided))
     |> Lwt.return
   ;;
 
@@ -691,10 +691,11 @@ let () =
       (Make (MariaConfig))
   in
   Lwt_main.run
-  @@ let%lwt () = Maria.delete ~ctx () in
-     let%lwt () = Maria.migrate ~ctx () in
-     let%lwt () = Maria.clean ~ctx () in
-     let%lwt () = Maria.start ~ctx () in
-     make_test_cases ~ctx (module Maria) "MariadDB Backend"
-     |> Alcotest_lwt.run "Authorization"
+  @@
+  let%lwt () = Maria.delete ~ctx () in
+  let%lwt () = Maria.migrate ~ctx () in
+  let%lwt () = Maria.clean ~ctx () in
+  let%lwt () = Maria.start ~ctx () in
+  make_test_cases ~ctx (module Maria) "MariadDB Backend"
+  |> Alcotest_lwt.run "Authorization"
 ;;

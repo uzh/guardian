@@ -22,7 +22,7 @@ depends: [
   "caqti" {= "1.9.0"}
   "caqti-driver-mariadb" {= "1.9.0"}
   "caqti-lwt" {= "1.9.0"}
-  "cmdliner" {= "1.0.4"}
+  "cmdliner" {= "1.2.0"}
   "conf-gcc" {= "1.0"}
   "conf-mariadb" {= "2"}
   "conf-pkg-config" {= "3"}

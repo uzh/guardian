@@ -42,11 +42,11 @@ module Make (Backend : Guard.PersistenceSig) = struct
   ;;
 
   let update_author
-      ?ctx
-      (actor : Actor.t)
-      ({ id; _ } as article)
-      old_author
-      new_author
+    ?ctx
+    (actor : Actor.t)
+    ({ id; _ } as article)
+    old_author
+    new_author
     =
     let open Lwt_result.Syntax in
     let fcn (old_author, new_author) =
