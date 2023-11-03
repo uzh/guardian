@@ -303,6 +303,25 @@ struct
               function_name )
         ;;
 
+        let combine_sql
+          from_sql
+          std_filter_sql
+          ?(joins = "")
+          ?where_additions
+          select
+          =
+          Format.asprintf
+            "SELECT\n  %s\nFROM  %s\n  %s\nWHERE\n  %s\n  %s"
+            select
+            from_sql
+            joins
+            std_filter_sql
+            (CCOption.map_or
+               ~default:""
+               (Format.asprintf "AND %s")
+               where_additions)
+        ;;
+
         module ActorRole = struct
           let upsert_uuid_request =
             {sql|
@@ -581,15 +600,7 @@ struct
             |sql}
           ;;
 
-          let combine_sql ?(joins = "") ?(where_additions = "") select =
-            Format.asprintf
-              "SELECT\n  %s\nFROM  %s\n  %s\nWHERE\n  %s\n  AND %s"
-              select
-              from_sql
-              joins
-              std_filter_sql
-              where_additions
-          ;;
+          let combine_sql = combine_sql from_sql std_filter_sql
 
           let find_all_request =
             combine_sql select_sql
@@ -663,15 +674,7 @@ struct
             |sql}
           ;;
 
-          let combine_sql ?(joins = "") ?(where_additions = "") select =
-            Format.asprintf
-              "SELECT\n  %s\nFROM  %s\n  %s\nWHERE\n  %s\n  AND %s"
-              select
-              from_sql
-              joins
-              std_filter_sql
-              where_additions
-          ;;
+          let combine_sql = combine_sql from_sql std_filter_sql
 
           let find_all_request =
             combine_sql select_sql
@@ -764,15 +767,7 @@ struct
             |sql}
           ;;
 
-          let combine_sql ?(joins = "") ?(where_additions = "") select =
-            Format.asprintf
-              "SELECT\n  %s\nFROM %s\n  %s\nWHERE\n  %s\n  AND %s"
-              select
-              from_sql
-              joins
-              std_filter_sql
-              where_additions
-          ;;
+          let combine_sql = combine_sql from_sql std_filter_sql
 
           let insert_request =
             {sql|
@@ -829,15 +824,7 @@ struct
             |sql}
           ;;
 
-          let combine_sql ?(joins = "") ?(where_additions = "") select =
-            Format.asprintf
-              "SELECT\n  %s\nFROM %s\n  %s\nWHERE\n  %s\n  AND %s"
-              select
-              from_sql
-              joins
-              std_filter_sql
-              where_additions
-          ;;
+          let combine_sql = combine_sql from_sql std_filter_sql
 
           let insert_request =
             {sql|
