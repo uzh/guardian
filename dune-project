@@ -30,11 +30,9 @@
   "Defined actors can access targets according to specified rules (allowed actions: CRUD).")
  (depends
   (caqti-driver-mariadb
-   (>= 1.9.0))
+   (>= 2.0.1))
   (caqti-lwt
-   (and
-    (>= 1.9.0)
-    (< 2.0.0)))
+   (>= 2.0.1))
   (containers
    (>= 3.6))
   (containers-data

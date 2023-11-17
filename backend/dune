@@ -5,6 +5,7 @@
   caqti
   caqti-driver-mariadb
   caqti-lwt
+  caqti-lwt.unix
   containers
   containers-data
   guardian

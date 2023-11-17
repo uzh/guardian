@@ -4,7 +4,7 @@ module type Sig = sig
   val fetch_pool
     :  ?ctx:(string * string) list
     -> unit
-    -> (Caqti_lwt.connection, Caqti_error.t) Caqti_lwt.Pool.t
+    -> (Caqti_lwt.connection, Caqti_error.t) Caqti_lwt_unix.Pool.t
 
   val add_pool : ?pool_size:int -> string -> string -> unit
   val drop_pool : string -> unit Lwt.t

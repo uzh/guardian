@@ -14,8 +14,8 @@ doc: "https://uzh.github.io/guardian"
 bug-reports: "https://github.com/uzh/guardian/issues"
 depends: [
   "dune" {>= "2.9"}
-  "caqti-driver-mariadb" {>= "1.9.0"}
-  "caqti-lwt" {>= "1.9.0" & < "2.0.0"}
+  "caqti-driver-mariadb" {>= "2.0.1"}
+  "caqti-lwt" {>= "2.0.1"}
   "containers" {>= "3.6"}
   "containers-data" {>= "3.6"}
   "logs" {>= "0.7.0"}

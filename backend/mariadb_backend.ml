@@ -105,7 +105,7 @@ struct
           Ok { actor_uuid; role; target_uuid = Some target_uuid }
         in
         Caqti_type.(
-          custom ~encode ~decode (tup3 Uuid.Actor.t Role.t Uuid.Target.t))
+          custom ~encode ~decode (t3 Uuid.Actor.t Role.t Uuid.Target.t))
       ;;
 
       let role =
@@ -119,7 +119,7 @@ struct
         let decode (actor_uuid, role) =
           Ok { actor_uuid; role; target_uuid = None }
         in
-        Caqti_type.(custom ~encode ~decode (tup2 Uuid.Actor.t Role.t))
+        Caqti_type.(custom ~encode ~decode (t2 Uuid.Actor.t Role.t))
       ;;
 
       let t =
@@ -128,10 +128,7 @@ struct
           Ok { actor_uuid; role; target_uuid }
         in
         Caqti_type.(
-          custom
-            ~encode
-            ~decode
-            (tup3 Uuid.Actor.t Role.t (option Uuid.Target.t)))
+          custom ~encode ~decode (t3 Uuid.Actor.t Role.t (option Uuid.Target.t)))
       ;;
     end
 
@@ -141,7 +138,7 @@ struct
       let t =
         let encode m = Ok (m.uuid, m.model) in
         let decode (uuid, model) = Ok { uuid; model } in
-        Caqti_type.(custom ~encode ~decode (tup2 Uuid.Actor.t ActorModel.t))
+        Caqti_type.(custom ~encode ~decode (t2 Uuid.Actor.t ActorModel.t))
       ;;
     end
 
@@ -151,7 +148,7 @@ struct
       let t =
         let encode m = Ok (m.uuid, m.model) in
         let decode (uuid, model) = Ok { uuid; model } in
-        Caqti_type.(custom ~encode ~decode (tup2 Uuid.Target.t TargetModel.t))
+        Caqti_type.(custom ~encode ~decode (t2 Uuid.Target.t TargetModel.t))
       ;;
     end
 
@@ -181,7 +178,7 @@ struct
           custom
             ~encode
             ~decode
-            (tup2 (option TargetModel.t) (option Uuid.Target.t)))
+            (t2 (option TargetModel.t) (option Uuid.Target.t)))
       ;;
     end
 
@@ -192,7 +189,7 @@ struct
         let encode m = Ok (m.role, m.permission, m.model) in
         let decode (role, permission, model) = Ok { role; permission; model } in
         Caqti_type.(
-          custom ~encode ~decode (tup3 Role.t Permission.t TargetModel.t))
+          custom ~encode ~decode (t3 Role.t Permission.t TargetModel.t))
       ;;
     end
 
@@ -205,7 +202,7 @@ struct
           Ok { actor_uuid; permission; target }
         in
         Caqti_type.(
-          custom ~encode ~decode (tup3 Uuid.Actor.t Permission.t TargetEntity.t))
+          custom ~encode ~decode (t3 Uuid.Actor.t Permission.t TargetEntity.t))
       ;;
     end
 
@@ -221,7 +218,7 @@ struct
           custom
             ~encode
             ~decode
-            (tup3 Permission.t TargetModel.t (option Uuid.Target.t)))
+            (t3 Permission.t TargetModel.t (option Uuid.Target.t)))
       ;;
     end
   end
@@ -388,7 +385,7 @@ struct
               WHERE roles.role = $1
                 AND roles.mark_as_deleted IS NULL
             |sql}
-            |> Entity.(Caqti_type.tup2 Role.t Uuid.Target.t ->* ActorRole.t)
+            |> Entity.(Caqti_type.t2 Role.t Uuid.Target.t ->* ActorRole.t)
           ;;
 
           let find_by_target ?ctx = Database.collect ?ctx find_by_target_request
@@ -567,7 +564,7 @@ struct
               WHERE actor_uuid = guardianEncodeUuid($1)
                 AND role = $2
             |sql}
-            |> Caqti_type.(tup2 Uuid.Actor.t Entity.Role.t ->. unit)
+            |> Caqti_type.(t2 Uuid.Actor.t Entity.Role.t ->. unit)
           ;;
 
           let delete ?ctx role =
@@ -885,7 +882,7 @@ struct
               SET model = $2, mark_as_deleted = NULL
               WHERE uuid = guardianEncodeUuid($1)
             |sql}
-            |> Caqti_type.(tup2 Uuid.Target.t TargetModel.t ->. unit)
+            |> Caqti_type.(t2 Uuid.Target.t TargetModel.t ->. unit)
           ;;
 
           let promote ?ctx = CCFun.curry (Database.exec ?ctx promote_request)
@@ -918,7 +915,7 @@ struct
               )
             |sql}
             |> Caqti_type.(
-                 tup3 Uuid.Actor.t Permission.t TargetModel.t ->? option bool)
+                 t3 Uuid.Actor.t Permission.t TargetModel.t ->? option bool)
           in
           Database.find_opt ?ctx validate_request (actor_uuid, permission, model)
           >|= CCOption.(flatten %> value ~default:false)
@@ -982,9 +979,9 @@ struct
               )
             |sql}
             |> Caqti_type.(
-                 tup2
+                 t2
                    Uuid.Actor.t
-                   (tup2 Permission.t (tup2 TargetModel.t Uuid.Target.t))
+                   (t2 Permission.t (t2 TargetModel.t Uuid.Target.t))
                  ->? option bool)
           in
           Database.find_opt
@@ -1007,7 +1004,7 @@ struct
           let to_req =
             let open Entity in
             Caqti_type.(
-              tup3 Uuid.Actor.t Permission.t TargetModel.t ->? option bool)
+              t3 Uuid.Actor.t Permission.t TargetModel.t ->? option bool)
           in
           let find_bool request =
             Database.find_opt ?ctx request (actor_uuid, permission, model)

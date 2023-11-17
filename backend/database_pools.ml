@@ -53,13 +53,15 @@ end
 
 module Make (Config : ConfigSig) = struct
   let main_pool_ref
-    : (Caqti_lwt.connection, Caqti_error.t) Caqti_lwt.Pool.t option ref
+    : (Caqti_lwt.connection, Caqti_error.t) Caqti_lwt_unix.Pool.t option ref
     =
     ref None
   ;;
 
   let pools
-    : (string, (Caqti_lwt.connection, Caqti_error.t) Caqti_lwt.Pool.t) Hashtbl.t
+    : ( string
+        , (Caqti_lwt.connection, Caqti_error.t) Caqti_lwt_unix.Pool.t )
+        Hashtbl.t
     =
     let spare_for_pools = 5 in
     Hashtbl.create
@@ -69,7 +71,7 @@ module Make (Config : ConfigSig) = struct
   ;;
 
   let print_pool_usage ?tags pool =
-    let n_connections = Caqti_lwt.Pool.size pool in
+    let n_connections = Caqti_lwt_unix.Pool.size pool in
     let max_connections = Config.database_pool_size in
     Logs.debug ~src (fun m ->
       m ?tags "Pool usage: %i/%i" n_connections max_connections)
@@ -82,7 +84,8 @@ module Make (Config : ConfigSig) = struct
     =
     database_url
     |> Uri.of_string
-    |> Caqti_lwt.connect_pool ~max_size:pool_size
+    |> Caqti_lwt_unix.connect_pool
+         ~pool_config:(Caqti_pool_config.create ~max_size:pool_size ())
     |> map_or_raise ~msg_prefix:"Failed to connect to DB pool" ok_fun
   ;;
 
@@ -118,7 +121,7 @@ module Make (Config : ConfigSig) = struct
       Lwt.return_unit
     | MultiPools _, Some connection ->
       let () = Hashtbl.remove pools name in
-      let%lwt () = Caqti_lwt.Pool.drain connection in
+      let%lwt () = Caqti_lwt_unix.Pool.drain connection in
       Lwt.return_unit
   ;;
 
@@ -156,7 +159,7 @@ module Make (Config : ConfigSig) = struct
     let open Lwt.Infix in
     let pool = fetch_pool ?ctx () in
     print_pool_usage pool;
-    Caqti_lwt.Pool.use
+    Caqti_lwt_unix.Pool.use
       (fun connection ->
         Logs.debug ~src (fun m ->
           m ?tags:(LogTag.ctx_opt ?ctx ()) "Fetched connection from pool");
@@ -214,7 +217,9 @@ module Make (Config : ConfigSig) = struct
     let open Lwt.Infix in
     let pool = fetch_pool ?ctx () in
     print_pool_usage pool;
-    Caqti_lwt.Pool.use (fun connection -> f connection >|= CCResult.return) pool
+    Caqti_lwt_unix.Pool.use
+      (fun connection -> f connection >|= CCResult.return)
+      pool
     >|= get_or_raise ?ctx ()
   ;;
 

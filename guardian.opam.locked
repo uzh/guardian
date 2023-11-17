@@ -13,15 +13,15 @@ doc: "https://uzh.github.io/guardian"
 bug-reports: "https://github.com/uzh/guardian/issues"
 depends: [
   "angstrom" {= "0.15.0"}
-  "base" {= "v0.14.3"}
+  "base" {= "v0.16.3"}
   "base-bytes" {= "base"}
   "base-threads" {= "base"}
   "base-unix" {= "base"}
   "bigarray-compat" {= "1.1.0"}
   "bigstringaf" {= "0.9.1"}
-  "caqti" {= "1.9.0"}
-  "caqti-driver-mariadb" {= "1.9.0"}
-  "caqti-lwt" {= "1.9.0"}
+  "caqti" {= "2.0.1"}
+  "caqti-driver-mariadb" {= "2.0.1"}
+  "caqti-lwt" {= "2.0.1"}
   "cmdliner" {= "1.2.0"}
   "conf-gcc" {= "1.0"}
   "conf-mariadb" {= "2"}
@@ -31,15 +31,20 @@ depends: [
   "cppo" {= "1.6.9"}
   "csexp" {= "1.5.2"}
   "ctypes" {= "0.20.2"}
-  "dune" {= "3.11.0"}
-  "dune-configurator" {= "3.11.0"}
+  "domain-name" {= "0.4.0"}
+  "dune" {= "3.11.1"}
+  "dune-configurator" {= "3.11.1"}
   "either" {= "1.0.0"}
   "fmt" {= "0.9.0"}
   "integers" {= "0.7.0"}
+  "ipaddr" {= "5.5.0"}
   "logs" {= "0.7.0"}
   "lwt" {= "5.7.0"}
+  "lwt-dllist" {= "1.0.1"}
   "lwt_ppx" {= "2.1.0"}
+  "macaddr" {= "5.5.0"}
   "mariadb" {= "1.1.6"}
+  "mtime" {= "2.0.0"}
   "ocaml" {= "4.14.1"}
   "ocaml-compiler-libs" {= "v0.12.4"}
   "ocaml-syntax-shims" {= "1.0.0"}
@@ -48,18 +53,19 @@ depends: [
   "ocplib-endian" {= "1.2"}
   "ppx_derivers" {= "1.2.1"}
   "ppx_deriving" {= "5.2.1"}
-  "ppx_deriving_yojson" {= "3.6.1"}
-  "ppx_sexp_conv" {= "v0.14.3"}
-  "ppxlib" {= "0.25.1"}
+  "ppx_deriving_yojson" {= "3.7.0"}
+  "ppx_sexp_conv" {= "v0.16.0"}
+  "ppxlib" {= "0.31.0"}
   "ptime" {= "1.1.0"}
   "result" {= "1.5"}
   "seq" {= "base"}
-  "sexplib0" {= "v0.14.0"}
+  "sexplib0" {= "v0.16.0"}
   "stdlib-shims" {= "0.3.0"}
   "stringext" {= "1.6.0"}
   "topkg" {= "1.0.7"}
   "uri" {= "4.4.0"}
-  "yojson" {= "2.1.0"}
+  "uuidm" {= "0.9.8"}
+  "yojson" {= "2.1.1"}
 ]
 build: [
   ["dune" "subst"] {dev}
