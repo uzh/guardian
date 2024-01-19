@@ -51,8 +51,12 @@
    (>= 5.2.1))
   (ppx_deriving_yojson
    (>= 3.6.1))
+  (ppx_fields_conv
+   (>= v0.16.0))
   (ppx_sexp_conv
    (>= 0.15.1))
+  (ppx_string
+   (>= v0.16.0))
   (uri
    (>= 4.2.0))
   (uuidm
