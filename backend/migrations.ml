@@ -208,6 +208,35 @@ let drop_old_targets = {sql|DROP TABLE IF EXISTS guardian_targets_old|sql}
 let drop_old_relations = {sql|DROP TABLE IF EXISTS guardian_relations_old|sql}
 let drop_old_rules = {sql|DROP TABLE IF EXISTS guardian_rules_old|sql}
 
+let create_guardian_assign_roles_table =
+  {sql|
+    CREATE TABLE IF NOT EXISTS guardian_assign_roles (
+      id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+      role varchar(255) NOT NULL,
+      target_role varchar(255) NOT NULL,
+      mark_as_deleted DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT unique_role_target_role UNIQUE (role, target_role),
+      PRIMARY KEY (id)
+    )
+  |sql}
+;;
+
+let create_guardian_assign_roles_history_table =
+  {sql|
+    CREATE TABLE IF NOT EXISTS guardian_assign_roles_history (
+      id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+      role varchar(255) NOT NULL,
+      target_role varchar(255) NOT NULL,
+      comment text NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id)
+    )
+  |sql}
+;;
+
 let all_tables =
   [ "guardian_actors"
   ; "guardian_actor_roles"
@@ -215,6 +244,8 @@ let all_tables =
   ; "guardian_targets"
   ; "guardian_role_permissions"
   ; "guardian_actor_permissions"
+  ; "guardian_assign_roles"
+  ; "guardian_assign_roles_history"
   ]
 ;;
 
@@ -264,5 +295,11 @@ let all =
   ; "drop old guardian targets table", "2024-01-17T09:02", drop_old_targets
   ; "drop old guardian relations table", "2024-01-17T09:03", drop_old_relations
   ; "drop old guardian rules table", "2024-01-17T09:04", drop_old_rules
+  ; ( "create guardian assign roles table"
+    , "2024-01-18T16:00"
+    , create_guardian_assign_roles_table )
+  ; ( "create guardian assign roles history table"
+    , "2024-01-18T16:01"
+    , create_guardian_assign_roles_history_table )
   ]
 ;;

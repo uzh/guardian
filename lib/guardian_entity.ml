@@ -212,6 +212,16 @@ struct
     let empty = Or []
   end
 
+  module RoleAssignment = struct
+    type t =
+      { role : Role.t
+      ; target_role : Role.t
+      }
+    [@@deriving eq, show, ord, yojson, sexp_of, fields ~getters]
+
+    let create role target_role = { role; target_role }
+  end
+
   module type PersistenceSig =
     Persistence.Contract
     with type actor = Actor.t
@@ -220,6 +230,7 @@ struct
      and type actor_permission = ActorPermission.t
      and type permission_on_target = PermissionOnTarget.t
      and type role = Role.t
+     and type role_assignment = RoleAssignment.t
      and type role_permission = RolePermission.t
      and type target = Target.t
      and type target_entity = TargetEntity.t
@@ -234,6 +245,7 @@ struct
                   and type actor_permission = ActorPermission.t
                   and type permission_on_target = PermissionOnTarget.t
                   and type role = Role.t
+                  and type role_assignment = RoleAssignment.t
                   and type role_permission = RolePermission.t
                   and type target = Target.t
                   and type target_entity = TargetEntity.t
@@ -384,6 +396,18 @@ struct
                  ([%show: ValidationSet.t] validation_set))
         in
         validation_set |> find_checker |> validate |> CCResult.map_err error
+      ;;
+    end
+
+    module RoleAssignment = struct
+      include RoleAssignment
+      include Repo.RoleAssignment
+
+      (** [can_assign_roles ?ctx role] returns all roles which can be assigned by
+          the provided role *)
+      let can_assign_roles ?ctx =
+        Repo.RoleAssignment.find_all_by_role ?ctx
+        %> Lwt.map (CCList.map target_role)
       ;;
     end
 

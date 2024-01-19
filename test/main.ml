@@ -34,6 +34,8 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     PermissionOnTarget.(Alcotest.testable pp equal)
   ;;
 
+  let testable_role_assignment = RoleAssignment.(Alcotest.testable pp equal)
+
   (* ensure that the `User` module conforms to the `ActorSig` and `UserTarget`
      conforms to `TargetSig` module type. *)
   let _ = (module Article : TargetSig)
@@ -593,6 +595,105 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     in
     Lwt.return_unit
   ;;
+
+  let test_role_assignment_create ?ctx (_ : 'a) () =
+    let create_assignable = CCList.map (CCFun.uncurry RoleAssignment.create) in
+    let sort = CCList.stable_sort RoleAssignment.compare in
+    let admin_objs = [ `Admin, `Reader ] |> create_assignable in
+    let author_objs =
+      [ `Author, `Editor; `Author, `Reader ] |> create_assignable
+    in
+    let%lwt () =
+      Backend.RoleAssignment.insert ?ctx (admin_objs @ author_objs)
+    in
+    let%lwt author_assignables =
+      Backend.RoleAssignment.find_all_by_role ?ctx `Author
+    in
+    let () =
+      Alcotest.(check (list testable_role_assignment))
+        "return correct list of assignable roles for an author"
+        (author_objs |> sort)
+        (author_assignables |> sort)
+    in
+    (* Reset all RoleAssignments *)
+    let%lwt () =
+      let open Lwt in
+      let open Backend.RoleAssignment in
+      find_all ?ctx ~default_where:None ()
+      >>= Lwt_list.iter_s (delete ?ctx ~comment:"[system] testing")
+    in
+    Lwt.return_unit
+  ;;
+
+  let test_role_assignment_delete ?ctx (_ : 'a) () =
+    let create_assignable = CCList.map (CCFun.uncurry RoleAssignment.create) in
+    let sort = CCList.stable_sort RoleAssignment.compare in
+    let delete_obj = RoleAssignment.create `Admin `Editor in
+    let expected_objs =
+      [ `Admin, `Author; `Admin, `Reader ] |> create_assignable
+    in
+    let%lwt () =
+      Backend.RoleAssignment.insert ?ctx (delete_obj :: expected_objs)
+    in
+    let%lwt () =
+      Backend.RoleAssignment.delete ?ctx ~comment:"delete test" delete_obj
+    in
+    let%lwt admin_objs = Backend.RoleAssignment.find_all_by_role ?ctx `Admin in
+    let () =
+      Alcotest.(check (list testable_role_assignment))
+        "return correct list of assignable roles for an admin"
+        (expected_objs |> sort)
+        (admin_objs |> sort)
+    in
+    (* Reset all RoleAssignments *)
+    let%lwt () =
+      let open Lwt in
+      let open Backend.RoleAssignment in
+      find_all ?ctx ~default_where:None ()
+      >>= Lwt_list.iter_s (delete ?ctx ~comment:"[system] testing")
+    in
+    Lwt.return_unit
+  ;;
+
+  let test_role_assignment_can_assign ?ctx (_ : 'a) () =
+    let create_assignable = CCList.map (CCFun.uncurry RoleAssignment.create) in
+    let admin_objs =
+      [ `Admin, `Author; `Admin, `Editor ] |> create_assignable
+    in
+    let author_objs =
+      [ `Author, `Editor; `Author, `Reader ] |> create_assignable
+    in
+    let%lwt () =
+      Backend.RoleAssignment.insert ?ctx (admin_objs @ author_objs)
+    in
+    let testables =
+      [ `Admin, `Reader, false
+      ; `Admin, `Author, true
+      ; `Author, `Admin, false
+      ; `Author, `Reader, true
+      ]
+    in
+    let%lwt () =
+      Lwt_list.iter_s
+        (fun (role, can_assign, expected) ->
+          let%lwt valid =
+            Backend.RoleAssignment.can_assign_roles ?ctx role
+            |> Lwt.map (CCList.exists (Role.Role.equal can_assign))
+          in
+          Alcotest.(
+            check bool "check if role can assign a target role" expected valid)
+          |> Lwt.return)
+        testables
+    in
+    (* Reset all RoleAssignments *)
+    let%lwt () =
+      let open Lwt in
+      let open Backend.RoleAssignment in
+      find_all ?ctx ~default_where:None ()
+      >>= Lwt_list.iter_s (delete ?ctx ~comment:"[system] testing")
+    in
+    Lwt.return_unit
+  ;;
 end
 
 let () =
@@ -668,6 +769,11 @@ let () =
         , [ test_case "permissions" `Quick (test_find_permissions_of_actor ?ctx)
           ; test_case "validate existance" `Quick (test_exists_fcn ?ctx)
           ; test_case "remove duplicates" `Quick (test_remove_duplicates ?ctx)
+          ] )
+      ; ( Format.asprintf "(%s) Validation for Role assignment" name
+        , [ test_case "create" `Quick (test_role_assignment_create ?ctx)
+          ; test_case "delete" `Quick (test_role_assignment_delete ?ctx)
+          ; test_case "can assign" `Quick (test_role_assignment_can_assign ?ctx)
           ] )
       ]
   in

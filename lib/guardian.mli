@@ -222,6 +222,22 @@ module Make : functor
     val empty : t
   end
 
+  module RoleAssignment : sig
+    type t =
+      { role : Role.t
+      ; target_role : Role.t
+      }
+
+    val equal : t -> t -> bool
+    val pp : Format.formatter -> t -> unit
+    val show : t -> string
+    val compare : t -> t -> int
+    val to_yojson : t -> Yojson.Safe.t
+    val of_yojson : Yojson.Safe.t -> t Ppx_deriving_yojson_runtime.error_or
+    val sexp_of_t : t -> Sexplib0.Sexp.t
+    val create : Role.t -> Role.t -> t
+  end
+
   module type PersistenceSig =
     Persistence.Contract
     with type actor = Actor.t
@@ -230,6 +246,7 @@ module Make : functor
      and type actor_role = ActorRole.t
      and type permission_on_target = PermissionOnTarget.t
      and type role = Role.t
+     and type role_assignment = RoleAssignment.t
      and type role_permission = RolePermission.t
      and type target = Target.t
      and type target_entity = TargetEntity.t
@@ -244,6 +261,7 @@ module Make : functor
                   and type actor_role = ActorRole.t
                   and type permission_on_target = PermissionOnTarget.t
                   and type role = Role.t
+                  and type role_assignment = RoleAssignment.t
                   and type role_permission = RolePermission.t
                   and type target = Target.t
                   and type target_entity = TargetEntity.t
