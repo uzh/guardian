@@ -213,6 +213,18 @@ module Make (Config : ConfigSig) = struct
 
   let transaction' ?ctx f = transaction ?ctx f |> Lwt.map (get_or_raise ?ctx ())
 
+  let exec_with_connection
+    (request : ('a, unit, [< `Zero ]) Caqti_request.t)
+    (input : 'a)
+    (connection : (module Caqti_lwt.CONNECTION))
+    : unit Lwt.t
+    =
+    let open CCFun in
+    let (module Connection : Caqti_lwt.CONNECTION) = connection in
+    Connection.exec request input
+    |> Lwt.map CCResult.(map_err Caqti_error.show %> get_or_failwith)
+  ;;
+
   let query ?ctx f =
     let open Lwt.Infix in
     let pool = fetch_pool ?ctx () in
@@ -247,5 +259,16 @@ module Make (Config : ConfigSig) = struct
     query' ?ctx (fun connection ->
       let module Connection = (val connection : Caqti_lwt.CONNECTION) in
       Connection.exec request input)
+  ;;
+
+  let populate ?ctx table columns request input =
+    query' ?ctx (fun connection ->
+      let module Connection = (val connection : Caqti_lwt.CONNECTION) in
+      Connection.populate
+        ~table
+        ~columns
+        request
+        (Caqti_lwt.Stream.of_list input)
+      |> Lwt.map Caqti_error.uncongested)
   ;;
 end
