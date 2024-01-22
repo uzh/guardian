@@ -2,6 +2,11 @@ open CCFun
 open Lwt.Infix
 open Caqti_request.Infix
 
+let combine_lwt m =
+  let%lwt k = m in
+  k
+;;
+
 module Make
     (ActorModel : Guardian.RoleSig)
     (Role : Guardian.RoleSig)
@@ -221,6 +226,19 @@ struct
             (t3 Permission.t TargetModel.t (option Uuid.Target.t)))
       ;;
     end
+
+    module RoleAssignment = struct
+      include Guard.RoleAssignment
+
+      let t =
+        let open Caqti_encoders in
+        let decode (role, (target_role, ())) = Ok { role; target_role } in
+        let encode m : ('a Caqti_encoders.Data.t, string) result =
+          Ok Data.[ m.role; m.target_role ]
+        in
+        custom ~encode ~decode Schema.[ Role.t; Role.t ]
+      ;;
+    end
   end
 
   module DBCache = struct
@@ -257,6 +275,7 @@ struct
       type actor_role = Guard.ActorRole.t
       type permission_on_target = Guard.PermissionOnTarget.t
       type role = Role.t
+      type role_assignment = Guard.RoleAssignment.t
       type role_permission = Guard.RolePermission.t
       type target = Guard.Target.t
       type target_entity = Guard.TargetEntity.t
@@ -886,6 +905,78 @@ struct
           ;;
 
           let promote ?ctx = CCFun.curry (Database.exec ?ctx promote_request)
+        end
+
+        module RoleAssignment = struct
+          let table_name = "guardian_assign_roles"
+          let sql_insert_columns = [ "role"; "target_role" ]
+
+          let sql_select_columns =
+            [ "guardian_assign_roles.role"
+            ; "guardian_assign_roles.target_role"
+            ]
+          ;;
+
+          let default_where = Some "mark_as_deleted IS NULL"
+
+          let find_request_sql =
+            Mariadb_utils.find_request_sql
+              sql_select_columns
+              default_where
+              table_name
+              ~joins:""
+          ;;
+
+          let insert ?ctx =
+            Database.populate
+              ?ctx
+              table_name
+              sql_insert_columns
+              Entity.RoleAssignment.t
+          ;;
+
+          let find_all_request ?default_where () =
+            find_request_sql ?default_where ""
+            |> Caqti_type.(unit ->* Entity.RoleAssignment.t)
+          ;;
+
+          let find_all ?ctx ?default_where =
+            Database.collect ?ctx (find_all_request ?default_where ())
+          ;;
+
+          let find_all_by_role_request =
+            find_request_sql {sql|WHERE role = ?|sql}
+            |> Entity.(Role.t ->* RoleAssignment.t)
+          ;;
+
+          let find_all_by_role ?ctx =
+            Database.collect ?ctx find_all_by_role_request
+          ;;
+
+          let delete_add_history_request =
+            {sql|
+              INSERT INTO guardian_assign_roles_history (role, target_role, comment) VALUES (?,?,?)
+            |sql}
+            |> Caqti_type.(t2 Entity.RoleAssignment.t (option string) ->. unit)
+          ;;
+
+          let delete_remove_request =
+            {sql|
+                DELETE FROM guardian_assign_roles WHERE role = ? AND target_role = ?
+            |sql}
+            |> Entity.RoleAssignment.t ->. Caqti_type.unit
+          ;;
+
+          let delete ?ctx ?comment role =
+            let exec = Database.exec_with_connection in
+            (fun conn ->
+              let%lwt () =
+                exec delete_add_history_request (role, comment) conn
+              in
+              exec delete_remove_request role conn)
+            |> Database.transaction ?ctx
+            |> combine_lwt
+          ;;
         end
 
         let validate_model ?ctx permission model actor_uuid =

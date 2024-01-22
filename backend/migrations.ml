@@ -198,6 +198,44 @@ let create_v2_guardian_actor_permissions_table =
 ;;
 
 let drop_relations = {sql|DROP TABLE IF EXISTS guardian_relations|sql}
+let drop_old_actors = {sql|DROP TABLE IF EXISTS guardian_actors_old|sql}
+
+let drop_old_actor_roles =
+  {sql|DROP TABLE IF EXISTS guardian_actor_roles_old|sql}
+;;
+
+let drop_old_targets = {sql|DROP TABLE IF EXISTS guardian_targets_old|sql}
+let drop_old_relations = {sql|DROP TABLE IF EXISTS guardian_relations_old|sql}
+let drop_old_rules = {sql|DROP TABLE IF EXISTS guardian_rules_old|sql}
+
+let create_guardian_assign_roles_table =
+  {sql|
+    CREATE TABLE IF NOT EXISTS guardian_assign_roles (
+      id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+      role varchar(255) NOT NULL,
+      target_role varchar(255) NOT NULL,
+      mark_as_deleted DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT unique_role_target_role UNIQUE (role, target_role),
+      PRIMARY KEY (id)
+    )
+  |sql}
+;;
+
+let create_guardian_assign_roles_history_table =
+  {sql|
+    CREATE TABLE IF NOT EXISTS guardian_assign_roles_history (
+      id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+      role varchar(255) NOT NULL,
+      target_role varchar(255) NOT NULL,
+      comment text NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id)
+    )
+  |sql}
+;;
 
 let all_tables =
   [ "guardian_actors"
@@ -206,11 +244,8 @@ let all_tables =
   ; "guardian_targets"
   ; "guardian_role_permissions"
   ; "guardian_actor_permissions"
-  ; "guardian_actors_old"
-  ; "guardian_actor_roles_old"
-  ; "guardian_targets_old"
-  ; "guardian_relations_old"
-  ; "guardian_rules_old"
+  ; "guardian_assign_roles"
+  ; "guardian_assign_roles_history"
   ]
 ;;
 
@@ -253,5 +288,18 @@ let all =
     , "2023-08-18T15:21"
     , create_v2_guardian_actor_permissions_table )
   ; "drop guardian relations table", "2023-08-18T15:22", drop_relations
+  ; "drop old guardian actors table", "2024-01-17T09:00", drop_old_actors
+  ; ( "drop old guardian actor roles table"
+    , "2024-01-17T09:01"
+    , drop_old_actor_roles )
+  ; "drop old guardian targets table", "2024-01-17T09:02", drop_old_targets
+  ; "drop old guardian relations table", "2024-01-17T09:03", drop_old_relations
+  ; "drop old guardian rules table", "2024-01-17T09:04", drop_old_rules
+  ; ( "create guardian assign roles table"
+    , "2024-01-18T16:00"
+    , create_guardian_assign_roles_table )
+  ; ( "create guardian assign roles history table"
+    , "2024-01-18T16:01"
+    , create_guardian_assign_roles_history_table )
   ]
 ;;

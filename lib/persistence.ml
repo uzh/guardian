@@ -7,6 +7,7 @@ module type Backend = sig
   type actor_role
   type permission_on_target
   type role
+  type role_assignment
   type role_permission
   type target
   type target_entity
@@ -98,6 +99,30 @@ module type Backend = sig
         -> actor_permission list Lwt.t
     end
 
+    module RoleAssignment : sig
+      val find_all
+        :  ?ctx:(string * string) list
+        -> ?default_where:string option
+        -> unit
+        -> role_assignment list Lwt.t
+
+      val find_all_by_role
+        :  ?ctx:(string * string) list
+        -> role
+        -> role_assignment list Lwt.t
+
+      val insert
+        :  ?ctx:(string * string) list
+        -> role_assignment list
+        -> unit Lwt.t
+
+      val delete
+        :  ?ctx:(string * string) list
+        -> ?comment:string
+        -> role_assignment
+        -> unit Lwt.t
+    end
+
     val validate
       :  ?ctx:context
       -> ?any_id:bool
@@ -171,6 +196,15 @@ module type Contract = sig
       -> validation_set
       -> actor
       -> (unit, 'etyp) result
+  end
+
+  module RoleAssignment : sig
+    include module type of Repo.RoleAssignment
+
+    val can_assign_roles
+      :  ?ctx:(string * string) list
+      -> role
+      -> role list Lwt.t
   end
 
   val wrap_function

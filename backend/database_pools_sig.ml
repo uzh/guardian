@@ -37,4 +37,18 @@ module type Sig = sig
     :  ?ctx:(string * string) list
     -> (Caqti_lwt.connection -> 'a)
     -> 'a Lwt.t
+
+  val exec_with_connection
+    :  ('a, unit, [< `Zero ]) Caqti_request.t
+    -> 'a
+    -> (module Caqti_lwt.CONNECTION)
+    -> unit Lwt.t
+
+  val populate
+    :  ?ctx:(string * string) list
+    -> string
+    -> string list
+    -> 'a Caqti_type.t
+    -> 'a list
+    -> unit Lwt.t
 end

@@ -94,7 +94,7 @@ let find_accessible kind =
     GROUP BY posts.uuid
     HAVING guardianValidatePostUuid(guardianEncodeUuid(?), ?, posts.uuid)
   |sql}
-  |> Caqti_type.(tup2 UuidActor.t Action.t ->* Post.t)
+  |> Caqti_type.(t2 UuidActor.t Action.t ->* Post.t)
 ```
 
 ## Development
