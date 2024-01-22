@@ -4,27 +4,41 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [unreleased](https://github.com/uzh/guardian/tree/HEAD)
 
+## [0.3.1](https://github.com/uzh/guardian/tree/0.3.1) - 2024-01-22
+
+### Added
+
+- role assingment base structure for specifiying which role can assign which ones
+
+### Removed
+
+- old unused database tables
+
+### Fixed
+
+- package deprecation warnings
+
 ## [0.3.0](https://github.com/uzh/guardian/tree/0.3.0) - 2023-09-21
 
-## Added
+### Added
 
 - helper functions on backend for integrated guardian usage
 
-## Changed
+### Changed
 
 - performance update, reduce amount of needed role permissions
 
-## Removed
+### Removed
 
 - relations
 
 ## [0.2.0](https://github.com/uzh/guardian/tree/0.2.0) - 2023-07-05
 
-## Added
+### Added
 
 - helper functions on backend for integrated guardian usage
 
-## Changed
+### Changed
 
 - extract roles into separate table
 - rework relations
@@ -34,11 +48,11 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [0.1.1](https://github.com/uzh/guardian/tree/0.1.1) - 2023-03-28
 
-## Added
+### Added
 
 - test cases for reported bug
 
-## Fixed
+### Fixed
 
 - checking for entity and uuid, bug allowed in certain cases to get access when action on entity matched
 

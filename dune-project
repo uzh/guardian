@@ -4,7 +4,7 @@
 
 (name guardian)
 
-(version 0.3.0)
+(version 0.3.1)
 
 (license GPL-2.0-or-later)
 
