@@ -100,6 +100,15 @@ module type Backend = sig
     end
 
     module RoleAssignment : sig
+      val table_name : string
+      val sql_select_columns : string list
+
+      val find_request_sql
+        :  ?default_where:string option
+        -> ?count:bool
+        -> string
+        -> string
+
       val find_all
         :  ?ctx:(string * string) list
         -> ?default_where:string option
