@@ -1,8 +1,7 @@
 let find_request_sql
   sql_select_columns
-  default_where
   table_name
-  ?(default_where = default_where)
+  ?(default_where = None)
   ?(count = false)
   ?(joins = "")
   where_fragment

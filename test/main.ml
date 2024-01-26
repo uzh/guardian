@@ -619,7 +619,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     let%lwt () =
       let open Lwt in
       let open Backend.RoleAssignment in
-      find_all ?ctx ~default_where:None ()
+      find_all ?ctx ()
       >>= Lwt_list.iter_s (delete ?ctx ~comment:"[system] testing")
     in
     Lwt.return_unit
@@ -649,7 +649,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     let%lwt () =
       let open Lwt in
       let open Backend.RoleAssignment in
-      find_all ?ctx ~default_where:None ()
+      find_all ?ctx ()
       >>= Lwt_list.iter_s (delete ?ctx ~comment:"[system] testing")
     in
     Lwt.return_unit
@@ -689,7 +689,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     let%lwt () =
       let open Lwt in
       let open Backend.RoleAssignment in
-      find_all ?ctx ~default_where:None ()
+      find_all ?ctx ()
       >>= Lwt_list.iter_s (delete ?ctx ~comment:"[system] testing")
     in
     Lwt.return_unit

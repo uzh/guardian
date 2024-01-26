@@ -917,13 +917,11 @@ struct
             ]
           ;;
 
-          let default_where = Some "mark_as_deleted IS NULL"
-
           let find_request_sql =
             Mariadb_utils.find_request_sql
               sql_select_columns
-              default_where
               table_name
+              ~default_where:None
               ~joins:""
           ;;
 
@@ -935,14 +933,11 @@ struct
               Entity.RoleAssignment.t
           ;;
 
-          let find_all_request ?default_where () =
-            find_request_sql ?default_where ""
-            |> Caqti_type.(unit ->* Entity.RoleAssignment.t)
+          let find_all_request =
+            find_request_sql "" |> Caqti_type.(unit ->* Entity.RoleAssignment.t)
           ;;
 
-          let find_all ?ctx ?default_where =
-            Database.collect ?ctx (find_all_request ?default_where ())
-          ;;
+          let find_all ?ctx = Database.collect ?ctx find_all_request
 
           let find_all_by_role_request =
             find_request_sql {sql|WHERE role = ?|sql}

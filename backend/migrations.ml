@@ -237,6 +237,13 @@ let create_guardian_assign_roles_history_table =
   |sql}
 ;;
 
+let remove_unused_mark_as_deleted_column =
+  {sql|
+    ALTER TABLE guardian_assign_roles
+    DROP COLUMN IF EXISTS mark_as_deleted
+  |sql}
+;;
+
 let all_tables =
   [ "guardian_actors"
   ; "guardian_actor_roles"
@@ -301,5 +308,8 @@ let all =
   ; ( "create guardian assign roles history table"
     , "2024-01-18T16:01"
     , create_guardian_assign_roles_history_table )
+  ; ( "remove unused mark as deleted column"
+    , "2024-01-26T15:00"
+    , remove_unused_mark_as_deleted_column )
   ]
 ;;
