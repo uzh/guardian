@@ -285,6 +285,11 @@ struct
       module Repo = struct
         let clear_cache = DBCache.clear
 
+        module Model = struct
+          let role = Entity.Role.t
+          let role_assignment = Entity.RoleAssignment.t
+        end
+
         let define_encode_uuid =
           let function_name = "guardianEncodeUuid" in
           ( function_name
@@ -426,17 +431,17 @@ struct
                     | None when with_uuid ->
                       ( "(exclude.role = ? AND exclude.target_uuid IS NULL)"
                         :: args
-                      , dyn |> add Entity.Role.t role )
+                      , dyn |> add Model.role role )
                     | None ->
                       ( "exclude.role = ? AND exclude.target_uuid IS NULL"
                         :: args
-                      , dyn |> add Entity.Role.t role )
+                      , dyn |> add Model.role role )
                     | Some uuid ->
                       ( "(exclude.role = ? AND exclude.target_uuid = \
                          guardianEncodeUuid(?))"
                         :: args
                       , dyn
-                        |> add Entity.Role.t role
+                        |> add Model.role role
                         |> add Entity.Uuid.Target.t uuid ))
                   ([], dynparam)
                   exclude
@@ -491,7 +496,7 @@ struct
             | Some uuid ->
               let field = "role_targets.actor_uuid" in
               let dynparam =
-                empty |> add Entity.Uuid.Target.t uuid |> add Entity.Role.t role
+                empty |> add Entity.Uuid.Target.t uuid |> add Model.role role
               in
               let Pack (pt, pv), exclude_sql =
                 create_exclude ~field ~dynparam ~with_uuid:true exclude
@@ -502,7 +507,7 @@ struct
                 pv
             | None ->
               let field = "roles.actor_uuid" in
-              let dynparam = empty |> add Entity.Role.t role in
+              let dynparam = empty |> add Model.role role in
               let Pack (pt, pv), exclude_sql =
                 create_exclude ~field ~dynparam exclude
               in
@@ -583,7 +588,7 @@ struct
               WHERE actor_uuid = guardianEncodeUuid($1)
                 AND role = $2
             |sql}
-            |> Caqti_type.(t2 Uuid.Actor.t Entity.Role.t ->. unit)
+            |> Caqti_type.(t2 Uuid.Actor.t Model.role ->. unit)
           ;;
 
           let delete ?ctx role =
@@ -930,18 +935,18 @@ struct
               ?ctx
               table_name
               sql_insert_columns
-              Entity.RoleAssignment.t
+              Model.role_assignment
           ;;
 
           let find_all_request =
-            find_request_sql "" |> Caqti_type.(unit ->* Entity.RoleAssignment.t)
+            find_request_sql "" |> Caqti_type.(unit ->* Model.role_assignment)
           ;;
 
           let find_all ?ctx = Database.collect ?ctx find_all_request
 
           let find_all_by_role_request =
             find_request_sql {sql|WHERE role = ?|sql}
-            |> Entity.(Role.t ->* RoleAssignment.t)
+            |> Model.(role ->* role_assignment)
           ;;
 
           let find_all_by_role ?ctx =
@@ -952,14 +957,14 @@ struct
             {sql|
               INSERT INTO guardian_assign_roles_history (role, target_role, comment) VALUES (?,?,?)
             |sql}
-            |> Caqti_type.(t2 Entity.RoleAssignment.t (option string) ->. unit)
+            |> Caqti_type.(t2 Model.role_assignment (option string) ->. unit)
           ;;
 
           let delete_remove_request =
             {sql|
                 DELETE FROM guardian_assign_roles WHERE role = ? AND target_role = ?
             |sql}
-            |> Entity.RoleAssignment.t ->. Caqti_type.unit
+            |> Model.role_assignment ->. Caqti_type.unit
           ;;
 
           let delete ?ctx ?comment role =

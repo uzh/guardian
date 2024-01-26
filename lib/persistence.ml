@@ -15,6 +15,11 @@ module type Backend = sig
   type validation_set
 
   module Repo : sig
+    module Model : sig
+      val role : role Caqti_type.t
+      val role_assignment : role_assignment Caqti_type.t
+    end
+
     module ActorRole : sig
       val upsert : ?ctx:(string * string) list -> actor_role -> unit Lwt.t
 
