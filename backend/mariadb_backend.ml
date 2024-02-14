@@ -754,21 +754,37 @@ struct
             Database.exec ?ctx insert_request %> Lwt_result.ok
           ;;
 
-          let delete_request =
+          let delete_model_request =
             {sql|
               UPDATE guardian_actor_permissions
               SET mark_as_deleted = NOW()
-              WHERE actor_uuid = guardianEncodeUuid(?)
-                AND permission = ?
-                AND target_model = ?
-                AND target_uuid = guardianEncodeUuid(?)
+              WHERE actor_uuid = guardianEncodeUuid($1)
+                AND permission = $2
+                AND target_model = $3
+                AND target_uuid = NULL
             |sql}
             |> Entity.ActorPermission.t ->. Caqti_type.unit
           ;;
 
-          let delete ?ctx =
+          let delete_id_request =
+            {sql|
+              UPDATE guardian_actor_permissions
+              SET mark_as_deleted = NOW()
+              WHERE actor_uuid = guardianEncodeUuid($1)
+                AND permission = $2
+                AND target_model = NULL
+                AND target_uuid = guardianEncodeUuid($4)
+            |sql}
+            |> Entity.ActorPermission.t ->. Caqti_type.unit
+          ;;
+
+          let delete ?ctx permission =
             let () = clear_cache () in
-            Database.exec ?ctx delete_request %> Lwt_result.ok
+            Lwt_result.ok
+            @@ ((match permission.Entity.ActorPermission.target with
+                 | Guard.TargetEntity.Id _ -> delete_id_request
+                 | Guard.TargetEntity.Model _ -> delete_model_request)
+                |> CCFun.flip (Database.exec ?ctx) permission)
           ;;
         end
 
