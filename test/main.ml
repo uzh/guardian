@@ -580,6 +580,39 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     |> Lwt.return
   ;;
 
+  let test_drop_actor_permission ?ctx (_ : 'a) () =
+    let open ActorPermission in
+    let open Backend.ActorPermission in
+    let actor_permission_id =
+      create_for_id (snd thomas) Delete chris_article_id
+    in
+    let actor_permission_model =
+      create_for_model (snd thomas) Delete `Article
+    in
+    let check ?(available = true) perm =
+      let msg =
+        Format.asprintf
+          "Validate if actor permission is %s"
+          (if available then "available" else "absent")
+      in
+      find_all ?ctx ()
+      |> Lwt.map (CCList.exists (equal perm))
+      |> Lwt.map (Alcotest.(check bool) msg available)
+    in
+    (let* () = insert ?ctx actor_permission_id in
+     let%lwt () = check actor_permission_id in
+     let* () = delete ?ctx actor_permission_id in
+     let%lwt () = check ~available:false actor_permission_id in
+     let* () = insert ?ctx actor_permission_model in
+     let%lwt () = check actor_permission_model in
+     let* () = delete ?ctx actor_permission_model in
+     let%lwt () = check ~available:false actor_permission_model in
+     Lwt.return_ok ())
+    >|= Alcotest.(check (result unit string))
+          "Read/Delete the actor permissions."
+          (Ok ())
+  ;;
+
   let hacker_cannot_update_article ?ctx (_ : 'a) () =
     let%lwt ben =
       Hacker.to_authorizable ?ctx ben |> Lwt.map CCResult.get_or_failwith
@@ -769,6 +802,10 @@ let () =
         , [ test_case "permissions" `Quick (test_find_permissions_of_actor ?ctx)
           ; test_case "validate existance" `Quick (test_exists_fcn ?ctx)
           ; test_case "remove duplicates" `Quick (test_remove_duplicates ?ctx)
+          ; test_case
+              "Insert/Delete actor permission."
+              `Quick
+              (test_drop_actor_permission ?ctx)
           ] )
       ; ( Format.asprintf "(%s) Validation for Role assignment" name
         , [ test_case "create" `Quick (test_role_assignment_create ?ctx)

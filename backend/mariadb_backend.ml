@@ -688,10 +688,10 @@ struct
 
           let select_sql =
             {sql|
-              actor_permissions.actor_uuid,
+              guardianDecodeUuid(actor_permissions.actor_uuid),
               actor_permissions.permission,
               actor_permissions.target_model,
-              actor_permissions.target_uuid
+              guardianDecodeUuid(actor_permissions.target_uuid)
             |sql}
           ;;
 
@@ -754,37 +754,21 @@ struct
             Database.exec ?ctx insert_request %> Lwt_result.ok
           ;;
 
-          let delete_model_request =
+          let delete_request =
             {sql|
               UPDATE guardian_actor_permissions
               SET mark_as_deleted = NOW()
               WHERE actor_uuid = guardianEncodeUuid($1)
                 AND permission = $2
-                AND target_model = $3
-                AND target_uuid = NULL
-            |sql}
-            |> Entity.ActorPermission.t ->. Caqti_type.unit
-          ;;
-
-          let delete_id_request =
-            {sql|
-              UPDATE guardian_actor_permissions
-              SET mark_as_deleted = NOW()
-              WHERE actor_uuid = guardianEncodeUuid($1)
-                AND permission = $2
-                AND target_model = NULL
-                AND target_uuid = guardianEncodeUuid($4)
+                AND (($3 IS NULL AND target_model IS NULL) OR target_model = $3)
+                AND (($4 IS NULL AND target_uuid IS NULL) OR target_uuid = guardianEncodeUuid($4))
             |sql}
             |> Entity.ActorPermission.t ->. Caqti_type.unit
           ;;
 
           let delete ?ctx permission =
             let () = clear_cache () in
-            Lwt_result.ok
-            @@ ((match permission.Entity.ActorPermission.target with
-                 | Guard.TargetEntity.Id _ -> delete_id_request
-                 | Guard.TargetEntity.Model _ -> delete_model_request)
-                |> CCFun.flip (Database.exec ?ctx) permission)
+            Database.exec ?ctx delete_request permission |> Lwt_result.ok
           ;;
         end
 
