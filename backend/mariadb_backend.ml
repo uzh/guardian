@@ -526,11 +526,13 @@ struct
                 guardianDecodeUuid(roles.target_uuid)
               FROM
                 guardian_actor_role_targets AS roles
-                JOIN guardian_role_permissions AS role_permissions ON role_permissions.role = roles.role
-                  AND role_permissions.mark_as_deleted IS NULL
+              LEFT JOIN guardian_role_permissions AS role_permissions
+                ON role_permissions.role = roles.role
+                AND role_permissions.mark_as_deleted IS NULL
               WHERE
                 roles.mark_as_deleted IS NULL
                 AND roles.actor_uuid = guardianEncodeUuid($1)
+                AND `permission` IS NOT null
               UNION
               SELECT
                 role_permissions.permission,
@@ -538,11 +540,13 @@ struct
                 NULL
               FROM
                 guardian_actor_roles AS roles
-                JOIN guardian_role_permissions AS role_permissions ON role_permissions.role = roles.role
-                  AND role_permissions.mark_as_deleted IS NULL
+              LEFT JOIN guardian_role_permissions AS role_permissions
+                ON role_permissions.role = roles.role
+                AND role_permissions.mark_as_deleted IS NULL
               WHERE
                 roles.mark_as_deleted IS NULL
                 AND roles.actor_uuid = guardianEncodeUuid($1)
+                AND `permission` IS NOT null
               UNION
               SELECT
                 actor_permissions.permission,
@@ -550,12 +554,13 @@ struct
                 guardianDecodeUuid(actor_permissions.target_uuid)
               FROM
                 guardian_actor_permissions AS actor_permissions
-              JOIN guardian_targets AS targets
+              LEFT JOIN guardian_targets AS targets
                 ON targets.uuid = actor_permissions.target_uuid
                 AND targets.mark_as_deleted IS NULL
               WHERE
                 actor_permissions.actor_uuid = guardianEncodeUuid($1)
                 AND actor_permissions.mark_as_deleted IS NULL
+                AND `permission` IS NOT null
             |sql}
             |> Uuid.Actor.t ->* PermissionOnTarget.t
           ;;
@@ -987,7 +992,7 @@ struct
               SELECT (
                 SELECT TRUE
                 FROM guardian_actor_roles AS roles
-                JOIN guardian_role_permissions AS role_permissions
+                LEFT JOIN guardian_role_permissions AS role_permissions
                   ON roles.role = role_permissions.role
                   AND role_permissions.mark_as_deleted IS NULL
                 WHERE roles.mark_as_deleted IS NULL
@@ -1046,7 +1051,7 @@ struct
               ) OR (
                 SELECT TRUE
                 FROM guardian_actor_role_targets AS role_targets
-                  JOIN guardian_role_permissions AS role_permissions
+                  LEFT JOIN guardian_role_permissions AS role_permissions
                     ON role_targets.role = role_permissions.role
                     AND role_permissions.mark_as_deleted IS NULL
                   WHERE role_targets.mark_as_deleted IS NULL
@@ -1109,7 +1114,7 @@ struct
             {sql|
               SELECT TRUE
               FROM guardian_actor_roles AS roles
-              JOIN guardian_role_permissions AS role_permissions
+              LEFT JOIN guardian_role_permissions AS role_permissions
                 ON roles.role = role_permissions.role
                 AND role_permissions.mark_as_deleted IS NULL
               WHERE roles.mark_as_deleted IS NULL
@@ -1124,7 +1129,7 @@ struct
             {sql|
               SELECT TRUE
               FROM guardian_actor_role_targets AS role_targets
-              JOIN guardian_role_permissions AS role_permissions
+              LEFT JOIN guardian_role_permissions AS role_permissions
                 ON role_targets.role = role_permissions.role
                 AND role_permissions.mark_as_deleted IS NULL
               WHERE role_targets.mark_as_deleted IS NULL
@@ -1139,10 +1144,13 @@ struct
             {sql|
               SELECT TRUE
               FROM guardian_actor_permissions AS actor_permissions
-              JOIN guardian_targets AS targets ON actor_permissions.target_uuid = targets.uuid
-              WHERE actor_permissions.actor_uuid = guardianEncodeUuid($1)
+              LEFT JOIN guardian_targets AS targets
+                ON actor_permissions.target_uuid = targets.uuid
+                AND targets.mark_as_deleted IS NULL
+              WHERE actor_permissions.mark_as_deleted IS NULL
+                AND actor_permissions.actor_uuid = guardianEncodeUuid($1)
                 AND (actor_permissions.permission = $2 OR actor_permissions.permission = 'manage')
-                AND targets.model = $3
+                AND (targets.model = $3 OR actor_permissions.target_model = $3)
               LIMIT 1
             |sql}
             |> to_req
