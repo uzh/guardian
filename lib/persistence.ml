@@ -143,7 +143,7 @@ module type Backend = sig
     val clear_cache : unit -> unit
   end
 
-  val start : ?ctx:context -> unit -> unit Lwt.t
+  val start : ?ctx:context -> unit -> unit Lwt.t [@@deprecated]
   val find_migrations : unit -> (string * string * string) list
   val find_clean : unit -> context
   val migrate : ?ctx:context -> unit -> unit Lwt.t
