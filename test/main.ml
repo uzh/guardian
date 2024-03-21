@@ -838,7 +838,6 @@ let () =
   let%lwt () = Maria.delete ~ctx () in
   let%lwt () = Maria.migrate ~ctx () in
   let%lwt () = Maria.clean ~ctx () in
-  let%lwt () = Maria.start ~ctx () in
   make_test_cases ~ctx (module Maria) "MariadDB Backend"
   |> Alcotest_lwt.run "Authorization"
 ;;
