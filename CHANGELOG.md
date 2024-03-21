@@ -4,6 +4,16 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [unreleased](https://github.com/uzh/guardian/tree/HEAD)
 
+## [0.3.2](https://github.com/uzh/guardian/tree/0.3.2) - 2024-03-21
+
+### Changed
+
+- use string preprocessor instead of defining and using sql functions
+
+### Deprecated
+
+- database `start` function, as no functions need to be defined anymore
+
 ## [0.3.1](https://github.com/uzh/guardian/tree/0.3.1) - 2024-01-22
 
 ### Added
