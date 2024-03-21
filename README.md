@@ -68,35 +68,6 @@ Example usage:
   let update_title = Article.update_title ?ctx mike thomas_article "Updated Title"
 ```
 
-### Integrate within a query (MariaDB)
-
-Requirement: Run `MariaDb.start` when the executable is started.
-
-The `start` function defines needed MariaDB functions for guardian. They can be integrated within your queries as well.
-It creates a `guardianValidate<Role>Uuid(...)` function for all roles, it takes care of all registered Relations within guardian.
-
-The following example shows how to check for a specific Post:
-
-```ocaml
-(** [guardianValidatePostUuid]
-
-    Input arguments:
-      - actor_uuid (binary 16)
-      - action (enum: 'create','read','update','delete','manage')
-      - target_uuid (binary 16, usually within the query)
-
-    Outputs a boolean
-*)
-let find_accessible kind =
-  {sql|
-    SELECT *
-    FROM posts
-    GROUP BY posts.uuid
-    HAVING guardianValidatePostUuid(guardianEncodeUuid(?), ?, posts.uuid)
-  |sql}
-  |> Caqti_type.(t2 UuidActor.t Action.t ->* Post.t)
-```
-
 ## Development
 
 A guide how to setup the project with devcontainers can be found [here](./.devcontainer/README.md).
