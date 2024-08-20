@@ -201,7 +201,7 @@ module Make (Config : ConfigSig) = struct
         | Open _ -> Ok ()
       in
       connect pool
-    | None -> Error "Database not foun"
+    | None -> Error "Database not found"
   ;;
 
   let disconnect =
