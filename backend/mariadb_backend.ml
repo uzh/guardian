@@ -981,14 +981,15 @@ struct
           ;;
 
           let delete ?ctx ?comment role =
-            let exec = Database.exec_with_connection in
-            (fun conn ->
-              let%lwt () =
-                exec delete_add_history_request (role, comment) conn
-              in
-              exec delete_remove_request role conn)
-            |> Database.transaction ?ctx
-            |> combine_lwt
+            let with_connection request input connection =
+              let (module Connection : Caqti_lwt.CONNECTION) = connection in
+              Connection.exec request input
+            in
+            Database.transaction_iter
+              ?ctx
+              [ with_connection delete_add_history_request (role, comment)
+              ; with_connection delete_remove_request role
+              ]
           ;;
         end
 

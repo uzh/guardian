@@ -1,13 +1,16 @@
 module type Sig = sig
-  val initialize : unit -> unit
+  val initialize : ?additinal_pools:(string * string) list -> unit -> unit
 
   val fetch_pool
     :  ?ctx:(string * string) list
+    -> ?retries:int
     -> unit
     -> (Caqti_lwt.connection, Caqti_error.t) Caqti_lwt_unix.Pool.t
 
-  val add_pool : ?pool_size:int -> string -> string -> unit
+  val add_pool : ?required:bool -> string -> string -> unit
   val drop_pool : string -> unit Lwt.t
+  val connect : string -> (unit, string) result
+  val disconnect : string -> unit Lwt.t
 
   val find
     :  ?ctx:(string * string) list
@@ -33,22 +36,24 @@ module type Sig = sig
     -> 'a
     -> unit Lwt.t
 
-  val transaction
-    :  ?ctx:(string * string) list
-    -> (Caqti_lwt.connection -> 'a)
-    -> 'a Lwt.t
-
-  val exec_with_connection
-    :  ('a, unit, [< `Zero ]) Caqti_request.t
-    -> 'a
-    -> (module Caqti_lwt.CONNECTION)
-    -> unit Lwt.t
-
   val populate
     :  ?ctx:(string * string) list
     -> string
     -> string list
     -> 'a Caqti_type.t
     -> 'a list
+    -> unit Lwt.t
+
+  val transaction
+    :  ?ctx:(string * string) list
+    -> ?setup:(Caqti_lwt.connection -> (unit, Caqti_error.t) Lwt_result.t) list
+    -> ?cleanup:
+         (Caqti_lwt.connection -> (unit, Caqti_error.t) Lwt_result.t) list
+    -> (Caqti_lwt.connection -> ('a, Caqti_error.t) Lwt_result.t)
+    -> 'a Lwt.t
+
+  val transaction_iter
+    :  ?ctx:(string * string) list
+    -> (Caqti_lwt.connection -> (unit, Caqti_error.t) result Lwt.t) list
     -> unit Lwt.t
 end

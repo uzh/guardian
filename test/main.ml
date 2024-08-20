@@ -821,20 +821,20 @@ let () =
     include DefaultConfig
 
     let database =
-      MultiPools
-        [ ( test_database
-          , Sys.getenv_opt "DATABASE_URL"
-            |> CCOption.get_or ~default:"mariadb://root@database:3306/test" )
-        ]
+      ( test_database
+      , Sys.getenv_opt "DATABASE_URL"
+        |> CCOption.get_or ~default:"mariadb://root@database:3306/test" )
     ;;
   end
   in
+  let module Database = Make (MariaConfig) in
   let module Maria =
     Guardian_backend.MariaDb.Make (Role.Actor) (Role.Role) (Role.Target)
-      (Make (MariaConfig))
+      (Database)
   in
   Lwt_main.run
   @@
+  let () = Database.initialize () in
   let%lwt () = Maria.delete ~ctx () in
   let%lwt () = Maria.migrate ~ctx () in
   let%lwt () = Maria.clean ~ctx () in
