@@ -20,14 +20,6 @@ module LogTag = struct
   ;;
 end
 
-let raise_caqti_error =
-  let open Caqti_error in
-  function
-  | Ok resp -> resp
-  | Error `Unsupported -> raise (Exception "Caqti error: Unsupported")
-  | Error (#t as err) -> raise (Exn err)
-;;
-
 module type ConfigSig = sig
   val database : string * string
   val database_pool_size : int
@@ -46,7 +38,7 @@ module Make (Config : ConfigSig) = struct
   type connection =
     | Close
     | Open of (Caqti_lwt.connection, Caqti_error.t) Caqti_lwt_unix.Pool.t
-    | Fail of Caqti_error.load
+    | Fail of Caqti_error.t
 
   module Pool = struct
     type t =
@@ -85,7 +77,7 @@ module Make (Config : ConfigSig) = struct
       CCResult.retry retries (fun () -> database_url |> connect_pool)
       |> (function
             | Error [] -> raise (Exception "Failed to connect: empty error")
-            | Error (err :: _) when required -> raise_caqti_error (Error err)
+            | Error (err :: _) when required -> raise (Caqti_error.Exn err)
             | Error (err :: _ as errors) ->
               Logs.warn ~src (fun m ->
                 m
@@ -128,33 +120,6 @@ module Make (Config : ConfigSig) = struct
     %> function
     | Open pool -> Caqti_lwt_unix.Pool.drain pool
     | Close | Fail _ -> Lwt.return_unit
-  ;;
-
-  let rec fetch_pool ?(ctx = []) ?(retries = 2) () =
-    match ctx |> find_pool_name |> CCFun.flip CCOption.bind Cache.find_opt with
-    | Some pool ->
-      (match Pool.connection pool with
-       | Fail err when pool.Pool.n_retries >= retries ->
-         raise_caqti_error (Error err)
-       | Fail _ ->
-         let () = Pool.connect pool |> Pool.increment_retry |> Cache.replace in
-         fetch_pool ~ctx ~retries ()
-       | Close ->
-         let () = Pool.connect pool |> Cache.replace in
-         fetch_pool ~ctx ~retries ()
-       | Open connection when pool.Pool.n_retries > 0 ->
-         let () = Pool.reset_retry pool |> Cache.replace in
-         print_pool_usage ?tags:(LogTag.ctx_opt ~ctx ()) pool;
-         connection
-       | Open connection ->
-         print_pool_usage ?tags:(LogTag.ctx_opt ~ctx ()) pool;
-         connection)
-    | None ->
-      raise
-        (Exception
-           (Format.asprintf
-              "Unknown Pool: Please 'add_pool' first! (%s)"
-              CCOption.(find_pool_name ctx |> value ~default:"-")))
   ;;
 
   let add_pool ?required database_label database_url =
@@ -204,24 +169,70 @@ module Make (Config : ConfigSig) = struct
     | None -> Error "Database not found"
   ;;
 
-  let disconnect =
+  let disconnect ?error =
     Cache.find_opt
     %> function
     | Some pool ->
       let%lwt () = drain_opt pool in
-      Cache.replace { pool with Pool.connection = Close } |> Lwt.return
+      Cache.replace
+        { pool with
+          Pool.connection =
+            CCOption.map_or ~default:Close (fun err -> Fail err) error
+        }
+      |> Lwt.return
     | None -> Lwt.return_unit
   ;;
 
-  let map_fetched ?ctx (fcn : 'a -> ('b, 'e) Lwt_result.t) =
-    fetch_pool ?ctx () |> fcn
+  let raise_caqti_error label input =
+    let open Caqti_error in
+    match%lwt input with
+    | Ok resp -> Lwt.return resp
+    | Error `Unsupported -> raise (Exception "Caqti error")
+    | Error (#load_or_connect as err) ->
+      let%lwt () = disconnect ~error:err label in
+      raise (Exn err)
+    | Error (#t as err) -> raise (Exn err)
+  ;;
+
+  let rec fetch_pool ?(ctx = []) ?(retries = 2) () =
+    match ctx |> find_pool_name |> CCFun.flip CCOption.bind Cache.find_opt with
+    | Some pool ->
+      (match Pool.connection pool with
+       | Fail err when pool.Pool.n_retries >= retries ->
+         raise_caqti_error
+           (Pool.database_label pool)
+           (Error err |> Lwt_result.lift)
+       | Fail _ ->
+         let () = Pool.connect pool |> Pool.increment_retry |> Cache.replace in
+         fetch_pool ~ctx ~retries ()
+       | Close ->
+         let () = Pool.connect pool |> Cache.replace in
+         fetch_pool ~ctx ~retries ()
+       | Open connection when pool.Pool.n_retries > 0 ->
+         let () = Pool.reset_retry pool |> Cache.replace in
+         print_pool_usage ?tags:(LogTag.ctx_opt ~ctx ()) pool;
+         Lwt.return connection
+       | Open connection ->
+         print_pool_usage ?tags:(LogTag.ctx_opt ~ctx ()) pool;
+         Lwt.return connection)
+    | None ->
+      Exception
+        (Format.asprintf
+           "Unknown Pool: Please 'add_pool' first! (%s)"
+           CCOption.(find_pool_name ctx |> value ~default:"-"))
+      |> raise
+  ;;
+
+  let map_fetched ?ctx ?retries (fcn : 'a -> ('b, 'e) Lwt_result.t) =
+    let label =
+      CCOption.(bind ctx find_pool_name |> get_exn_or "Unknown pool")
+    in
+    let%lwt connection = fetch_pool ?ctx ?retries () in
+    fcn connection |> raise_caqti_error label
   ;;
 
   let query ?ctx f =
-    let open Lwt.Infix in
-    Caqti_lwt_unix.Pool.use (fun connection -> f connection)
-    |> map_fetched ?ctx
-    >|= raise_caqti_error
+    Caqti_lwt_unix.Pool.use (fun connection -> f connection) |> map_fetched ?ctx
   ;;
 
   let find_opt ?ctx request input =
@@ -266,14 +277,17 @@ module Make (Config : ConfigSig) = struct
     %> Lwt_result.map (fun (_ : unit list) -> ())
   ;;
 
-  let rollback connection error =
+  let rollback ?ctx connection error =
     let (module Connection : Caqti_lwt.CONNECTION) = connection in
+    let label =
+      CCOption.(bind ctx find_pool_name |> get_exn_or "Unknown pool")
+    in
     let%lwt () =
       Connection.rollback ()
       |> Lwt_result.map
            (CCFun.tap (fun _ ->
               Logs.debug (fun m -> m "Successfully rolled back transaction")))
-      |> Lwt.map raise_caqti_error
+      |> raise_caqti_error label
     in
     Lwt.fail error
   ;;
@@ -300,9 +314,8 @@ module Make (Config : ConfigSig) = struct
           match%lwt Connection.commit () with
           | Ok () -> Lwt.return_ok result
           | Error error -> Lwt.return_error error)
-        (rollback connection))
+        (rollback ?ctx connection))
     |> map_fetched ?ctx
-    |> Lwt.map raise_caqti_error
   ;;
 
   let transaction_iter ?ctx queries =
@@ -314,8 +327,7 @@ module Make (Config : ConfigSig) = struct
         (fun () ->
           let* () = exec_each connection queries in
           Connection.commit ())
-        (rollback connection))
+        (rollback ?ctx connection))
     |> map_fetched ?ctx
-    |> Lwt.map raise_caqti_error
   ;;
 end

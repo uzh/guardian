@@ -5,12 +5,12 @@ module type Sig = sig
     :  ?ctx:(string * string) list
     -> ?retries:int
     -> unit
-    -> (Caqti_lwt.connection, Caqti_error.t) Caqti_lwt_unix.Pool.t
+    -> (Caqti_lwt.connection, Caqti_error.t) Caqti_lwt_unix.Pool.t Lwt.t
 
   val add_pool : ?required:bool -> string -> string -> unit
   val drop_pool : string -> unit Lwt.t
   val connect : string -> (unit, string) result
-  val disconnect : string -> unit Lwt.t
+  val disconnect : ?error:Caqti_error.t -> string -> unit Lwt.t
 
   val find
     :  ?ctx:(string * string) list
