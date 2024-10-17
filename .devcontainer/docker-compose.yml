@@ -14,15 +14,15 @@ services:
       - ${HOME}${USERPROFILE:-}/.ssh:/home/opam/.ssh
       - ${HOME}${USERPROFILE:-}/.gitconfig:/home/opam/.gitconfig
       - ${HOME}${USERPROFILE:-}/.gitignore_global:/home/opam/.gitignore_global
-    depends_on: [database]
-    ports: [3020:3000]
+    depends_on: [ database ]
+    ports: [ 3020:3000 ]
     command: /workspace/.devcontainer/wait-for-database.sh test sleep infinity
 
   database:
     container_name: guardian_database
     image: mariadb:10.6.3
     command: --max_allowed_packet=629145600
-    ports: [3320:3306]
+    ports: [ 3320:3306 ]
     environment:
       - TZ=Europe/Zurich
       - MYSQL_ALLOW_EMPTY_PASSWORD='yes'
@@ -36,8 +36,8 @@ services:
   adminer:
     image: adminer:standalone
     restart: always
-    ports: [8080:8080]
-    depends_on: [database]
+    ports: [ 8080:8080 ]
+    depends_on: [ database ]
 
 volumes:
   opam:

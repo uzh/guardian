@@ -17,7 +17,7 @@ module UuidBase = struct
   ;;
 
   let sexp_of_t uuid = Sexplib0.Sexp.Atom (to_string uuid)
-  let create () = v `V4
+  let create = v4_gen (Random.State.make_self_init ())
 end
 
 module Actor = struct
