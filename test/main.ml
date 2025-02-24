@@ -709,13 +709,13 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     let%lwt () =
       Lwt_list.iter_s
         (fun (role, can_assign, expected) ->
-          let%lwt valid =
-            Backend.RoleAssignment.can_assign_roles ?ctx role
-            |> Lwt.map (CCList.exists (Role.Role.equal can_assign))
-          in
-          Alcotest.(
-            check bool "check if role can assign a target role" expected valid)
-          |> Lwt.return)
+           let%lwt valid =
+             Backend.RoleAssignment.can_assign_roles ?ctx role
+             |> Lwt.map (CCList.exists (Role.Role.equal can_assign))
+           in
+           Alcotest.(
+             check bool "check if role can assign a target role" expected valid)
+           |> Lwt.return)
         testables
     in
     (* Reset all RoleAssignments *)

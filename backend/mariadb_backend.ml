@@ -308,11 +308,11 @@ struct
         end
 
         let combine_sql
-          from_sql
-          std_filter_sql
-          ?(joins = "")
-          ?where_additions
-          select
+              from_sql
+              std_filter_sql
+              ?(joins = "")
+              ?where_additions
+              select
           =
           Format.asprintf
             "SELECT\n  %s\nFROM  %s\n  %s\nWHERE\n  %s\n  %s"
@@ -409,10 +409,10 @@ struct
           let find_by_target ?ctx = Database.collect ?ctx find_by_target_request
 
           let create_exclude
-            ?(field = "roles.actor_uuid")
-            ?(dynparam = Guardian.Utils.Dynparam.empty)
-            ?(with_uuid = false)
-            exclude
+                ?(field = "roles.actor_uuid")
+                ?(dynparam = Guardian.Utils.Dynparam.empty)
+                ?(with_uuid = false)
+                exclude
             =
             let open Guardian.Utils.Dynparam in
             if CCList.is_empty exclude
@@ -421,22 +421,22 @@ struct
               let arguments, params =
                 CCList.fold_left
                   (fun (args, dyn) (role, target_uuid) ->
-                    match target_uuid with
-                    | None when with_uuid ->
-                      ( "(exclude.role = ? AND exclude.target_uuid IS NULL)"
-                        :: args
-                      , dyn |> add Model.role role )
-                    | None ->
-                      ( "exclude.role = ? AND exclude.target_uuid IS NULL"
-                        :: args
-                      , dyn |> add Model.role role )
-                    | Some uuid ->
-                      ( [%string
-                          {sql|(exclude.role = ? AND exclude.target_uuid = %{Entity.Uuid.sql_value_fragment "?"})|sql}]
-                        :: args
-                      , dyn
-                        |> add Model.role role
-                        |> add Entity.Uuid.Target.t uuid ))
+                     match target_uuid with
+                     | None when with_uuid ->
+                       ( "(exclude.role = ? AND exclude.target_uuid IS NULL)"
+                         :: args
+                       , dyn |> add Model.role role )
+                     | None ->
+                       ( "exclude.role = ? AND exclude.target_uuid IS NULL"
+                         :: args
+                       , dyn |> add Model.role role )
+                     | Some uuid ->
+                       ( [%string
+                           {sql|(exclude.role = ? AND exclude.target_uuid = %{Entity.Uuid.sql_value_fragment "?"})|sql}]
+                         :: args
+                       , dyn
+                         |> add Model.role role
+                         |> add Entity.Uuid.Target.t uuid ))
                   ([], dynparam)
                   exclude
               in
@@ -1183,12 +1183,12 @@ struct
         ;;
 
         let validate
-          ?ctx
-          ?(any_id = false)
-          ?target_uuid
-          ?model
-          permission
-          { Guard.Actor.uuid; _ }
+              ?ctx
+              ?(any_id = false)
+              ?target_uuid
+              ?model
+              permission
+              { Guard.Actor.uuid; _ }
           =
           let open Lwt.Infix in
           (match any_id, target_uuid, model with
