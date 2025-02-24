@@ -28,30 +28,41 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ocaml-compiler: [4.14.x]
+        ocaml-compiler:
+          - 4.14
+          - 5.2
+          - 5.3
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Retrieve opam cache
+        uses: actions/cache@v4
+        if: runner.os != 'Windows'
+        id: cache-opam
+        with:
+          path: ~/.opam
+          key: v1-${{ runner.os }}-opam-${{ matrix.ocaml-compiler }}-${{ hashFiles('*.opam.locked') }}
 
       - name: Use OCaml ${{ matrix.ocaml-version }}
-        uses: ocaml/setup-ocaml@v2
+        uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: ${{ matrix.ocaml-compiler }}
           dune-cache: true
           opam-pin: true
-          opam-depext: false
 
       - name: Install system dependencies
         run: sudo apt-get update -y && sudo apt-get install -y libmariadb-dev
 
-      - name: Pin current guardian
-        run: |
-          opam pin add -yn guardian .
-          OPAMSOLVERTIMEOUT=180 opam depext --with-test --with-doc -y guardian
-
       - name: Install dependencies
         run: opam install --deps-only --with-test --with-doc -y .
+
+      - name: Recover from an Opam broken state
+        if: steps.cache-opam.outputs.cache-hit == 'true'
+        run: |
+          opam install -y dune
+          opam upgrade --fixup
 
       - name: Build
         run: |
@@ -71,12 +82,12 @@ jobs:
         run: |
           make doc
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: documentation
           path: _build/default/_doc/_html
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: tests
@@ -98,13 +109,13 @@ jobs:
       url: ${{ steps.deploy-doc.outputs.page_url }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download all workflow run artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
 
       - name: Deploy odoc to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ github.token }}
           publish_dir: documentation
@@ -121,13 +132,13 @@ jobs:
     if: github.ref_type == 'tag'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Extract version changelog
         run: sed -nr "/^## .?v?${GITHUB_REF_NAME}/,/^## /p" CHANGELOG.md | sed '1d;2d;$d' > changes.md
 
       - name: Create release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           body_path: changes.md
