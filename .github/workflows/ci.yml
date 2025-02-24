@@ -84,13 +84,13 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: documentation
+          name: documentation-${{ matrix.ocaml-compiler }}
           path: _build/default/_doc/_html
 
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: tests
+          name: tests-${{ matrix.ocaml-compiler }}
           path: _build/default/test/_build/_tests/
 
       - name: Notify about failure
