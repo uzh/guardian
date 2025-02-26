@@ -17,7 +17,7 @@ module Make (Role : Role.Sig) : Core with type elt = Role.t = struct
     | `List items ->
       CCList.fold_left
         (fun acc x ->
-          acc >>= fun acc' -> x |> Role.of_yojson >|= CCFun.flip add acc')
+           acc >>= fun acc' -> x |> Role.of_yojson >|= CCFun.flip add acc')
         (Ok empty)
         items
     | _ -> Error "Invalid role set"

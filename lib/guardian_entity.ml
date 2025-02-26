@@ -142,31 +142,32 @@ struct
 
     let remove_duplicates (perms : t list) : t list =
       CCList.fold_left
-        (fun init ({ permission; model; target_uuid } as permission_on_target) ->
-          let is_manage_model () =
-            equal
-              (of_tuple (Permission.Manage, model, None))
-              permission_on_target
-          in
-          let model_permission () =
-            let in_list perm =
-              CCList.mem ~eq:equal (of_tuple (perm, model, None)) perms
-            in
-            in_list permission || in_list Permission.Manage
-          in
-          let manage_permission () =
-            CCList.mem (of_tuple (Permission.Manage, model, target_uuid)) perms
-          in
-          match target_uuid with
-          | None when is_manage_model () -> init @ [ permission_on_target ]
-          | None when manage_permission () -> init
-          | None -> init @ [ permission_on_target ]
-          | Some _
-            when Permission.(equal Manage permission)
-                 && model_permission () |> not ->
-            init @ [ permission_on_target ]
-          | Some _ when model_permission () || manage_permission () -> init
-          | Some _ -> init @ [ permission_on_target ])
+        (fun init
+          ({ permission; model; target_uuid } as permission_on_target) ->
+           let is_manage_model () =
+             equal
+               (of_tuple (Permission.Manage, model, None))
+               permission_on_target
+           in
+           let model_permission () =
+             let in_list perm =
+               CCList.mem ~eq:equal (of_tuple (perm, model, None)) perms
+             in
+             in_list permission || in_list Permission.Manage
+           in
+           let manage_permission () =
+             CCList.mem (of_tuple (Permission.Manage, model, target_uuid)) perms
+           in
+           match target_uuid with
+           | None when is_manage_model () -> init @ [ permission_on_target ]
+           | None when manage_permission () -> init
+           | None -> init @ [ permission_on_target ]
+           | Some _
+             when Permission.(equal Manage permission)
+                  && model_permission () |> not ->
+             init @ [ permission_on_target ]
+           | Some _ when model_permission () || manage_permission () -> init
+           | Some _ -> init @ [ permission_on_target ])
         []
         perms
     ;;
@@ -191,9 +192,9 @@ struct
       filter_permission_on_model permission model
       %> CCList.fold_left
            (fun (init, uuids) { target_uuid; _ } ->
-             match target_uuid with
-             | Some uuid -> init, uuid :: uuids
-             | None -> true, uuids)
+              match target_uuid with
+              | Some uuid -> init, uuid :: uuids
+              | None -> true, uuids)
            (false, [])
     ;;
   end
@@ -238,20 +239,20 @@ struct
      and type validation_set = ValidationSet.t
 
   module MakePersistence
-      (Backend : Persistence.Backend
-                 with type actor = Actor.t
-                  and type actor_model = ActorModel.t
-                  and type actor_role = ActorRole.t
-                  and type actor_permission = ActorPermission.t
-                  and type permission_on_target = PermissionOnTarget.t
-                  and type role = Role.t
-                  and type role_assignment = RoleAssignment.t
-                  and type role_permission = RolePermission.t
-                  and type target = Target.t
-                  and type target_entity = TargetEntity.t
-                  and type target_model = TargetModel.t
-                  and type validation_set = ValidationSet.t) : PersistenceSig =
-  struct
+      (Backend :
+         Persistence.Backend
+         with type actor = Actor.t
+          and type actor_model = ActorModel.t
+          and type actor_role = ActorRole.t
+          and type actor_permission = ActorPermission.t
+          and type permission_on_target = PermissionOnTarget.t
+          and type role = Role.t
+          and type role_assignment = RoleAssignment.t
+          and type role_permission = RolePermission.t
+          and type target = Target.t
+          and type target_entity = TargetEntity.t
+          and type target_model = TargetModel.t
+          and type validation_set = ValidationSet.t) : PersistenceSig = struct
     include Backend
 
     let clear_cache () = Repo.clear_cache ()
@@ -262,10 +263,10 @@ struct
       let insert_all ?ctx =
         Lwt_list.fold_left_s
           (fun acc x ->
-            match%lwt insert ?ctx x with
-            | Ok () -> CCResult.map (CCList.cons x) acc |> Lwt_result.lift
-            | Error (_ : string) ->
-              CCResult.map_err (CCList.cons x) acc |> Lwt_result.lift)
+             match%lwt insert ?ctx x with
+             | Ok () -> CCResult.map (CCList.cons x) acc |> Lwt_result.lift
+             | Error (_ : string) ->
+               CCResult.map_err (CCList.cons x) acc |> Lwt_result.lift)
           (Ok [])
       ;;
     end
@@ -276,10 +277,10 @@ struct
       let insert_all ?ctx =
         Lwt_list.fold_left_s
           (fun acc x ->
-            match%lwt insert ?ctx x with
-            | Ok () -> CCResult.map (CCList.cons x) acc |> Lwt_result.lift
-            | Error (_ : string) ->
-              CCResult.map_err (CCList.cons x) acc |> Lwt_result.lift)
+             match%lwt insert ?ctx x with
+             | Ok () -> CCResult.map (CCList.cons x) acc |> Lwt_result.lift
+             | Error (_ : string) ->
+               CCResult.map_err (CCList.cons x) acc |> Lwt_result.lift)
           (Ok [])
       ;;
     end
@@ -341,11 +342,11 @@ struct
       include PermissionOnTarget
 
       let validate_set
-        ?any_id
-        perms
-        (error : string -> 'etyp)
-        (validation_set : ValidationSet.t)
-        actor
+            ?any_id
+            perms
+            (error : string -> 'etyp)
+            (validation_set : ValidationSet.t)
+            actor
         =
         let open CCFun in
         let rec find_checker : validation_set -> bool =
@@ -368,10 +369,9 @@ struct
              | true -> true
              | false ->
                CCList.fold_left
-                 (flip (fun rule ->
-                       function
-                       | true -> true
-                       | false -> find_checker rule))
+                 (flip (fun rule -> function
+                    | true -> true
+                    | false -> find_checker rule))
                  false
                  rules)
           | And (rule :: rules) ->
@@ -379,10 +379,9 @@ struct
              | false -> false
              | true ->
                CCList.fold_left
-                 (flip (fun rule ->
-                       function
-                       | true -> find_checker rule
-                       | false -> false))
+                 (flip (fun rule -> function
+                    | true -> find_checker rule
+                    | false -> false))
                  true
                  rules)
           | Or [] | And [] -> true
@@ -424,11 +423,11 @@ struct
 
         [actor] actor object who'd like to perform the action *)
     let validate
-      ?ctx
-      ?any_id
-      (error : string -> 'etyp)
-      (validation_set : ValidationSet.t)
-      actor
+          ?ctx
+          ?any_id
+          (error : string -> 'etyp)
+          (validation_set : ValidationSet.t)
+          actor
       : (unit, 'etyp) Lwt_result.t
       =
       let open CCFun in
@@ -443,10 +442,9 @@ struct
            | true -> Lwt.return_true
            | false ->
              Lwt_list.fold_left_s
-               (flip (fun rule ->
-                     function
-                     | true -> Lwt.return_true
-                     | false -> find_checker rule))
+               (flip (fun rule -> function
+                  | true -> Lwt.return_true
+                  | false -> find_checker rule))
                false
                rules)
         | And (rule :: rules) ->
@@ -454,10 +452,9 @@ struct
            | false -> Lwt.return_false
            | true ->
              Lwt_list.fold_left_s
-               (flip (fun rule ->
-                     function
-                     | true -> find_checker rule
-                     | false -> Lwt.return_false))
+               (flip (fun rule -> function
+                  | true -> find_checker rule
+                  | false -> Lwt.return_false))
                true
                rules)
         | Or [] | And [] -> Lwt.return_true
@@ -482,10 +479,10 @@ struct
 
         [validation_set] effect set to check the permissions against *)
     let wrap_function
-      ?ctx
-      (error : string -> 'etyp)
-      (validation_set : ValidationSet.t)
-      (fcn : 'param -> ('rval, 'etyp) Lwt_result.t)
+          ?ctx
+          (error : string -> 'etyp)
+          (validation_set : ValidationSet.t)
+          (fcn : 'param -> ('rval, 'etyp) Lwt_result.t)
       =
       let open Lwt_result.Syntax in
       let can = validate ?ctx error validation_set in

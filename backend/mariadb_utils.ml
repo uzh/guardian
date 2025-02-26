@@ -1,10 +1,10 @@
 let find_request_sql
-  sql_select_columns
-  table_name
-  ?(default_where = None)
-  ?(count = false)
-  ?(joins = "")
-  where_fragment
+      sql_select_columns
+      table_name
+      ?(default_where = None)
+      ?(count = false)
+      ?(joins = "")
+      where_fragment
   =
   let where_fragment =
     CCOption.map_or ~default:where_fragment (fun default_where ->

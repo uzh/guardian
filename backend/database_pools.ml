@@ -70,23 +70,23 @@ module Make (Config : ConfigSig) = struct
     ;;
 
     let connect
-      ?(retries = 2)
-      ({ database_label; database_url; required; _ } as pool)
+          ?(retries = 2)
+          ({ database_label; database_url; required; _ } as pool)
       =
       let tags = database_label |> LogTag.create in
       CCResult.retry retries (fun () -> database_url |> connect_pool)
       |> (function
-            | Error [] -> raise (Exception "Failed to connect: empty error")
-            | Error (err :: _) when required -> raise (Caqti_error.Exn err)
-            | Error (err :: _ as errors) ->
-              Logs.warn ~src (fun m ->
-                m
-                  ~tags
-                  "Failed to connect: %s (%s)"
-                  database_label
-                  ([%show: Caqti_error.t list] errors));
-              Fail err
-            | Ok con -> Open con)
+       | Error [] -> raise (Exception "Failed to connect: empty error")
+       | Error (err :: _) when required -> raise (Caqti_error.Exn err)
+       | Error (err :: _ as errors) ->
+         Logs.warn ~src (fun m ->
+           m
+             ~tags
+             "Failed to connect: %s (%s)"
+             database_label
+             ([%show: Caqti_error.t list] errors));
+         Fail err
+       | Ok con -> Open con)
       |> fun connection -> { pool with connection }
     ;;
   end
@@ -293,13 +293,14 @@ module Make (Config : ConfigSig) = struct
   ;;
 
   let transaction
-    ?ctx
-    ?(setup : (Caqti_lwt.connection -> (unit, Caqti_error.t) Lwt_result.t) list =
-      [])
-    ?(cleanup :
-        (Caqti_lwt.connection -> (unit, Caqti_error.t) Lwt_result.t) list =
-      [])
-    (f : Caqti_lwt.connection -> ('a, Caqti_error.t) Lwt_result.t)
+        ?ctx
+        ?(setup :
+            (Caqti_lwt.connection -> (unit, Caqti_error.t) Lwt_result.t) list =
+          [])
+        ?(cleanup :
+            (Caqti_lwt.connection -> (unit, Caqti_error.t) Lwt_result.t) list =
+          [])
+        (f : Caqti_lwt.connection -> ('a, Caqti_error.t) Lwt_result.t)
     : 'a Lwt.t
     =
     let open Lwt_result.Syntax in
@@ -308,12 +309,12 @@ module Make (Config : ConfigSig) = struct
       let* () = Connection.start () in
       Lwt.catch
         (fun () ->
-          let* () = exec_each connection setup in
-          let* result = f connection in
-          let* () = exec_each connection cleanup in
-          match%lwt Connection.commit () with
-          | Ok () -> Lwt.return_ok result
-          | Error error -> Lwt.return_error error)
+           let* () = exec_each connection setup in
+           let* result = f connection in
+           let* () = exec_each connection cleanup in
+           match%lwt Connection.commit () with
+           | Ok () -> Lwt.return_ok result
+           | Error error -> Lwt.return_error error)
         (rollback ?ctx connection))
     |> map_fetched ?ctx
   ;;
@@ -325,8 +326,8 @@ module Make (Config : ConfigSig) = struct
       let* () = Connection.start () in
       Lwt.catch
         (fun () ->
-          let* () = exec_each connection queries in
-          Connection.commit ())
+           let* () = exec_each connection queries in
+           Connection.commit ())
         (rollback ?ctx connection))
     |> map_fetched ?ctx
   ;;
