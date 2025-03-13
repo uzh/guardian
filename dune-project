@@ -63,6 +63,8 @@
    (>= 0.9.8))
   (yojson
    (>= 2.0.2))
+  (result
+   (>= 1.5))
   ;; Documentation
   (odoc :with-doc)
   ;; Test/Dev dependencies
