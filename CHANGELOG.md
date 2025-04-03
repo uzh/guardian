@@ -4,6 +4,12 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [unreleased](https://github.com/uzh/guardian/tree/HEAD)
 
+## [0.3.3](https://github.com/uzh/guardian/tree/0.3.3) - 2025-04-03
+
+### Fixed
+
+- support for OCaml 5.x
+
 ## [0.3.2](https://github.com/uzh/guardian/tree/0.3.2) - 2024-03-21
 
 ### Changed
