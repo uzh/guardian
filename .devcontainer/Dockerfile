@@ -18,9 +18,10 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 COPY --from=hadolint /bin/hadolint /bin/hadolint
 
 # Avoid warnings by switching to noninteractive
-ENV DEBIAN_FRONTEND noninteractive
-ENV SIHL_ENV development
+ENV DEBIAN_FRONTEND=noninteractive SIHL_ENV=development
 
+# install packages
+# hadolint ignore=DL3008
 RUN apt-get update --allow-releaseinfo-change -q \
   && apt-get install -yqq --no-install-recommends \
   inotify-tools \

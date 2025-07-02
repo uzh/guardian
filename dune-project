@@ -44,7 +44,7 @@
   (lwt_ppx
    (>= 2.1.0))
   (mariadb
-   (>= 1.1.6))
+   (>= 1.2.0))
   (ocaml
    (>= 4.12.0))
   (ppx_deriving
