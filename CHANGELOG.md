@@ -4,6 +4,12 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [unreleased](https://github.com/uzh/guardian/tree/HEAD)
 
+## [0.3.4](https://github.com/uzh/guardian/tree/0.3.4) - 2025-11-07
+
+### Fixed
+
+- maintenance
+
 ## [0.3.3](https://github.com/uzh/guardian/tree/0.3.3) - 2025-04-03
 
 ### Fixed
@@ -60,7 +66,6 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 - rework relations
 - combine "find checker" functions
 - optimised validate function
-
 
 ## [0.1.1](https://github.com/uzh/guardian/tree/0.1.1) - 2023-03-28
 
