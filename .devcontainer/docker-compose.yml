@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   dev:
     container_name: guardian_dev
@@ -11,6 +9,7 @@ services:
       - ..:/workspace:cached
       - opam:/home/opam/.opam:cached
       - build:/workspace/_build:cached
+      - ${HOME}/.gitconfig:/home/opam/.gitconfig:ro
     depends_on: [ database ]
     ports: [ 3020:3000 ]
     command: /workspace/.devcontainer/wait-for-database.sh test sleep infinity

@@ -87,4 +87,4 @@ Most used commands can be found in the following list. For the full list of comm
 1. Build the project `dune build` __OR__ edit the file `pool.opam` and update version `version: "0.0.0"`
 1. Commit your changes.
 1. Tag the commit and push changes and git tag
-1. create opam release (`opam-publish`)
+1. create opam release (`opam publish`)
