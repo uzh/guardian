@@ -24,6 +24,7 @@ depends: [
   "dune-release" {with-dev-setup}
   "fmt" {with-test & >= "0.11.0"}
   "logs" {>= "0.7.0"}
+  "lru" {>= "0.3.1"}
   "lwt" {>= "5.6.1"}
   "lwt_ppx" {>= "2.1.0"}
   "mariadb" {>= "1.2.0"}
