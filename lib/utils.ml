@@ -18,7 +18,7 @@ let decompose_variant_string input =
     | exception (End_of_file | Failure _ | Invalid_argument _ | _) -> None
   in
   [ (fun () ->
-      try_scan "`%[^(](%s@)" (fun name params ->
+      try_scan "`%[^(](%[^)])" (fun name params ->
         lowercase_ascii (trim name), CCList.map trim (split_on_char ',' params)))
   ; (fun () -> try_scan "`%s" (fun name -> lowercase_ascii name, []))
   ]

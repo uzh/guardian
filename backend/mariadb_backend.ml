@@ -253,58 +253,91 @@ struct
       CCOption.flat_map (CCList.assoc_opt ~eq:CCString.equal "pool")
     ;;
 
-    (* Inner key: pool * any_id * permission * target_uuid * model *)
-    let equal_inner
-          (pool1, any_id1, perm1, target_uuid1, model1)
-          (pool2, any_id2, perm2, target_uuid2, model2)
-      =
-      CCOption.equal CCString.equal pool1 pool2
-      && Bool.equal any_id1 any_id2
-      && Guard.Permission.equal perm1 perm2
-      && CCOption.equal Guard.Uuid.Target.equal target_uuid1 target_uuid2
-      && CCOption.equal TargetModel.equal model1 model2
-    ;;
+    (* Flat LRU cache keyed by the full (actor, pool, any_id, permission,
+       target_uuid, model) tuple.  A total capacity cap means entries are
+       evicted in LRU order rather than growing without bound. *)
 
-    (* actor_uuid_string -> [(inner_key, granted)] *)
-    let _cache
-      : ( string
-          , ((string option
-             * bool
-             * Guard.Permission.t
-             * Guard.Uuid.Target.t option
-             * TargetModel.t option)
-            * bool)
-              list )
-          Hashtbl.t
-      =
-      Hashtbl.create 256
-    ;;
+    type cache_key =
+      { actor : string
+      ; pool : string option
+      ; any_id : bool
+      ; permission : Guard.Permission.t
+      ; target_uuid : Guard.Uuid.Target.t option
+      ; model : TargetModel.t option
+      }
 
-    let clear () = Hashtbl.clear _cache
+    module CacheKey = struct
+      type t = cache_key
+
+      let equal a b =
+        String.equal a.actor b.actor
+        && CCOption.equal String.equal a.pool b.pool
+        && Bool.equal a.any_id b.any_id
+        && Guard.Permission.equal a.permission b.permission
+        && CCOption.equal Guard.Uuid.Target.equal a.target_uuid b.target_uuid
+        && CCOption.equal TargetModel.equal a.model b.model
+      ;;
+
+      let hash = Hashtbl.hash
+    end
+
+    module CacheValue = struct
+      type t = bool
+
+      let weight _ = 1
+    end
+
+    module LruCache = Lru.M.Make (CacheKey) (CacheValue)
+
+    (* Total number of (actor, permission, target) entries kept across all
+       actors.  Evicts the least-recently-used entry when the limit is hit. *)
+    let capacity = 4096
+    let _cache = ref (LruCache.create capacity)
+    let clear () = _cache := LruCache.create capacity
 
     (** Remove all cached entries for a single actor. Used when that actor's
         roles or direct permissions change. *)
     let clear_actor uuid =
-      Hashtbl.remove _cache (Guard.Uuid.Actor.to_string uuid)
+      let actor_str = Guard.Uuid.Actor.to_string uuid in
+      let to_remove =
+        LruCache.fold
+          (fun k _ acc ->
+             if String.equal k.actor actor_str then k :: acc else acc)
+          []
+          !_cache
+      in
+      List.iter (fun k -> LruCache.remove k !_cache) to_remove
     ;;
 
     let find ctx any_id actor_uuid permission target_uuid model =
-      let inner_key = pool_of_ctx ctx, any_id, permission, target_uuid, model in
-      Hashtbl.find_opt _cache (Guard.Uuid.Actor.to_string actor_uuid)
-      |> CCOption.flat_map (CCList.assoc_opt ~eq:equal_inner inner_key)
+      let key =
+        { actor = Guard.Uuid.Actor.to_string actor_uuid
+        ; pool = pool_of_ctx ctx
+        ; any_id
+        ; permission
+        ; target_uuid
+        ; model
+        }
+      in
+      match LruCache.find key !_cache with
+      | Some _ as v ->
+        LruCache.promote key !_cache;
+        v
+      | None -> None
     ;;
 
     let store ctx any_id actor_uuid permission target_uuid model result =
-      let actor_key = Guard.Uuid.Actor.to_string actor_uuid in
-      let inner_key = pool_of_ctx ctx, any_id, permission, target_uuid, model in
-      let existing =
-        Hashtbl.find_opt _cache actor_key |> CCOption.value ~default:[]
+      let key =
+        { actor = Guard.Uuid.Actor.to_string actor_uuid
+        ; pool = pool_of_ctx ctx
+        ; any_id
+        ; permission
+        ; target_uuid
+        ; model
+        }
       in
-      let updated =
-        (inner_key, result)
-        :: CCList.filter (fun (k, _) -> not (equal_inner k inner_key)) existing
-      in
-      Hashtbl.replace _cache actor_key updated
+      LruCache.add key result !_cache;
+      LruCache.trim !_cache
     ;;
   end
 
@@ -1234,7 +1267,10 @@ struct
           =
           let open Lwt.Infix in
           let log_result granted =
-            Logs.info ~src (fun m ->
+            let level, status =
+              if granted then Logs.Debug, "granted" else Logs.Info, "denied"
+            in
+            Logs.msg ~src level (fun m ->
               let target =
                 match target_uuid, model with
                 | Some t, _ -> Guard.Uuid.Target.to_string t
@@ -1243,37 +1279,78 @@ struct
               in
               m
                 "Access %s: actor=%s permission=%s target=%s"
-                (if granted then "granted" else "denied")
+                status
                 (Guard.Uuid.Actor.to_string uuid)
                 (Guard.Permission.show permission)
                 target)
           in
-          match DBCache.find ctx any_id uuid permission target_uuid model with
-          | Some granted ->
-            log_result granted;
-            Lwt.return granted
-          | None ->
-            (match any_id, target_uuid, model with
-             | _, None, None ->
-               Lwt.return_error
-                 "At least a target uuid or model has to be specified!"
-             | true, Some target_uuid, None ->
-               Logs.warn ~src (fun m ->
-                 m
-                   "Validation with 'any_id' set on a 'uuid' doesn't make \
-                    sense. Validating uuid.");
-               validate_uuid ?ctx permission target_uuid uuid
-             | true, _, Some model ->
-               validate_any_of_model ?ctx permission model uuid
-             | false, Some target_uuid, model ->
-               validate_uuid ?ctx ?model permission target_uuid uuid
-             | false, None, Some model ->
-               validate_model ?ctx permission model uuid)
-            >|= fun result ->
-            let granted = CCResult.is_ok result in
-            log_result granted;
-            DBCache.store ctx any_id uuid permission target_uuid model granted;
-            granted
+          (* [run_and_cache cache_model query] checks the cache keyed by
+             [cache_model], runs [query] on a miss, then stores the result
+             under the same key.  Callers must pass the fully-resolved model
+             so the key is stable and concrete. *)
+          let run_and_cache cache_model query =
+            match
+              DBCache.find ctx any_id uuid permission target_uuid cache_model
+            with
+            | Some granted ->
+              log_result granted;
+              Lwt.return granted
+            | None ->
+              query
+              >|= fun result ->
+              let granted = CCResult.is_ok result in
+              log_result granted;
+              let () =
+                DBCache.store
+                  ctx
+                  any_id
+                  uuid
+                  permission
+                  target_uuid
+                  cache_model
+                  granted
+              in
+              granted
+          in
+          match any_id, target_uuid, model with
+          | _, None, None ->
+            run_and_cache
+              None
+              (Lwt.return_error
+                 "At least a target uuid or model has to be specified!")
+          | true, Some target_uuid, None ->
+            Logs.warn ~src (fun m ->
+              m
+                "Validation with 'any_id' set on a 'uuid' doesn't make sense. \
+                 Validating uuid.");
+            run_and_cache None (validate_uuid ?ctx permission target_uuid uuid)
+          | true, _, Some mdl ->
+            run_and_cache model (validate_any_of_model ?ctx permission mdl uuid)
+          | false, Some target_uuid, None ->
+            (* Resolve the model up front so both the DB query and the cache
+               key use the concrete model, preventing stale model=None entries
+               if the target's model later changes (e.g. via Target.promote). *)
+            Target.find_model ?ctx target_uuid
+            >>= (function
+             | Error _ as e ->
+               let granted = CCResult.is_ok e in
+               log_result granted;
+               Lwt.return granted
+             | Ok resolved_model ->
+               run_and_cache
+                 (Some resolved_model)
+                 (validate_uuid
+                    ?ctx
+                    ~model:resolved_model
+                    permission
+                    target_uuid
+                    uuid))
+          | false, Some target_uuid, Some mdl ->
+            run_and_cache
+              model
+              (validate_uuid ?ctx ~model:mdl permission target_uuid uuid)
+          | false, None, Some mdl ->
+            run_and_cache model (validate_model ?ctx permission mdl uuid)
         ;;
       end
 
