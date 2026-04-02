@@ -455,6 +455,42 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     |> Lwt.return
   ;;
 
+  let test_parametric_role_isolation ?ctx (_ : 'a) () =
+    (* Verify that a role bound to a specific target UUID does NOT grant access
+       to a different target UUID — parametric role isolation. *)
+    let actor_uuid = Uuid.Actor.create () in
+    let target_a = Uuid.Target.create () in
+    let target_b = Uuid.Target.create () in
+    let actor = Actor.create `User actor_uuid in
+    let open Lwt.Infix in
+    (let* () = Backend.Actor.insert ?ctx actor in
+     let%lwt () =
+       ActorRole.create ~target_uuid:target_a actor_uuid `Editor
+       |> Backend.ActorRole.upsert ?ctx
+     in
+     let check_access msg expected target =
+       Backend.validate
+         ?ctx
+         id
+         (ValidationSet.one_of_tuple (Update, `Article, Some target))
+         actor
+       >|= fun result ->
+       Alcotest.(check bool) msg expected (CCResult.is_ok result)
+     in
+     let* () =
+       check_access "Editor on target_a is granted" true target_a
+       |> Lwt_result.ok
+     in
+     let* () =
+       check_access "Editor on target_a is denied for target_b" false target_b
+       |> Lwt_result.ok
+     in
+     Lwt.return_ok ())
+    >|= Alcotest.(check (result unit string))
+          "Parametric role isolation."
+          (Ok ())
+  ;;
+
   let transistency_deny ?ctx (_ : 'a) () =
     (let* (_ : Guard.Target.t) = Post.to_authorizable ?ctx thomas_chris_post in
      let* chris_authorizable = User.to_authorizable ?ctx chris in
@@ -1071,7 +1107,12 @@ let () =
       ; ( Format.asprintf "(%s) Managing ownership." name
         , [ test_case "Set owner" `Quick (set_author ?ctx) ] )
       ; ( Format.asprintf "(%s) Use parametric roles." name
-        , [ test_case "Parametric editor role" `Quick (operator_works ?ctx) ] )
+        , [ test_case "Parametric editor role" `Quick (operator_works ?ctx)
+          ; test_case
+              "Parametric role isolation"
+              `Quick
+              (test_parametric_role_isolation ?ctx)
+          ] )
       ; ( Format.asprintf
             "(%s) Transistancy, manager of `x` shouldn't be able to update \
              `x.a`."

@@ -270,6 +270,17 @@ struct
       | _ -> Lwt_result.fail (CCList.rev failures)
     ;;
 
+    (** [decorate_entity get_uuid insert find to_entity ?ctx x] is the shared
+        implementation for [Actor.decorate] and [Target.decorate]. It upserts
+        the entity (idempotent) and returns the current DB state, removing the
+        need for a separate existence check. *)
+    let decorate_entity get_uuid insert find ?ctx to_entity x =
+      let open Lwt_result.Syntax in
+      let entity = to_entity x in
+      let* () = insert ?ctx entity in
+      find ?ctx (get_uuid entity)
+    ;;
+
     module RolePermission = struct
       include Repo.RolePermission
 
@@ -286,23 +297,10 @@ struct
       include Actor
       include Repo.Actor
 
-      (** [decorate ?ctx to_actor] This convenience function should be used to
-          decorate the [actor] * functions of authorizable modules. The newly
-          decorated function connects * to the persistent backend to ensure that
-          the authorizable's roles and ownership * are consistent in both
-          spaces. *)
-      let decorate ?ctx (to_actor : 'a -> actor)
-        : 'a -> (actor, string) Lwt_result.t
-        =
-        fun x ->
-        let open Lwt_result.Syntax in
-        let ({ Actor.uuid; _ } as entity : actor) = to_actor x in
-        let* mem = mem ?ctx uuid in
-        if mem
-        then find ?ctx uuid
-        else
-          let* () = insert ?ctx entity in
-          Lwt.return_ok entity
+      (** [decorate ?ctx to_actor] ensures the actor exists in the persistent
+          backend (idempotent upsert) and returns the current stored state. *)
+      let decorate ?ctx =
+        decorate_entity (fun (e : actor) -> e.Actor.uuid) insert find ?ctx
       ;;
     end
 
@@ -315,23 +313,10 @@ struct
       include Target
       include Repo.Target
 
-      (** [decorate ?ctx to_target] This convenience function should be used to
-          decorate the [target] * functions of authorizable modules. The newly
-          decorated function connects * to the persistent backend to ensure that
-          the authorizable's roles and ownership * are consistent in both
-          spaces. *)
-      let decorate ?ctx (to_target : 'a -> target)
-        : 'a -> (target, string) Lwt_result.t
-        =
-        fun x ->
-        let open Lwt_result.Syntax in
-        let ({ Target.uuid; _ } as entity : target) = to_target x in
-        let* mem = mem ?ctx uuid in
-        if mem
-        then find ?ctx uuid
-        else
-          let* () = insert ?ctx entity in
-          Lwt.return_ok entity
+      (** [decorate ?ctx to_target] ensures the target exists in the persistent
+          backend (idempotent upsert) and returns the current stored state. *)
+      let decorate ?ctx =
+        decorate_entity (fun (e : target) -> e.Target.uuid) insert find ?ctx
       ;;
     end
 
