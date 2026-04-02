@@ -1179,9 +1179,22 @@ struct
              validate_uuid ?ctx ?model permission target_uuid uuid
            | false, None, Some model ->
              validate_model ?ctx permission model uuid)
-          >|= function
-          | Ok () -> true
-          | Error _ -> false
+          >|= fun result ->
+          let granted = CCResult.is_ok result in
+          Logs.info ~src (fun m ->
+            let target =
+              match target_uuid, model with
+              | Some t, _ -> Guard.Uuid.Target.to_string t
+              | None, Some mdl -> [%show: TargetModel.t] mdl
+              | None, None -> "none"
+            in
+            m
+              "Access %s: actor=%s permission=%s target=%s"
+              (if granted then "granted" else "denied")
+              (Guard.Uuid.Actor.to_string uuid)
+              (Guard.Permission.show permission)
+              target);
+          granted
         ;;
       end
 
