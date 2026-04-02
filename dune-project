@@ -29,7 +29,15 @@
  (description
   "Defined actors can access targets according to specified rules (allowed actions: CRUD).")
  (depends
+  (alcotest
+   (and
+    :with-test
+    (>= 1.9.1)))
   (alcotest-lwt :with-test)
+  (base
+   (>= v0.17.3))
+  (caqti
+   (>= 2.2.4))
   (caqti-driver-mariadb
    (>= 2.0.1))
   (caqti-lwt
@@ -39,6 +47,10 @@
   (containers-data
    (>= 3.6))
   (dune-release :with-dev-setup)
+  (fmt
+   (and
+    :with-test
+    (>= 0.11.0)))
   (logs
    (>= 0.7.0))
   (lwt
@@ -64,6 +76,8 @@
    (>= v0.16.0))
   (result
    (>= 1.5))
+  (sexplib0
+   (>= v0.17.0))
   (uri
    (>= 4.2.0))
   (uuidm
