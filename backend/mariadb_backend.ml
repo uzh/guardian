@@ -249,32 +249,63 @@ struct
   end
 
   module DBCache = struct
-    open CCCache
-
-    let equal_validate (c1, any1, a1, p1, pt1) (c2, any2, a2, p2, pt2) =
-      let pool_of =
-        CCOption.flat_map (CCList.assoc_opt ~eq:CCString.equal "pool")
-      in
-      CCOption.equal CCString.equal (pool_of c1) (pool_of c2)
-      && CCOption.equal CCBool.equal any1 any2
-      && Guard.Uuid.Actor.equal a1 a2
-      && Guard.Permission.equal p1 p2
-      && Guard.TargetEntity.equal pt1 pt2
+    let pool_of_ctx =
+      CCOption.flat_map (CCList.assoc_opt ~eq:CCString.equal "pool")
     ;;
 
-    let lru_validate
-      : ( (string * string) list option
-          * bool option
-          * Guard.Uuid.Actor.t
-          * Guard.Permission.t
-          * Guard.TargetEntity.t
-          , bool )
-          t
+    (* Inner key: pool * any_id * permission * target_uuid * model *)
+    let equal_inner
+          (pool1, any_id1, perm1, target_uuid1, model1)
+          (pool2, any_id2, perm2, target_uuid2, model2)
       =
-      lru ~eq:equal_validate 16384
+      CCOption.equal CCString.equal pool1 pool2
+      && Bool.equal any_id1 any_id2
+      && Guard.Permission.equal perm1 perm2
+      && CCOption.equal Guard.Uuid.Target.equal target_uuid1 target_uuid2
+      && CCOption.equal TargetModel.equal model1 model2
     ;;
 
-    let clear () = clear lru_validate
+    (* actor_uuid_string -> [(inner_key, granted)] *)
+    let _cache
+      : ( string
+          , ((string option
+             * bool
+             * Guard.Permission.t
+             * Guard.Uuid.Target.t option
+             * TargetModel.t option)
+            * bool)
+              list )
+          Hashtbl.t
+      =
+      Hashtbl.create 256
+    ;;
+
+    let clear () = Hashtbl.clear _cache
+
+    (** Remove all cached entries for a single actor. Used when that actor's
+        roles or direct permissions change. *)
+    let clear_actor uuid =
+      Hashtbl.remove _cache (Guard.Uuid.Actor.to_string uuid)
+    ;;
+
+    let find ctx any_id actor_uuid permission target_uuid model =
+      let inner_key = pool_of_ctx ctx, any_id, permission, target_uuid, model in
+      Hashtbl.find_opt _cache (Guard.Uuid.Actor.to_string actor_uuid)
+      |> CCOption.flat_map (CCList.assoc_opt ~eq:equal_inner inner_key)
+    ;;
+
+    let store ctx any_id actor_uuid permission target_uuid model result =
+      let actor_key = Guard.Uuid.Actor.to_string actor_uuid in
+      let inner_key = pool_of_ctx ctx, any_id, permission, target_uuid, model in
+      let existing =
+        Hashtbl.find_opt _cache actor_key |> CCOption.value ~default:[]
+      in
+      let updated =
+        (inner_key, result)
+        :: CCList.filter (fun (k, _) -> not (equal_inner k inner_key)) existing
+      in
+      Hashtbl.replace _cache actor_key updated
+    ;;
   end
 
   include Guard.MakePersistence (struct
@@ -348,8 +379,11 @@ struct
             |> Entity.ActorRole.role ->. Caqti_type.unit
           ;;
 
-          let upsert ?ctx ({ Entity.ActorRole.target_uuid; _ } as role) =
-            let () = clear_cache () in
+          let upsert
+                ?ctx
+                ({ Entity.ActorRole.target_uuid; actor_uuid; _ } as role)
+            =
+            let () = DBCache.clear_actor actor_uuid in
             match target_uuid with
             | Some _ -> Database.exec ?ctx upsert_uuid_request role
             | None -> Database.exec ?ctx upsert_model_request role
@@ -582,9 +616,30 @@ struct
             |> Caqti_type.(t2 Uuid.Actor.t Model.role ->. unit)
           ;;
 
+          let find_all_actors_with_role_request =
+            [%string
+              {sql|
+                SELECT %{Entity.Uuid.sql_select_fragment "actor_uuid"} FROM (
+                  SELECT actor_uuid FROM guardian_actor_roles
+                    WHERE role = ? AND mark_as_deleted IS NULL
+                  UNION
+                  SELECT actor_uuid FROM guardian_actor_role_targets
+                    WHERE role = ? AND mark_as_deleted IS NULL
+                ) AS combined
+              |sql}]
+            |> Caqti_type.t2 Entity.Role.t Entity.Role.t ->* Entity.Uuid.Actor.t
+          ;;
+
+          (** Find all actor UUIDs that have [role] assigned (globally or
+              per-target). Used to invalidate cache entries when a role
+              permission rule changes. *)
+          let find_all_actors_with_role ?ctx role =
+            Database.collect ?ctx find_all_actors_with_role_request (role, role)
+          ;;
+
           let delete ?ctx role =
             let open Guard.ActorRole in
-            let () = clear_cache () in
+            let () = DBCache.clear_actor role.actor_uuid in
             match role.target_uuid with
             | Some _ -> Database.exec ?ctx delete_role_uuid_request role
             | None ->
@@ -645,9 +700,15 @@ struct
             |> RolePermission.t ->. Caqti_type.unit
           ;;
 
-          let insert ?ctx =
-            let () = clear_cache () in
-            Database.exec ?ctx insert_request %> Lwt_result.ok
+          let insert ?ctx rp =
+            let open Lwt.Syntax in
+            let* actor_uuids =
+              ActorRole.find_all_actors_with_role
+                ?ctx
+                rp.Guard.RolePermission.role
+            in
+            List.iter DBCache.clear_actor actor_uuids;
+            Database.exec ?ctx insert_request rp |> Lwt_result.ok
           ;;
 
           let delete_request =
@@ -662,9 +723,15 @@ struct
             |> RolePermission.t ->. Caqti_type.unit
           ;;
 
-          let delete ?ctx =
-            let () = clear_cache () in
-            Database.exec ?ctx delete_request %> Lwt_result.ok
+          let delete ?ctx rp =
+            let open Lwt.Syntax in
+            let* actor_uuids =
+              ActorRole.find_all_actors_with_role
+                ?ctx
+                rp.Guard.RolePermission.role
+            in
+            List.iter DBCache.clear_actor actor_uuids;
+            Database.exec ?ctx delete_request rp |> Lwt_result.ok
           ;;
         end
 
@@ -743,9 +810,9 @@ struct
             |> Entity.ActorPermission.t ->. Caqti_type.unit
           ;;
 
-          let insert ?ctx =
-            let () = clear_cache () in
-            Database.exec ?ctx insert_request %> Lwt_result.ok
+          let insert ?ctx ({ Guard.ActorPermission.actor_uuid; _ } as ap) =
+            DBCache.clear_actor actor_uuid;
+            Database.exec ?ctx insert_request ap |> Lwt_result.ok
           ;;
 
           let delete_request =
@@ -762,8 +829,11 @@ struct
             |> Entity.ActorPermission.t ->. Caqti_type.unit
           ;;
 
-          let delete ?ctx permission =
-            let () = clear_cache () in
+          let delete
+                ?ctx
+                ({ Guard.ActorPermission.actor_uuid; _ } as permission)
+            =
+            DBCache.clear_actor actor_uuid;
             Database.exec ?ctx delete_request permission |> Lwt_result.ok
           ;;
         end
@@ -1163,38 +1233,47 @@ struct
               { Guard.Actor.uuid; _ }
           =
           let open Lwt.Infix in
-          (match any_id, target_uuid, model with
-           | _, None, None ->
-             Lwt.return_error
-               "At least a target uuid or model has to be specified!"
-           | true, Some target_uuid, None ->
-             Logs.warn ~src (fun m ->
-               m
-                 "Validation with 'any_id' set on a 'uuid' doesn't make sense. \
-                  Validating uuid.");
-             validate_uuid ?ctx permission target_uuid uuid
-           | true, _, Some model ->
-             validate_any_of_model ?ctx permission model uuid
-           | false, Some target_uuid, model ->
-             validate_uuid ?ctx ?model permission target_uuid uuid
-           | false, None, Some model ->
-             validate_model ?ctx permission model uuid)
-          >|= fun result ->
-          let granted = CCResult.is_ok result in
-          Logs.info ~src (fun m ->
-            let target =
-              match target_uuid, model with
-              | Some t, _ -> Guard.Uuid.Target.to_string t
-              | None, Some mdl -> [%show: TargetModel.t] mdl
-              | None, None -> "none"
-            in
-            m
-              "Access %s: actor=%s permission=%s target=%s"
-              (if granted then "granted" else "denied")
-              (Guard.Uuid.Actor.to_string uuid)
-              (Guard.Permission.show permission)
-              target);
-          granted
+          let log_result granted =
+            Logs.info ~src (fun m ->
+              let target =
+                match target_uuid, model with
+                | Some t, _ -> Guard.Uuid.Target.to_string t
+                | None, Some mdl -> [%show: TargetModel.t] mdl
+                | None, None -> "none"
+              in
+              m
+                "Access %s: actor=%s permission=%s target=%s"
+                (if granted then "granted" else "denied")
+                (Guard.Uuid.Actor.to_string uuid)
+                (Guard.Permission.show permission)
+                target)
+          in
+          match DBCache.find ctx any_id uuid permission target_uuid model with
+          | Some granted ->
+            log_result granted;
+            Lwt.return granted
+          | None ->
+            (match any_id, target_uuid, model with
+             | _, None, None ->
+               Lwt.return_error
+                 "At least a target uuid or model has to be specified!"
+             | true, Some target_uuid, None ->
+               Logs.warn ~src (fun m ->
+                 m
+                   "Validation with 'any_id' set on a 'uuid' doesn't make \
+                    sense. Validating uuid.");
+               validate_uuid ?ctx permission target_uuid uuid
+             | true, _, Some model ->
+               validate_any_of_model ?ctx permission model uuid
+             | false, Some target_uuid, model ->
+               validate_uuid ?ctx ?model permission target_uuid uuid
+             | false, None, Some model ->
+               validate_model ?ctx permission model uuid)
+            >|= fun result ->
+            let granted = CCResult.is_ok result in
+            log_result granted;
+            DBCache.store ctx any_id uuid permission target_uuid model granted;
+            granted
         ;;
       end
 
