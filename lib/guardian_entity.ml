@@ -157,17 +157,17 @@ struct
              CCList.mem (of_tuple (Permission.Manage, model, target_uuid)) perms
            in
            match target_uuid with
-           | None when is_manage_model () -> init @ [ permission_on_target ]
+           | None when is_manage_model () -> permission_on_target :: init
            | None when manage_permission () -> init
-           | None -> init @ [ permission_on_target ]
+           | None -> permission_on_target :: init
            | Some _
              when Permission.(equal Manage permission)
-                  && model_permission () |> not ->
-             init @ [ permission_on_target ]
+                  && model_permission () |> not -> permission_on_target :: init
            | Some _ when model_permission () || manage_permission () -> init
-           | Some _ -> init @ [ permission_on_target ])
+           | Some _ -> permission_on_target :: init)
         []
         perms
+      |> CCList.rev
     ;;
 
     let validate ?(any_id = false) =
@@ -255,32 +255,31 @@ struct
 
     let clear_cache () = Repo.clear_cache ()
 
+    let insert_all_items insert ?ctx items =
+      let%lwt successes, failures =
+        Lwt_list.fold_left_s
+          (fun (ok, err) x ->
+             match%lwt insert ?ctx x with
+             | Ok () -> Lwt.return (x :: ok, err)
+             | Error (_ : string) -> Lwt.return (ok, x :: err))
+          ([], [])
+          items
+      in
+      match failures with
+      | [] -> Lwt_result.return (CCList.rev successes)
+      | _ -> Lwt_result.fail (CCList.rev failures)
+    ;;
+
     module RolePermission = struct
       include Repo.RolePermission
 
-      let insert_all ?ctx =
-        Lwt_list.fold_left_s
-          (fun acc x ->
-             match%lwt insert ?ctx x with
-             | Ok () -> CCResult.map (CCList.cons x) acc |> Lwt_result.lift
-             | Error (_ : string) ->
-               CCResult.map_err (CCList.cons x) acc |> Lwt_result.lift)
-          (Ok [])
-      ;;
+      let insert_all ?ctx = insert_all_items insert ?ctx
     end
 
     module ActorPermission = struct
       include Repo.ActorPermission
 
-      let insert_all ?ctx =
-        Lwt_list.fold_left_s
-          (fun acc x ->
-             match%lwt insert ?ctx x with
-             | Ok () -> CCResult.map (CCList.cons x) acc |> Lwt_result.lift
-             | Error (_ : string) ->
-               CCResult.map_err (CCList.cons x) acc |> Lwt_result.lift)
-          (Ok [])
-      ;;
+      let insert_all ?ctx = insert_all_items insert ?ctx
     end
 
     module Actor = struct

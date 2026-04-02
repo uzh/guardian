@@ -25,4 +25,4 @@ let of_string_res s =
   CCOption.to_result (Format.asprintf "Invalid action: %s" s) (of_string s)
 ;;
 
-let is_valid ~matches action = equal Manage action || equal matches action
+let is_valid ~required action = equal Manage action || equal required action

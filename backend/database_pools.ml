@@ -149,8 +149,8 @@ module Make (Config : ConfigSig) = struct
       Cache.remove name |> Lwt.return
   ;;
 
-  let initialize ?(additinal_pools : (string * string) list = []) () : unit =
-    Config.database :: additinal_pools
+  let initialize ?(additional_pools : (string * string) list = []) () : unit =
+    Config.database :: additional_pools
     |> CCList.filter (fst %> Cache.find_opt %> CCOption.is_none)
     |> CCList.iter (CCFun.uncurry (Pool.create ~required:true) %> Cache.replace)
   ;;

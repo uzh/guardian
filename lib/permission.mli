@@ -16,6 +16,6 @@ val of_string_exn : string -> t
 val of_string_res : string -> (t, string) result
 val sexp_of_t : t -> Sexplib0.Sexp.t
 
-(** [is_valid] checks the validity of the provided action [t] against action
-    [matches] or action [Manage] *)
-val is_valid : matches:t -> t -> bool
+(** [is_valid] checks the validity of the provided action [t] against the
+    [required] action or [Manage] *)
+val is_valid : required:t -> t -> bool

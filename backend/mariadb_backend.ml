@@ -21,10 +21,6 @@ struct
     CCString.(TargetModel.show %> replace ~sub:"`" ~by:"" %> lowercase_ascii)
   ;;
 
-  let capitalize_role =
-    CCString.(TargetModel.show %> replace ~sub:"`" ~by:"" %> capitalize_ascii)
-  ;;
-
   module Entity = struct
     module Uuid = struct
       let sql_select_fragment field =
@@ -256,8 +252,10 @@ struct
     open CCCache
 
     let equal_validate (c1, any1, a1, p1, pt1) (c2, any2, a2, p2, pt2) =
-      let ctx = [%show: (string * string) list] in
-      CCOption.equal (fun a b -> CCString.equal (ctx a) (ctx b)) c1 c2
+      let pool_of =
+        CCOption.flat_map (CCList.assoc_opt ~eq:CCString.equal "pool")
+      in
+      CCOption.equal CCString.equal (pool_of c1) (pool_of c2)
       && CCOption.equal CCBool.equal any1 any2
       && Guard.Uuid.Actor.equal a1 a2
       && Guard.Permission.equal p1 p2
@@ -1102,70 +1100,50 @@ struct
 
         let validate_any_of_model ?ctx permission model actor_uuid =
           let open Lwt.Infix in
-          let to_req =
+          let validate_request =
             let open Entity in
-            Caqti_type.(
-              t3 Uuid.Actor.t Permission.t TargetModel.t ->? option bool)
-          in
-          let find_bool request =
-            Database.find_opt ?ctx request (actor_uuid, permission, model)
-            >|= CCOption.(flatten %> value ~default:false)
-          in
-          let valid_or_continue fcn = function
-            | true -> Lwt.return_true
-            | false -> fcn
-          in
-          let role_permission_request =
             [%string
               {sql|
-                SELECT TRUE
-                FROM guardian_actor_roles AS roles
-                LEFT JOIN guardian_role_permissions AS role_permissions
-                  ON roles.role = role_permissions.role
-                  AND role_permissions.mark_as_deleted IS NULL
-                WHERE roles.mark_as_deleted IS NULL
-                  AND roles.actor_uuid = %{Entity.Uuid.sql_value_fragment "$1"}
-                  AND role_permissions.target_model = $3
-                  AND (role_permissions.permission = $2 OR role_permissions.permission = 'manage')
-                LIMIT 1
+                SELECT (
+                  SELECT TRUE
+                  FROM guardian_actor_roles AS roles
+                  LEFT JOIN guardian_role_permissions AS role_permissions
+                    ON roles.role = role_permissions.role
+                    AND role_permissions.mark_as_deleted IS NULL
+                  WHERE roles.mark_as_deleted IS NULL
+                    AND roles.actor_uuid = %{Uuid.sql_value_fragment "$1"}
+                    AND role_permissions.target_model = $3
+                    AND (role_permissions.permission = $2 OR role_permissions.permission = 'manage')
+                  LIMIT 1
+                ) OR (
+                  SELECT TRUE
+                  FROM guardian_actor_role_targets AS role_targets
+                  LEFT JOIN guardian_role_permissions AS role_permissions
+                    ON role_targets.role = role_permissions.role
+                    AND role_permissions.mark_as_deleted IS NULL
+                  WHERE role_targets.mark_as_deleted IS NULL
+                    AND role_targets.actor_uuid = %{Uuid.sql_value_fragment "$1"}
+                    AND role_permissions.target_model = $3
+                    AND (role_permissions.permission = $2 OR role_permissions.permission = 'manage')
+                  LIMIT 1
+                ) OR (
+                  SELECT TRUE
+                  FROM guardian_actor_permissions AS actor_permissions
+                  LEFT JOIN guardian_targets AS targets
+                    ON actor_permissions.target_uuid = targets.uuid
+                    AND targets.mark_as_deleted IS NULL
+                  WHERE actor_permissions.mark_as_deleted IS NULL
+                    AND actor_permissions.actor_uuid = %{Uuid.sql_value_fragment "$1"}
+                    AND (actor_permissions.permission = $2 OR actor_permissions.permission = 'manage')
+                    AND (targets.model = $3 OR actor_permissions.target_model = $3)
+                  LIMIT 1
+                )
               |sql}]
-            |> to_req
+            |> Caqti_type.(
+                 t3 Uuid.Actor.t Permission.t TargetModel.t ->? option bool)
           in
-          let role_permission_target_request =
-            [%string
-              {sql|
-                SELECT TRUE
-                FROM guardian_actor_role_targets AS role_targets
-                LEFT JOIN guardian_role_permissions AS role_permissions
-                  ON role_targets.role = role_permissions.role
-                  AND role_permissions.mark_as_deleted IS NULL
-                WHERE role_targets.mark_as_deleted IS NULL
-                  AND role_targets.actor_uuid = %{Entity.Uuid.sql_value_fragment "$1"}
-                  AND role_permissions.target_model = $3
-                  AND (role_permissions.permission = $2 OR role_permissions.permission = 'manage')
-                LIMIT 1
-              |sql}]
-            |> to_req
-          in
-          let actor_permission_request =
-            [%string
-              {sql|
-                SELECT TRUE
-                FROM guardian_actor_permissions AS actor_permissions
-                LEFT JOIN guardian_targets AS targets
-                  ON actor_permissions.target_uuid = targets.uuid
-                  AND targets.mark_as_deleted IS NULL
-                WHERE actor_permissions.mark_as_deleted IS NULL
-                  AND actor_permissions.actor_uuid = %{Entity.Uuid.sql_value_fragment "$1"}
-                  AND (actor_permissions.permission = $2 OR actor_permissions.permission = 'manage')
-                  AND (targets.model = $3 OR actor_permissions.target_model = $3)
-                LIMIT 1
-              |sql}]
-            |> to_req
-          in
-          find_bool role_permission_request
-          >>= valid_or_continue (find_bool role_permission_target_request)
-          >>= valid_or_continue (find_bool actor_permission_request)
+          Database.find_opt ?ctx validate_request (actor_uuid, permission, model)
+          >|= CCOption.(flatten %> value ~default:false)
           >|= function
           | true -> Ok ()
           | false ->

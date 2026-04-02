@@ -19,7 +19,7 @@ module UuidBase = struct
 
   let of_yojson = function
     | `String s -> of_string_res s
-    | _ -> Error "Invalid argument"
+    | _ -> Error "Expected a JSON string for UUID"
   ;;
 
   let sexp_of_t uuid = Sexplib0.Sexp.Atom (to_string uuid)
