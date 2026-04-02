@@ -48,7 +48,9 @@ module Make (Config : ConfigSig) = struct
       ; connection : connection [@opaque]
       ; n_retries : int
       }
-    [@@deriving fields]
+
+    let database_label { database_label; _ } = database_label
+    let connection { connection; _ } = connection
 
     let create ?(required = false) database_label database_url =
       { database_label

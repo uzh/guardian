@@ -34,8 +34,6 @@
     :with-test
     (>= 1.9.1)))
   (alcotest-lwt :with-test)
-  (base
-   (>= v0.17.3))
   (caqti
    (>= 2.2.4))
   (caqti-driver-mariadb
@@ -68,8 +66,6 @@
    (>= 5.2.1))
   (ppx_deriving_yojson
    (>= 3.6.1))
-  (ppx_fields_conv
-   (>= v0.16.0))
   (ppx_sexp_conv
    (>= 0.15.1))
   (ppx_string

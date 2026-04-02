@@ -216,7 +216,7 @@ struct
       { role : Role.t
       ; target_role : Role.t
       }
-    [@@deriving eq, show, ord, yojson, sexp_of, fields ~getters]
+    [@@deriving eq, show, ord, yojson, sexp_of]
 
     let create role target_role = { role; target_role }
   end
@@ -388,7 +388,7 @@ struct
           the provided role *)
       let can_assign_roles ?ctx =
         Repo.RoleAssignment.find_all_by_role ?ctx
-        %> Lwt.map (CCList.map target_role)
+        %> Lwt.map (CCList.map (fun ra -> ra.target_role))
       ;;
     end
 
