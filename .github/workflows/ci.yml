@@ -33,14 +33,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Retrieve opam cache
-        uses: actions/cache@v5
-        if: runner.os != 'Windows'
-        id: cache-opam
-        with:
-          path: ~/.opam
-          key: v1-${{ runner.os }}-opam-${{ matrix.ocaml-compiler }}-${{ hashFiles('*.opam.locked') }}
-
       - name: Use OCaml ${{ matrix.ocaml-compiler }}
         uses: ocaml/setup-ocaml@v3
         with:
@@ -49,12 +41,6 @@ jobs:
 
       - name: Install system dependencies
         run: sudo apt-get update -y && sudo apt-get install -y libmariadb-dev
-
-      - name: Recover from an Opam broken state
-        if: steps.cache-opam.outputs.cache-hit == 'true'
-        run: |
-          opam install -y dune
-          opam upgrade --fixup
 
       - name: Install dependencies
         run: opam install --deps-only --with-test --with-doc -y .
