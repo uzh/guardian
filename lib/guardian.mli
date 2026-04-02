@@ -10,7 +10,11 @@ module Utils : sig
     -> 'b
     -> 'c Lwt.t
 
-  val decompose_variant_string : string -> string * string list
+  val decompose_variant_string_exn : string -> string * string list
+
+  val decompose_variant_string : string -> (string * string list) option
+  [@@migrate decompose_variant_string_exn]
+
   val failwith_invalid_role : ?msg_prefix:string -> string * string list -> 'a
   val invalid_role : ?msg_prefix:string -> string * string list -> string
 

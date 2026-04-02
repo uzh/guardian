@@ -70,7 +70,7 @@ Example usage:
 
 ## Development
 
-A guide how to setup the project with devcontainers can be found [here](./.devcontainer/README.md).
+A guide how to setup the project with devcontainers can be found in [this README](./.devcontainer/README.md).
 
 ### Commands
 

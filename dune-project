@@ -29,6 +29,7 @@
  (description
   "Defined actors can access targets according to specified rules (allowed actions: CRUD).")
  (depends
+  (alcotest-lwt :with-test)
   (caqti-driver-mariadb
    (>= 2.0.1))
   (caqti-lwt
@@ -37,6 +38,7 @@
    (>= 3.6))
   (containers-data
    (>= 3.6))
+  (dune-release :with-dev-setup)
   (logs
    (>= 0.7.0))
   (lwt
@@ -47,6 +49,9 @@
    (>= 1.2.0))
   (ocaml
    (>= 4.12.0))
+  (ocaml-lsp-server :with-dev-setup)
+  (ocamlformat :with-dev-setup)
+  (odoc :with-doc)
   (ppx_deriving
    (>= 5.2.1))
   (ppx_deriving_yojson
@@ -57,17 +62,13 @@
    (>= 0.15.1))
   (ppx_string
    (>= v0.16.0))
+  (result
+   (>= 1.5))
   (uri
    (>= 4.2.0))
   (uuidm
    (>= 0.9.8))
   (yojson
-   (>= 2.0.2))
-  (result
-   (>= 1.5))
-  ;; Documentation
-  (odoc :with-doc)
-  ;; Test/Dev dependencies
-  (alcotest-lwt :with-test)))
+   (>= 2.0.2))))
 
 (implicit_transitive_deps false)

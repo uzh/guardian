@@ -286,7 +286,8 @@ module Make (Config : ConfigSig) = struct
       Connection.rollback ()
       |> Lwt_result.map
            (CCFun.tap (fun _ ->
-              Logs.debug (fun m -> m "Successfully rolled back transaction")))
+              Logs.debug ~src (fun m ->
+                m "Successfully rolled back transaction")))
       |> raise_caqti_error label
     in
     Lwt.fail error

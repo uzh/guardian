@@ -13,6 +13,8 @@ module Make
     (TargetModel : Guardian.RoleSig)
     (Database : Database_pools.Sig) =
 struct
+  let src = Logs.Src.create "guardian.backend.mariadb"
+
   module Guard = Guardian.Make (ActorModel) (Role) (TargetModel)
 
   let lowercase_role =
@@ -49,10 +51,7 @@ struct
           Caqti_type.(
             custom
               ~encode:(to_string %> CCResult.return)
-              ~decode:(fun id ->
-                id
-                |> of_string
-                |> CCOption.to_result (Format.asprintf "Invalid UUID: %s" id))
+              ~decode:of_string_res
               string)
         ;;
       end
@@ -65,11 +64,10 @@ struct
       include Role
 
       let t =
-        let open CCResult in
         Caqti_type.(
           custom
-            ~encode:(Role.show %> return)
-            ~decode:(of_string %> return)
+            ~encode:(Role.show %> CCResult.return)
+            ~decode:of_string_res
             string)
       ;;
     end
@@ -82,7 +80,7 @@ struct
         Caqti_type.(
           custom
             ~encode:(ActorModel.show %> return)
-            ~decode:(of_string %> return)
+            ~decode:of_string_res
             string)
       ;;
     end
@@ -91,11 +89,10 @@ struct
       include TargetModel
 
       let t =
-        let open CCResult in
         Caqti_type.(
           custom
-            ~encode:(TargetModel.show %> return)
-            ~decode:(of_string %> return)
+            ~encode:(TargetModel.show %> CCResult.return)
+            ~decode:of_string_res
             string)
       ;;
     end
@@ -104,11 +101,10 @@ struct
       include Guard.Permission
 
       let t =
-        let open CCResult in
         Caqti_type.(
           custom
-            ~encode:(Guard.Permission.show %> return)
-            ~decode:(of_string %> return)
+            ~encode:(Guard.Permission.show %> CCResult.return)
+            ~decode:of_string_res
             string)
       ;;
     end
@@ -131,12 +127,10 @@ struct
       ;;
 
       let role =
-        let encode m =
-          let open CCResult in
-          (match m.target_uuid with
-           | Some _ -> Error "target_uuid defined for role only model"
-           | None -> Ok ())
-          >|= fun () -> m.actor_uuid, m.role
+        let encode { actor_uuid; role; target_uuid } =
+          match target_uuid with
+          | Some _ -> Error "target_uuid defined for role only model"
+          | None -> Ok (actor_uuid, role)
         in
         let decode (actor_uuid, role) =
           Ok { actor_uuid; role; target_uuid = None }
@@ -1193,9 +1187,10 @@ struct
           let open Lwt.Infix in
           (match any_id, target_uuid, model with
            | _, None, None ->
-             failwith "At least a target uuid or model has to be specified!"
+             Lwt.return_error
+               "At least a target uuid or model has to be specified!"
            | true, Some target_uuid, None ->
-             Logs.warn (fun m ->
+             Logs.warn ~src (fun m ->
                m
                  "Validation with 'any_id' set on a 'uuid' doesn't make sense. \
                   Validating uuid.");
@@ -1211,13 +1206,6 @@ struct
           | Error _ -> false
         ;;
       end
-
-      (** [start ?ctx ()] runs needed actions to start the backend, e.g. redefines
-          needed functions **)
-      let start ?ctx () =
-        let (_ : (string * string) list option) = ctx in
-        Lwt.return_unit
-      ;;
 
       (** [find_migrations ()] returns a list of all migrations as a tuple with
           key, datetime and sql query **)
@@ -1235,7 +1223,7 @@ struct
         ()
         |> find_migrations
         |> Lwt_list.iter_s (fun (key, date, sql) ->
-          Logs.debug (fun m -> m "Migration: Run '%s' from '%s'" key date);
+          Logs.debug ~src (fun m -> m "Migration: Run '%s' from '%s'" key date);
           Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
       ;;
 
@@ -1244,7 +1232,7 @@ struct
         ()
         |> find_clean
         |> Lwt_list.iter_s (fun (key, sql) ->
-          Logs.debug (fun m -> m "Clean: Run '%s'" key);
+          Logs.debug ~src (fun m -> m "Clean: Run '%s'" key);
           Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
       ;;
 
@@ -1253,9 +1241,9 @@ struct
         |> CCList.map (fun m -> m, Format.asprintf "DROP TABLE IF EXISTS %s" m)
         |> fun deletes ->
         (("skip foreign key set", "SET FOREIGN_KEY_CHECKS = 0") :: deletes)
-        @ [ "add foreign key check", "SET FOREIGN_KEY_CHECKS = 0" ]
+        @ [ "add foreign key check", "SET FOREIGN_KEY_CHECKS = 1" ]
         |> Lwt_list.iter_s (fun (key, sql) ->
-          Logs.debug (fun m -> m "Delete: Run '%s'" key);
+          Logs.debug ~src (fun m -> m "Delete: Run '%s'" key);
           Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
       ;;
     end)

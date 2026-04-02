@@ -9,12 +9,20 @@ type t =
 [@@deriving eq, ord, show { with_path = false }, yojson, sexp_of]
 
 let of_string = function
-  | "create" -> Create
-  | "read" -> Read
-  | "update" -> Update
-  | "delete" -> Delete
-  | "manage" -> Manage
-  | act -> raise (Invalid_argument (Format.asprintf "Invalid action: %s" act))
+  | "create" -> Some Create
+  | "read" -> Some Read
+  | "update" -> Some Update
+  | "delete" -> Some Delete
+  | "manage" -> Some Manage
+  | _ -> None
+;;
+
+let of_string_exn s =
+  CCOption.get_exn_or (Format.asprintf "Invalid action: %s" s) (of_string s)
+;;
+
+let of_string_res s =
+  CCOption.to_result (Format.asprintf "Invalid action: %s" s) (of_string s)
 ;;
 
 let is_valid ~matches action = equal Manage action || equal matches action

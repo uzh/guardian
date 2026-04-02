@@ -10,17 +10,25 @@ let with_exn ?ctx f name arg =
   | Error s -> failwith @@ Format.asprintf "%s failed: %s" name s
 ;;
 
-let decompose_variant_string s =
+let decompose_variant_string input =
   let open CCString in
-  let s = trim s in
-  let fmt = format_of_string "`%s (%s@)" in
-  try
-    Scanf.sscanf s fmt (fun name params ->
+  let try_fmt fmt fcn =
+    match Scanf.sscanf (trim input) fmt fcn with
+    | result -> Some result
+    | exception (End_of_file | Failure _ | Invalid_argument _ | _) -> None
+  in
+  match
+    try_fmt (format_of_string "`%s (%s@)") (fun name params ->
       lowercase_ascii name, CCList.map trim (split_on_char ',' params))
   with
-  | End_of_file ->
-    let fmt = format_of_string "`%s" in
-    Scanf.sscanf s fmt (fun name -> lowercase_ascii name, [])
+  | Some _ as result -> result
+  | None ->
+    try_fmt (format_of_string "`%s") (fun name -> lowercase_ascii name, [])
+;;
+
+let decompose_variant_string_exn input =
+  decompose_variant_string input
+  |> CCOption.get_exn_or (Format.asprintf "Invalid variant string: %s" input)
 ;;
 
 let invalid_role ?(msg_prefix = "Invalid role") =

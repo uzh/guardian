@@ -1,7 +1,5 @@
 open CCFun.Infix
 
-let src = Logs.Src.create "guardian"
-
 type context = Persistence.context
 
 module type RoleSig = Role.Sig
