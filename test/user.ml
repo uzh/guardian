@@ -9,21 +9,30 @@ module MakeActor (Backend : PersistenceSig) = struct
   let make s : t = s, Uuid.Actor.create ()
 
   let insert_roles ?ctx actor =
+    let target_uuid =
+      actor.Actor.uuid |> Uuid.Actor.to_string |> Uuid.Target.of_string_exn
+    in
     let%lwt () =
       ActorRole.create actor.Actor.uuid `Reader |> Backend.ActorRole.upsert ?ctx
     in
-    ActorPermission.create_for_id
-      actor.Actor.uuid
-      Permission.Update
-      (actor.Actor.uuid |> Uuid.(Actor.to_string %> Target.of_string_exn))
+    ActorPermission.create_for_id actor.Actor.uuid Permission.Update target_uuid
     |> Backend.ActorPermission.insert ?ctx
   ;;
 
   let to_authorizable ?ctx actor : (Backend.actor, string) result Lwt.t =
-    Backend.Actor.decorate
-      ?ctx
-      (fun (t : t) : Actor.t -> Actor.create `User (snd t))
-      actor
+    let open Lwt_result.Syntax in
+    let* actor_ent =
+      Backend.Actor.decorate
+        ?ctx
+        (fun (t : t) : Actor.t -> Actor.create `User (snd t))
+        actor
+    in
+    (* A user is always also a target (e.g. for self-update permissions) *)
+    let target_uuid =
+      actor_ent.Actor.uuid |> Uuid.Actor.to_string |> Uuid.Target.of_string_exn
+    in
+    let* () = Backend.Target.insert ?ctx (Target.create `User target_uuid) in
+    Lwt.return_ok actor_ent
   ;;
 
   let update_name ?ctx (actor : Actor.t) t new_name =

@@ -9,13 +9,10 @@ on:
 jobs:
   build:
     name: Build and test
-
     runs-on: ubuntu-latest
-
     env:
       MYSQL_DATABASE: test
       MYSQL_ROOT_PASSWORD: password
-
     services:
       database:
         image: mariadb:10.6
@@ -24,7 +21,6 @@ jobs:
           MYSQL_ROOT_PASSWORD: ${{ env.MYSQL_ROOT_PASSWORD }}
         ports: ['3306:3306']
         options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
-
     strategy:
       fail-fast: false
       matrix:
@@ -34,29 +30,25 @@ jobs:
           - 5.3
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v6
 
       - name: Retrieve opam cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         if: runner.os != 'Windows'
         id: cache-opam
         with:
           path: ~/.opam
           key: v1-${{ runner.os }}-opam-${{ matrix.ocaml-compiler }}-${{ hashFiles('*.opam.locked') }}
 
-      - name: Use OCaml ${{ matrix.ocaml-version }}
+      - name: Use OCaml ${{ matrix.ocaml-compiler }}
         uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: ${{ matrix.ocaml-compiler }}
           dune-cache: true
-          opam-pin: true
 
       - name: Install system dependencies
         run: sudo apt-get update -y && sudo apt-get install -y libmariadb-dev
-
-      - name: Install dependencies
-        run: opam install --deps-only --with-test --with-doc -y .
 
       - name: Recover from an Opam broken state
         if: steps.cache-opam.outputs.cache-hit == 'true'
@@ -64,30 +56,18 @@ jobs:
           opam install -y dune
           opam upgrade --fixup
 
-      - name: Build
-        run: |
-          make build
+      - name: Install dependencies
+        run: opam install --deps-only --with-test --with-doc -y .
 
-      - name: Check formatting
-        run: |
-          opam install -y ocamlformat
-          make format
+      - name: Build
+        run: make build
 
       - name: Run tests
         env:
           DATABASE_URL: mariadb://root:${{ env.MYSQL_ROOT_PASSWORD }}@127.0.0.1:3306/${{ env.MYSQL_DATABASE }}
         run: make test
 
-      - name: Build documentation
-        run: |
-          make doc
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: documentation-${{ matrix.ocaml-compiler }}
-          path: _build/default/_doc/_html
-
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: tests-${{ matrix.ocaml-compiler }}
@@ -99,20 +79,81 @@ jobs:
         with:
           webhook: ${{ secrets.ECON_TEAMS_WEBHOOK }}
 
+  lint-doc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tree
+        uses: actions/checkout@v6
+      - name: Install system dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y libmariadb-dev
+      - name: Set-up OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.3.0
+          opam-pin: true
+      - uses: ocaml/setup-ocaml/lint-doc@v3
+      - uses: actions/upload-artifact@v6
+        with:
+          name: documentation
+          path: _build/default/_doc/_html
+
+      - name: Notify about failure
+        if: failure()
+        uses: ./.github/actions/notify-failure
+        with:
+          webhook: ${{ secrets.ECON_TEAMS_WEBHOOK }}
+
+  lint-fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tree
+        uses: actions/checkout@v6
+      - name: Set-up OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.3.0
+      - uses: ocaml/setup-ocaml/lint-fmt@v3
+
+      - name: Notify about failure
+        if: failure()
+        uses: ./.github/actions/notify-failure
+        with:
+          webhook: ${{ secrets.ECON_TEAMS_WEBHOOK }}
+
+  lint-opam:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tree
+        uses: actions/checkout@v6
+      - name: Set-up OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.3.0
+      - uses: ocaml/setup-ocaml/lint-opam@v3
+
+      - name: Notify about failure
+        if: failure()
+        uses: ./.github/actions/notify-failure
+        with:
+          webhook: ${{ secrets.ECON_TEAMS_WEBHOOK }}
+
   deploy-doc:
     name: Deploy documentation
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [lint-doc]
     if: github.ref == 'refs/heads/main'
     environment:
       name: github-pages
       url: ${{ steps.deploy-doc.outputs.page_url }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Download all workflow run artifacts
-        uses: actions/download-artifact@v4
+      - name: Download documentation artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: documentation
+          path: documentation
 
       - name: Deploy odoc to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
@@ -132,7 +173,7 @@ jobs:
     if: github.ref_type == 'tag'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Extract version changelog
         run: sed -nr "/^## .?v?${GITHUB_REF_NAME}/,/^## /p" CHANGELOG.md | sed '1d;2d;$d' > changes.md

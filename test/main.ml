@@ -305,10 +305,9 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   ;;
 
   let can_update_self ?ctx (_ : 'a) () =
-    (let%lwt (_ : (Backend.target, string) result) =
-       UserTarget.to_authorizable ?ctx thomas
-     in
-     let%lwt thomas_auth = User.to_authorizable ?ctx thomas in
+    (* User.to_authorizable registers the user in both guardian_actors and
+       guardian_targets, so no separate UserTarget call is needed here. *)
+    (let%lwt thomas_auth = User.to_authorizable ?ctx thomas in
      match thomas_auth with
      | Ok thomas_user ->
        let as_target =
@@ -429,8 +428,8 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     let open Guard in
     let%lwt actual =
       let open Lwt_result.Syntax in
-      (* Note: a user can be an actor or a target, so 'to_authorizable' has to
-         be called for both roles *)
+      (* hugo is a contact/target-only user — managed by others but never logs
+         in, so only MakeTarget.to_authorizable is called (no actor row). *)
       let* target' = UserTarget.to_authorizable ?ctx hugo in
       let target_uuid = target'.Target.uuid in
       let* actor = User.to_authorizable ?ctx aron in
@@ -455,6 +454,43 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     |> Lwt.return
   ;;
 
+  let test_target_only_contact ?ctx (_ : 'a) () =
+    (* Verify the MakeTarget-only path: a contact that is a target of
+       permissions but never an actor (e.g. a passive user managed by admins). *)
+    let contact = "Contact", Uuid.Actor.create () in
+    let contact_uuid_as_target =
+      Guard.Uuid.(contact |> snd |> Actor.to_string |> Target.of_string_exn)
+    in
+    let open Lwt_result.Syntax in
+    let%lwt actual =
+      (* Register contact as target-only *)
+      let* _target_ent = UserTarget.to_authorizable ?ctx contact in
+      (* Contact has no actor row *)
+      let%lwt actor_lookup = Backend.Actor.find ?ctx (snd contact) in
+      Alcotest.(check bool)
+        "contact has no actor row"
+        true
+        (CCResult.is_error actor_lookup);
+      (* An admin can still hold a parametric role bound to the contact *)
+      let* _aron_ent = User.to_authorizable ?ctx aron in
+      let%lwt () =
+        ActorRole.create ~target_uuid:contact_uuid_as_target (snd aron) `Admin
+        |> Backend.ActorRole.upsert ?ctx
+      in
+      let* actor = Backend.Actor.find ?ctx (snd aron) in
+      let effects =
+        ValidationSet.one_of_tuple
+          (Permission.Manage, `User, Some contact_uuid_as_target)
+      in
+      Backend.validate ?ctx id effects actor
+    in
+    Alcotest.(check (result unit string))
+      "admin can manage a target-only contact"
+      (Ok ())
+      actual
+    |> Lwt.return
+  ;;
+
   let test_parametric_role_isolation ?ctx (_ : 'a) () =
     (* Verify that a role bound to a specific target UUID does NOT grant access
        to a different target UUID — parametric role isolation. *)
@@ -464,6 +500,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     let actor = Actor.create `User actor_uuid in
     let open Lwt.Infix in
     (let* () = Backend.Actor.insert ?ctx actor in
+     let* () = Backend.Target.insert ?ctx (Target.create `Article target_a) in
      let%lwt () =
        ActorRole.create ~target_uuid:target_a actor_uuid `Editor
        |> Backend.ActorRole.upsert ?ctx
@@ -1039,6 +1076,33 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   ;;
 end
 
+let role_model_tests =
+  let open Alcotest_lwt in
+  let handle mdl = function
+    | Ok _ ->
+      Alcotest.fail (Format.asprintf "Expected error for invalid %s string" mdl)
+    | Error _ -> ()
+  in
+  [ ( "Role/Actor/Target string parsing"
+    , [ test_case "invalid role" `Quick (fun _ () ->
+          CCList.iter
+            (Role.Role.of_string_res %> handle "role")
+            [ "superadmin"; ""; "admin,extra"; "123" ];
+          Lwt.return_unit)
+      ; test_case "invalid actor" `Quick (fun _ () ->
+          CCList.iter
+            (Role.Actor.of_string_res %> handle "actor")
+            [ "ghost"; ""; "admin,extra"; "user1" ];
+          Lwt.return_unit)
+      ; test_case "invalid target" `Quick (fun _ () ->
+          CCList.iter
+            (Role.Target.of_string_res %> handle "target")
+            [ "thing"; ""; "article,extra"; "note1" ];
+          Lwt.return_unit)
+      ] )
+  ]
+;;
+
 let () =
   let make_test_cases ?ctx (module Backend : Guard.PersistenceSig) name =
     let module T = Tests (Backend) in
@@ -1050,9 +1114,6 @@ let () =
               `Quick
               (test_invalid_permission_string ?ctx)
           ] )
-      ; ( "conflicting roles"
-        , [ test_case "conflicting roles" `Quick (test_conflicting_roles ?ctx) ]
-        )
       ; ( Format.asprintf "(%s) Managing authorizables." name
         , [ test_case
               "Create an authorizable."
@@ -1073,6 +1134,9 @@ let () =
           ; test_case "Read rules." `Quick (test_read_rules ?ctx)
           ; test_case "Save rule." `Quick (save_existing_rule ?ctx)
           ] )
+      ; ( "conflicting roles"
+        , [ test_case "conflicting roles" `Quick (test_conflicting_roles ?ctx) ]
+        )
       ; ( Format.asprintf "(%s) Admins should be able to do everything." name
         , [ test_case
               "Update someone else's article."
@@ -1112,6 +1176,10 @@ let () =
               "Parametric role isolation"
               `Quick
               (test_parametric_role_isolation ?ctx)
+          ; test_case
+              "Target-only contact"
+              `Quick
+              (test_target_only_contact ?ctx)
           ] )
       ; ( Format.asprintf
             "(%s) Transistancy, manager of `x` shouldn't be able to update \
@@ -1209,6 +1277,6 @@ let () =
   let%lwt () = Maria.delete ~ctx () in
   let%lwt () = Maria.migrate ~ctx () in
   let%lwt () = Maria.clean ~ctx () in
-  make_test_cases ~ctx (module Maria) "MariadDB Backend"
+  role_model_tests @ make_test_cases ~ctx (module Maria) "MariadDB Backend"
   |> Alcotest_lwt.run "Authorization"
 ;;

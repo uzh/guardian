@@ -11,6 +11,10 @@
   result
   sexplib0
   uri)
+ (ocamlopt_flags
+  (:standard -O3))
+ (flags
+  (:standard -w -32))
  (preprocess
   (pps
    lwt_ppx

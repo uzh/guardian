@@ -1206,7 +1206,7 @@ struct
           sql query **)
       let find_clean () =
         Migrations.all_tables
-        |> CCList.map (fun m -> m, Format.asprintf "TRUNCATE TABLE %s" m)
+        |> CCList.map (fun m -> m, [%string "TRUNCATE TABLE %{m}"])
       ;;
 
       (** [migrate ?ctx ()] runs all migration on a specified context [?ctx] **)
@@ -1218,24 +1218,21 @@ struct
           Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
       ;;
 
-      (** [clean ?ctx ()] runs clean on a specified context [?ctx] **)
-      let clean ?ctx () =
-        ()
-        |> find_clean
+      let run_without_fk_checks ?ctx label stmts =
+        (("disable foreign key checks", "SET FOREIGN_KEY_CHECKS = 0") :: stmts)
+        @ [ "enable foreign key checks", "SET FOREIGN_KEY_CHECKS = 1" ]
         |> Lwt_list.iter_s (fun (key, sql) ->
-          Logs.debug ~src (fun m -> m "Clean: Run '%s'" key);
+          Logs.debug ~src (fun m -> m "%s: Run '%s'" label key);
           Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
       ;;
+
+      (** [clean ?ctx ()] runs clean on a specified context [?ctx] **)
+      let clean ?ctx () = find_clean () |> run_without_fk_checks ?ctx "Clean"
 
       let delete ?ctx () =
         Migrations.all_tables
         |> CCList.map (fun m -> m, Format.asprintf "DROP TABLE IF EXISTS %s" m)
-        |> fun deletes ->
-        (("skip foreign key set", "SET FOREIGN_KEY_CHECKS = 0") :: deletes)
-        @ [ "add foreign key check", "SET FOREIGN_KEY_CHECKS = 1" ]
-        |> Lwt_list.iter_s (fun (key, sql) ->
-          Logs.debug ~src (fun m -> m "Delete: Run '%s'" key);
-          Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
+        |> run_without_fk_checks ?ctx "Delete"
       ;;
     end)
 end
