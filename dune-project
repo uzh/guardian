@@ -68,12 +68,10 @@
    (>= 3.6.1))
   (ppx_sexp_conv
    (>= 0.15.1))
-  (ppx_string
-   (>= v0.16.0))
+  ppx_string
   (result
    (>= 1.5))
-  (sexplib0
-   (>= v0.17.0))
+  sexplib0
   (uri
    (>= 4.2.0))
   (uuidm
