@@ -4,6 +4,29 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [unreleased](https://github.com/uzh/guardian/tree/HEAD)
 
+## [0.4.0](https://github.com/uzh/guardian/tree/0.4.0) - 2026-04-07
+
+### Added
+
+- GitHub Actions for `lint-fmt` and `lint-opam`
+- Backend LRU cache for authentication requests
+
+### Fixed
+
+- Typo in the `additional_pools` argument for the pool `initialize` function
+
+### Changed
+
+- Updated GitHub Actions
+- Improved performance of the validation function
+- Changed argument from `~matches` to `~required` for the `Permission.is_valid` function for better clarity
+- Increased consistency for function outputs: `of_string` always returns an `option`, `_exn` raises exceptions, and `_res` returns a `result`
+
+### Removed
+
+- Deprecated `start` function
+- Removed `guardian.opam.locked` file; as this is a library, it should not have a lock file
+
 ## [0.3.4](https://github.com/uzh/guardian/tree/0.3.4) - 2025-11-07
 
 ### Fixed
