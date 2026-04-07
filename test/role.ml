@@ -9,19 +9,21 @@ module Role = struct
     ]
   [@@deriving show, eq, ord, yojson, sexp_of]
 
-  let name = show %> Guardian.Utils.decompose_variant_string %> fst
+  let name = show %> Guardian.Utils.decompose_variant_string_exn %> fst
 
   let of_string_res =
     Guardian.Utils.decompose_variant_string
     %> function
-    | "admin", [] -> Ok `Admin
-    | "author", [] -> Ok `Author
-    | "editor", [] -> Ok `Editor
-    | "reader", [] -> Ok `Reader
-    | role -> Error (Guardian.Utils.invalid_role role)
+    | Some ("admin", []) -> Ok `Admin
+    | Some ("author", []) -> Ok `Author
+    | Some ("editor", []) -> Ok `Editor
+    | Some ("reader", []) -> Ok `Reader
+    | Some role -> Error (Guardian.Utils.invalid_role role)
+    | None -> Error (Guardian.Utils.invalid_role ("invalid format", []))
   ;;
 
-  let of_string = of_string_res %> CCResult.get_or_failwith
+  let of_string = of_string_res %> CCResult.to_option
+  let of_string_exn = of_string_res %> CCResult.get_or_failwith
   let all = [ `Admin; `Author; `Editor; `Reader ]
 end
 
@@ -33,18 +35,20 @@ module Actor = struct
     ]
   [@@deriving show, eq, ord, yojson, sexp_of]
 
-  let name = show %> Guardian.Utils.decompose_variant_string %> fst
+  let name = show %> Guardian.Utils.decompose_variant_string_exn %> fst
 
   let of_string_res =
     Guardian.Utils.decompose_variant_string
     %> function
-    | "admin", [] -> Ok `Admin
-    | "hacker", [] -> Ok `Hacker
-    | "user", [] -> Ok `User
-    | role -> Error (Guardian.Utils.invalid_role role)
+    | Some ("admin", []) -> Ok `Admin
+    | Some ("hacker", []) -> Ok `Hacker
+    | Some ("user", []) -> Ok `User
+    | Some role -> Error (Guardian.Utils.invalid_role role)
+    | None -> Error (Guardian.Utils.invalid_role ("invalid format", []))
   ;;
 
-  let of_string = of_string_res %> CCResult.get_or_failwith
+  let of_string = of_string_res %> CCResult.to_option
+  let of_string_exn = of_string_res %> CCResult.get_or_failwith
   let all = [ `Admin; `Hacker; `User ]
 end
 
@@ -57,18 +61,20 @@ module Target = struct
     ]
   [@@deriving show, eq, ord, yojson, sexp_of]
 
-  let name = show %> Guardian.Utils.decompose_variant_string %> fst
+  let name = show %> Guardian.Utils.decompose_variant_string_exn %> fst
 
   let of_string_res =
     Guardian.Utils.decompose_variant_string
     %> function
-    | "article", [] -> Ok `Article
-    | "note", [] -> Ok `Note
-    | "post", [] -> Ok `Post
-    | "user", [] -> Ok `User
-    | role -> Error (Guardian.Utils.invalid_role role)
+    | Some ("article", []) -> Ok `Article
+    | Some ("note", []) -> Ok `Note
+    | Some ("post", []) -> Ok `Post
+    | Some ("user", []) -> Ok `User
+    | Some role -> Error (Guardian.Utils.invalid_role role)
+    | None -> Error (Guardian.Utils.invalid_role ("invalid format", []))
   ;;
 
-  let of_string = of_string_res %> CCResult.get_or_failwith
+  let of_string = of_string_res %> CCResult.to_option
+  let of_string_exn = of_string_res %> CCResult.get_or_failwith
   let all = [ `Article; `Note; `Post; `User ]
 end

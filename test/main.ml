@@ -79,6 +79,43 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   let ( let* ) = Lwt_result.bind
   let ( >|= ) = Lwt.Infix.( >|= )
 
+  let test_invalid_permission_string
+        ?(ctx : Guardian__Persistence.context option)
+        (_ : 'a)
+        ()
+    : unit Lwt.t
+    =
+    let _ = ctx in
+    [ "superperm"; ""; "create,extra"; "123" ]
+    |> Lwt_list.iter_s
+         (Permission.of_string_res
+          %> function
+          | Ok (_ : Permission.t) ->
+            Alcotest.fail "Expected error for invalid permission string"
+          | Error (_ : string) -> Lwt.return_unit)
+  ;;
+
+  let test_conflicting_roles ?ctx (_ : 'a) () =
+    (* User with both Editor and Reader roles, Editor grants Update, Reader denies *)
+    let user = "Multi", Uuid.Actor.create () in
+    let%lwt user_ent =
+      match%lwt User.to_authorizable ?ctx user with
+      | Ok u -> Lwt.return u
+      | Error msg -> Alcotest.failf "Failed to create user entity: %s" msg
+    in
+    let editor_role = ActorRole.create (snd user) `Editor in
+    let reader_role = ActorRole.create (snd user) `Reader in
+    let%lwt () = Backend.ActorRole.upsert ?ctx editor_role in
+    let%lwt () = Backend.ActorRole.upsert ?ctx reader_role in
+    let set = ValidationSet.one_of_tuple (Update, `Article, None) in
+    let%lwt result = Backend.validate ?ctx id set user_ent in
+    Alcotest.(check (result unit string))
+      "Conflicting roles: Editor should allow Update"
+      (Ok ())
+      result;
+    Lwt.return_unit
+  ;;
+
   let test_create_authorizable ?ctx (_ : 'a) () =
     let expected =
       ( ActorRole.create ~target_uuid:chris_article_id (snd chris) `Author
@@ -131,7 +168,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     in
     Backend.ActorRole.find_by_actor ?ctx (snd aron)
     >|= of_list
-    >|= CCFun.flip diff previous_roles
+    >|= flip diff previous_roles
     >|= Alcotest.(check testable_actor_role_set)
           "Check if the role was granted."
           (ActorRoleSet.singleton grant_role)
@@ -268,10 +305,9 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   ;;
 
   let can_update_self ?ctx (_ : 'a) () =
-    (let%lwt (_ : (Backend.target, string) result) =
-       UserTarget.to_authorizable ?ctx thomas
-     in
-     let%lwt thomas_auth = User.to_authorizable ?ctx thomas in
+    (* User.to_authorizable registers the user in both guardian_actors and
+       guardian_targets, so no separate UserTarget call is needed here. *)
+    (let%lwt thomas_auth = User.to_authorizable ?ctx thomas in
      match thomas_auth with
      | Ok thomas_user ->
        let as_target =
@@ -305,13 +341,13 @@ module Tests (Backend : Guard.PersistenceSig) = struct
      in
      let* thomas_actor = User.to_authorizable ?ctx thomas in
      let validate_test (fcn : string -> string) msg set expected =
-       Backend.validate ?ctx CCFun.id set thomas_actor
+       Backend.validate ?ctx id set thomas_actor
        |> Lwt_result.map_error fcn
        |> Lwt.map (check (result unit string) msg expected)
      in
      let%lwt () =
        validate_test
-         CCFun.id
+         id
          "Reader can read a note he's reader/owner of."
          (one_of_tuple (Permission.Read, `Note, Some thomas_note.Notes.id))
          (Ok ())
@@ -392,8 +428,8 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     let open Guard in
     let%lwt actual =
       let open Lwt_result.Syntax in
-      (* Note: a user can be an actor or a target, so 'to_authorizable' has to
-         be called for both roles *)
+      (* hugo is a contact/target-only user — managed by others but never logs
+         in, so only MakeTarget.to_authorizable is called (no actor row). *)
       let* target' = UserTarget.to_authorizable ?ctx hugo in
       let target_uuid = target'.Target.uuid in
       let* actor = User.to_authorizable ?ctx aron in
@@ -409,13 +445,87 @@ module Tests (Backend : Guard.PersistenceSig) = struct
       let effects =
         ValidationSet.one_of_tuple (Permission.Manage, `User, Some target_uuid)
       in
-      Backend.validate ?ctx CCFun.id effects actor
+      Backend.validate ?ctx id effects actor
     in
     Alcotest.(check (result unit string))
       "Parametric roles work."
       (Ok ())
       actual
     |> Lwt.return
+  ;;
+
+  let test_target_only_contact ?ctx (_ : 'a) () =
+    (* Verify the MakeTarget-only path: a contact that is a target of
+       permissions but never an actor (e.g. a passive user managed by admins). *)
+    let contact = "Contact", Uuid.Actor.create () in
+    let contact_uuid_as_target =
+      Guard.Uuid.(contact |> snd |> Actor.to_string |> Target.of_string_exn)
+    in
+    let open Lwt_result.Syntax in
+    let%lwt actual =
+      (* Register contact as target-only *)
+      let* _target_ent = UserTarget.to_authorizable ?ctx contact in
+      (* Contact has no actor row *)
+      let%lwt actor_lookup = Backend.Actor.find ?ctx (snd contact) in
+      Alcotest.(check bool)
+        "contact has no actor row"
+        true
+        (CCResult.is_error actor_lookup);
+      (* An admin can still hold a parametric role bound to the contact *)
+      let* _aron_ent = User.to_authorizable ?ctx aron in
+      let%lwt () =
+        ActorRole.create ~target_uuid:contact_uuid_as_target (snd aron) `Admin
+        |> Backend.ActorRole.upsert ?ctx
+      in
+      let* actor = Backend.Actor.find ?ctx (snd aron) in
+      let effects =
+        ValidationSet.one_of_tuple
+          (Permission.Manage, `User, Some contact_uuid_as_target)
+      in
+      Backend.validate ?ctx id effects actor
+    in
+    Alcotest.(check (result unit string))
+      "admin can manage a target-only contact"
+      (Ok ())
+      actual
+    |> Lwt.return
+  ;;
+
+  let test_parametric_role_isolation ?ctx (_ : 'a) () =
+    (* Verify that a role bound to a specific target UUID does NOT grant access
+       to a different target UUID — parametric role isolation. *)
+    let actor_uuid = Uuid.Actor.create () in
+    let target_a = Uuid.Target.create () in
+    let target_b = Uuid.Target.create () in
+    let actor = Actor.create `User actor_uuid in
+    let open Lwt.Infix in
+    (let* () = Backend.Actor.insert ?ctx actor in
+     let* () = Backend.Target.insert ?ctx (Target.create `Article target_a) in
+     let%lwt () =
+       ActorRole.create ~target_uuid:target_a actor_uuid `Editor
+       |> Backend.ActorRole.upsert ?ctx
+     in
+     let check_access msg expected target =
+       Backend.validate
+         ?ctx
+         id
+         (ValidationSet.one_of_tuple (Update, `Article, Some target))
+         actor
+       >|= fun result ->
+       Alcotest.(check bool) msg expected (CCResult.is_ok result)
+     in
+     let* () =
+       check_access "Editor on target_a is granted" true target_a
+       |> Lwt_result.ok
+     in
+     let* () =
+       check_access "Editor on target_a is denied for target_b" false target_b
+       |> Lwt_result.ok
+     in
+     Lwt.return_ok ())
+    >|= Alcotest.(check (result unit string))
+          "Parametric role isolation."
+          (Ok ())
   ;;
 
   let transistency_deny ?ctx (_ : 'a) () =
@@ -443,7 +553,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     let result =
       let validation_set = ValidationSet.one_of_tuple (Read, `Post, None) in
       let* actor = User.to_authorizable ?ctx chris in
-      Backend.validate ?ctx CCFun.id validation_set actor
+      Backend.validate ?ctx id validation_set actor
     in
     result
     >|= Alcotest.(check (result unit string))
@@ -630,7 +740,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   ;;
 
   let test_role_assignment_create ?ctx (_ : 'a) () =
-    let create_assignable = CCList.map (CCFun.uncurry RoleAssignment.create) in
+    let create_assignable = CCList.map (uncurry RoleAssignment.create) in
     let sort = CCList.stable_sort RoleAssignment.compare in
     let admin_objs = [ `Admin, `Reader ] |> create_assignable in
     let author_objs =
@@ -659,7 +769,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   ;;
 
   let test_role_assignment_delete ?ctx (_ : 'a) () =
-    let create_assignable = CCList.map (CCFun.uncurry RoleAssignment.create) in
+    let create_assignable = CCList.map (uncurry RoleAssignment.create) in
     let sort = CCList.stable_sort RoleAssignment.compare in
     let delete_obj = RoleAssignment.create `Admin `Editor in
     let expected_objs =
@@ -689,7 +799,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   ;;
 
   let test_role_assignment_can_assign ?ctx (_ : 'a) () =
-    let create_assignable = CCList.map (CCFun.uncurry RoleAssignment.create) in
+    let create_assignable = CCList.map (uncurry RoleAssignment.create) in
     let admin_objs =
       [ `Admin, `Author; `Admin, `Editor ] |> create_assignable
     in
@@ -727,14 +837,284 @@ module Tests (Backend : Guard.PersistenceSig) = struct
     in
     Lwt.return_unit
   ;;
+
+  (* pure edge-case tests (no DB) *)
+
+  let test_decompose_variant_string ?ctx:_ (_ : 'a) () =
+    let check msg expected s =
+      Alcotest.(check (option (pair string (list string))))
+        msg
+        expected
+        (Guardian.Utils.decompose_variant_string s)
+    in
+    check "backtick-prefixed" (Some ("admin", [])) "`admin";
+    check "uppercase normalised" (Some ("admin", [])) "`Admin";
+    check "leading/trailing whitespace" (Some ("admin", [])) "  `admin  ";
+    check "two params" (Some ("role", [ "foo"; "bar" ])) "`role(foo, bar)";
+    check
+      "params with extra spaces"
+      (Some ("role", [ "foo"; "bar" ]))
+      "`role(  foo  ,  bar  )";
+    check "single param" (Some ("role", [ "foo" ])) "`role(foo)";
+    check "no backtick returns None" None "admin";
+    check "empty string returns None" None "";
+    Lwt.return_unit
+  ;;
+
+  let test_decompose_variant_string_exn ?ctx:_ (_ : 'a) () =
+    Alcotest.(check (pair string (list string)))
+      "valid backtick"
+      ("admin", [])
+      (Guardian.Utils.decompose_variant_string_exn "`admin");
+    Alcotest.(check (pair string (list string)))
+      "with params"
+      ("role", [ "foo"; "bar" ])
+      (Guardian.Utils.decompose_variant_string_exn "`role(foo, bar)");
+    (match Guardian.Utils.decompose_variant_string_exn "no_backtick" with
+     | _ -> Alcotest.fail "Expected exception for non-variant string"
+     | exception (Failure _ | Invalid_argument _) -> ());
+    Lwt.return_unit
+  ;;
+
+  let test_permission_edge_cases ?ctx:_ (_ : 'a) () =
+    let testable_perm = Alcotest.testable Permission.pp Permission.equal in
+    let check_none msg s =
+      Alcotest.(check (option testable_perm)) msg None (Permission.of_string s)
+    in
+    let check_some msg expected s =
+      Alcotest.(check (option testable_perm))
+        msg
+        (Some expected)
+        (Permission.of_string s)
+    in
+    check_none "uppercase CREATE" "CREATE";
+    check_none "mixed case Read" "Read";
+    check_none "leading space" " read";
+    check_none "trailing space" "read ";
+    check_none "both spaces" " manage ";
+    check_some "create" Create "create";
+    check_some "read" Read "read";
+    check_some "update" Update "update";
+    check_some "delete" Delete "delete";
+    check_some "manage" Manage "manage";
+    Lwt.return_unit
+  ;;
+
+  let test_uuid_parsing ?ctx:_ (_ : 'a) () =
+    let valid = "550e8400-e29b-41d4-a716-446655440000" in
+    Alcotest.(check bool)
+      "valid uuid accepted"
+      true
+      (Uuid.Actor.of_string_res valid |> CCResult.is_ok);
+    Alcotest.(check bool)
+      "invalid hex rejected"
+      false
+      (Uuid.Actor.of_string_res "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+       |> CCResult.is_ok);
+    Alcotest.(check bool)
+      "empty string rejected"
+      false
+      (Uuid.Actor.of_string_res "" |> CCResult.is_ok);
+    Alcotest.(check bool)
+      "too short rejected"
+      false
+      (Uuid.Actor.of_string_res "550e8400-e29b" |> CCResult.is_ok);
+    let uuid = Uuid.Actor.create () in
+    (match Uuid.Actor.of_string_res (Uuid.Actor.to_string uuid) with
+     | Ok roundtripped ->
+       Alcotest.(check bool)
+         "actor uuid roundtrip"
+         true
+         (Uuid.Actor.equal uuid roundtripped)
+     | Error msg -> Alcotest.failf "Actor UUID roundtrip failed: %s" msg);
+    (match Uuid.Target.of_string_res valid with
+     | Ok _ -> ()
+     | Error _ -> Alcotest.fail "Target uuid should accept valid string");
+    Lwt.return_unit
+  ;;
+
+  let test_role_conversion ?ctx:_ (_ : 'a) () =
+    Alcotest.(check bool)
+      "Actor: no backtick is error"
+      true
+      (Role.Actor.of_string_res "admin" |> CCResult.is_error);
+    Alcotest.(check bool)
+      "Actor: empty string is error"
+      true
+      (Role.Actor.of_string_res "" |> CCResult.is_error);
+    Alcotest.(check bool)
+      "Actor: unknown role is error"
+      true
+      (Role.Actor.of_string_res "`superuser" |> CCResult.is_error);
+    Alcotest.(check bool)
+      "Actor: `user is ok"
+      true
+      (Role.Actor.of_string_res "`user" |> CCResult.is_ok);
+    Alcotest.(check bool)
+      "Actor: `User (uppercase) is ok"
+      true
+      (Role.Actor.of_string_res "`User" |> CCResult.is_ok);
+    Alcotest.(check bool)
+      "Role: no backtick is error"
+      true
+      (Role.Role.of_string_res "author" |> CCResult.is_error);
+    Alcotest.(check bool)
+      "Role: `Author is ok"
+      true
+      (Role.Role.of_string_res "`Author" |> CCResult.is_ok);
+    Alcotest.(check bool)
+      "Target: `Article is ok"
+      true
+      (Role.Target.of_string_res "`Article" |> CCResult.is_ok);
+    Alcotest.(check bool)
+      "Target: unknown is error"
+      true
+      (Role.Target.of_string_res "`Unknown" |> CCResult.is_error);
+    Lwt.return_unit
+  ;;
+
+  let test_validate_extended ?ctx:_ (_ : 'a) () =
+    let open PermissionOnTarget in
+    let read = (Read, `Article, None) |> of_tuple in
+    Alcotest.(check bool)
+      "empty grant list returns false"
+      false
+      (validate read []);
+    let id1 = Uuid.Target.create () in
+    let id2 = Uuid.Target.create () in
+    let read_id1 = (Read, `Article, Some id1) |> of_tuple in
+    let read_id2 = (Read, `Article, Some id2) |> of_tuple in
+    Alcotest.(check bool)
+      "different ids without any_id returns false"
+      false
+      (validate read_id1 [ read_id2 ]);
+    Alcotest.(check bool)
+      "different ids with any_id=true returns true"
+      true
+      (validate ~any_id:true read_id1 [ read_id2 ]);
+    Alcotest.(check bool)
+      "model-level read vs id-specific manage returns false"
+      false
+      (validate read [ (Manage, `Article, Some id1) |> of_tuple ]);
+    Alcotest.(check bool)
+      "manage on wrong model returns false"
+      false
+      (validate read [ (Manage, `Note, None) |> of_tuple ]);
+    Alcotest.(check bool)
+      "read not satisfied by create returns false"
+      false
+      (validate read [ (Create, `Article, None) |> of_tuple ]);
+    Lwt.return_unit
+  ;;
+
+  let test_remove_duplicates_extended ?ctx:_ (_ : 'a) () =
+    let open PermissionOnTarget in
+    let check msg expected input =
+      Alcotest.(check (list testable_permission_on_target))
+        msg
+        expected
+        (remove_duplicates input)
+    in
+    check "empty list" [] [];
+    let read = (Read, `Article, None) |> of_tuple in
+    let manage = (Manage, `Article, None) |> of_tuple in
+    let id1 = Uuid.Target.create () in
+    let manage_id = (Manage, `Article, Some id1) |> of_tuple in
+    let read_id = (Read, `Article, Some id1) |> of_tuple in
+    check "single model permission kept" [ read ] [ read ];
+    check "manage model supersedes model-level read" [ manage ] [ read; manage ];
+    check "manage model supersedes manage id" [ manage ] [ manage_id; manage ];
+    check "id-level manage kept without model-level" [ manage_id ] [ manage_id ];
+    check "manage model supersedes read id" [ manage ] [ read_id; manage ];
+    let read_note = (Read, `Note, None) |> of_tuple in
+    check "different models both kept" [ read; read_note ] [ read; read_note ];
+    Lwt.return_unit
+  ;;
+
+  (* DB-backed edge-case tests *)
+
+  let test_validation_set_degenerate ?ctx (_ : 'a) () =
+    let actor = Actor.create `User (Uuid.Actor.create ()) in
+    let%lwt result = Backend.validate ?ctx id ValidationSet.empty actor in
+    Alcotest.(check (result unit string))
+      "Or [] (empty ValidationSet) is allowed"
+      (Ok ())
+      result;
+    let%lwt result = Backend.validate ?ctx id (ValidationSet.And []) actor in
+    Alcotest.(check (result unit string))
+      "And [] is allowed by vacuous truth"
+      (Ok ())
+      result;
+    Lwt.return_unit
+  ;;
+
+  let test_actor_no_roles ?ctx (_ : 'a) () =
+    let actor = Actor.create `User (Uuid.Actor.create ()) in
+    let%lwt result =
+      Backend.validate
+        ?ctx
+        id
+        (ValidationSet.one_of_tuple (Read, `Article, None))
+        actor
+    in
+    Alcotest.(check bool)
+      "actor with no roles denied for Read"
+      true
+      (CCResult.is_error result);
+    let%lwt result =
+      Backend.validate
+        ?ctx
+        id
+        (ValidationSet.one_of_tuple (Manage, `Article, None))
+        actor
+    in
+    Alcotest.(check bool)
+      "actor with no roles denied for Manage"
+      true
+      (CCResult.is_error result);
+    Lwt.return_unit
+  ;;
 end
+
+let role_model_tests =
+  let open Alcotest_lwt in
+  let handle mdl = function
+    | Ok _ ->
+      Alcotest.fail (Format.asprintf "Expected error for invalid %s string" mdl)
+    | Error _ -> ()
+  in
+  [ ( "Role/Actor/Target string parsing"
+    , [ test_case "invalid role" `Quick (fun _ () ->
+          CCList.iter
+            (Role.Role.of_string_res %> handle "role")
+            [ "superadmin"; ""; "admin,extra"; "123" ];
+          Lwt.return_unit)
+      ; test_case "invalid actor" `Quick (fun _ () ->
+          CCList.iter
+            (Role.Actor.of_string_res %> handle "actor")
+            [ "ghost"; ""; "admin,extra"; "user1" ];
+          Lwt.return_unit)
+      ; test_case "invalid target" `Quick (fun _ () ->
+          CCList.iter
+            (Role.Target.of_string_res %> handle "target")
+            [ "thing"; ""; "article,extra"; "note1" ];
+          Lwt.return_unit)
+      ] )
+  ]
+;;
 
 let () =
   let make_test_cases ?ctx (module Backend : Guard.PersistenceSig) name =
     let module T = Tests (Backend) in
     let open Alcotest_lwt in
     T.
-      [ ( Format.asprintf "(%s) Managing authorizables." name
+      [ ( "invalid permission string"
+        , [ test_case
+              "invalid permission"
+              `Quick
+              (test_invalid_permission_string ?ctx)
+          ] )
+      ; ( Format.asprintf "(%s) Managing authorizables." name
         , [ test_case
               "Create an authorizable."
               `Quick
@@ -754,6 +1134,9 @@ let () =
           ; test_case "Read rules." `Quick (test_read_rules ?ctx)
           ; test_case "Save rule." `Quick (save_existing_rule ?ctx)
           ] )
+      ; ( "conflicting roles"
+        , [ test_case "conflicting roles" `Quick (test_conflicting_roles ?ctx) ]
+        )
       ; ( Format.asprintf "(%s) Admins should be able to do everything." name
         , [ test_case
               "Update someone else's article."
@@ -788,7 +1171,16 @@ let () =
       ; ( Format.asprintf "(%s) Managing ownership." name
         , [ test_case "Set owner" `Quick (set_author ?ctx) ] )
       ; ( Format.asprintf "(%s) Use parametric roles." name
-        , [ test_case "Parametric editor role" `Quick (operator_works ?ctx) ] )
+        , [ test_case "Parametric editor role" `Quick (operator_works ?ctx)
+          ; test_case
+              "Parametric role isolation"
+              `Quick
+              (test_parametric_role_isolation ?ctx)
+          ; test_case
+              "Target-only contact"
+              `Quick
+              (test_target_only_contact ?ctx)
+          ] )
       ; ( Format.asprintf
             "(%s) Transistancy, manager of `x` shouldn't be able to update \
              `x.a`."
@@ -811,6 +1203,53 @@ let () =
         , [ test_case "create" `Quick (test_role_assignment_create ?ctx)
           ; test_case "delete" `Quick (test_role_assignment_delete ?ctx)
           ; test_case "can assign" `Quick (test_role_assignment_can_assign ?ctx)
+          ] )
+      ; ( "Utils: decompose_variant_string"
+        , [ test_case
+              "option variant"
+              `Quick
+              (test_decompose_variant_string ?ctx)
+          ] )
+      ; ( "Utils: decompose_variant_string_exn"
+        , [ test_case
+              "exn variant"
+              `Quick
+              (test_decompose_variant_string_exn ?ctx)
+          ] )
+      ; ( "Permission: edge cases"
+        , [ test_case
+              "case sensitivity and whitespace"
+              `Quick
+              (test_permission_edge_cases ?ctx)
+          ] )
+      ; ( "UUID: string parsing"
+        , [ test_case
+              "valid, invalid and roundtrip"
+              `Quick
+              (test_uuid_parsing ?ctx)
+          ] )
+      ; ( "Role: string conversion"
+        , [ test_case
+              "backtick, case and unknown"
+              `Quick
+              (test_role_conversion ?ctx)
+          ] )
+      ; ( "PermissionOnTarget: validate edge cases"
+        , [ test_case "edge cases" `Quick (test_validate_extended ?ctx) ] )
+      ; ( "PermissionOnTarget: remove_duplicates edge cases"
+        , [ test_case "edge cases" `Quick (test_remove_duplicates_extended ?ctx)
+          ] )
+      ; ( Format.asprintf "(%s) ValidationSet degenerate cases" name
+        , [ test_case
+              "Or [] and And [] are allowed"
+              `Quick
+              (test_validation_set_degenerate ?ctx)
+          ] )
+      ; ( Format.asprintf "(%s) Actor with no DB roles" name
+        , [ test_case
+              "denied for any One permission"
+              `Quick
+              (test_actor_no_roles ?ctx)
           ] )
       ]
   in
@@ -838,6 +1277,6 @@ let () =
   let%lwt () = Maria.delete ~ctx () in
   let%lwt () = Maria.migrate ~ctx () in
   let%lwt () = Maria.clean ~ctx () in
-  make_test_cases ~ctx (module Maria) "MariadDB Backend"
+  role_model_tests @ make_test_cases ~ctx (module Maria) "MariadDB Backend"
   |> Alcotest_lwt.run "Authorization"
 ;;

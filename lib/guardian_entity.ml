@@ -1,7 +1,5 @@
 open CCFun.Infix
 
-let src = Logs.Src.create "guardian"
-
 type context = Persistence.context
 
 module type RoleSig = Role.Sig
@@ -159,17 +157,17 @@ struct
              CCList.mem (of_tuple (Permission.Manage, model, target_uuid)) perms
            in
            match target_uuid with
-           | None when is_manage_model () -> init @ [ permission_on_target ]
+           | None when is_manage_model () -> permission_on_target :: init
            | None when manage_permission () -> init
-           | None -> init @ [ permission_on_target ]
+           | None -> permission_on_target :: init
            | Some _
              when Permission.(equal Manage permission)
-                  && model_permission () |> not ->
-             init @ [ permission_on_target ]
+                  && model_permission () |> not -> permission_on_target :: init
            | Some _ when model_permission () || manage_permission () -> init
-           | Some _ -> init @ [ permission_on_target ])
+           | Some _ -> permission_on_target :: init)
         []
         perms
+      |> CCList.rev
     ;;
 
     let validate ?(any_id = false) =
@@ -218,7 +216,7 @@ struct
       { role : Role.t
       ; target_role : Role.t
       }
-    [@@deriving eq, show, ord, yojson, sexp_of, fields ~getters]
+    [@@deriving eq, show, ord, yojson, sexp_of]
 
     let create role target_role = { role; target_role }
   end
@@ -257,55 +255,52 @@ struct
 
     let clear_cache () = Repo.clear_cache ()
 
+    let insert_all_items insert ?ctx items =
+      let%lwt successes, failures =
+        Lwt_list.fold_left_s
+          (fun (ok, err) x ->
+             match%lwt insert ?ctx x with
+             | Ok () -> Lwt.return (x :: ok, err)
+             | Error (_ : string) -> Lwt.return (ok, x :: err))
+          ([], [])
+          items
+      in
+      match failures with
+      | [] -> Lwt_result.return (CCList.rev successes)
+      | _ -> Lwt_result.fail (CCList.rev failures)
+    ;;
+
+    (** [decorate_entity get_uuid insert find to_entity ?ctx x] is the shared
+        implementation for [Actor.decorate] and [Target.decorate]. It upserts
+        the entity (idempotent) and returns the current DB state, removing the
+        need for a separate existence check. *)
+    let decorate_entity get_uuid insert find ?ctx to_entity x =
+      let open Lwt_result.Syntax in
+      let entity = to_entity x in
+      let* () = insert ?ctx entity in
+      find ?ctx (get_uuid entity)
+    ;;
+
     module RolePermission = struct
       include Repo.RolePermission
 
-      let insert_all ?ctx =
-        Lwt_list.fold_left_s
-          (fun acc x ->
-             match%lwt insert ?ctx x with
-             | Ok () -> CCResult.map (CCList.cons x) acc |> Lwt_result.lift
-             | Error (_ : string) ->
-               CCResult.map_err (CCList.cons x) acc |> Lwt_result.lift)
-          (Ok [])
-      ;;
+      let insert_all ?ctx = insert_all_items insert ?ctx
     end
 
     module ActorPermission = struct
       include Repo.ActorPermission
 
-      let insert_all ?ctx =
-        Lwt_list.fold_left_s
-          (fun acc x ->
-             match%lwt insert ?ctx x with
-             | Ok () -> CCResult.map (CCList.cons x) acc |> Lwt_result.lift
-             | Error (_ : string) ->
-               CCResult.map_err (CCList.cons x) acc |> Lwt_result.lift)
-          (Ok [])
-      ;;
+      let insert_all ?ctx = insert_all_items insert ?ctx
     end
 
     module Actor = struct
       include Actor
       include Repo.Actor
 
-      (** [decorate ?ctx to_actor] This convenience function should be used to
-          decorate the [actor] * functions of authorizable modules. The newly
-          decorated function connects * to the persistent backend to ensure that
-          the authorizable's roles and ownership * are consistent in both
-          spaces. *)
-      let decorate ?ctx (to_actor : 'a -> actor)
-        : 'a -> (actor, string) Lwt_result.t
-        =
-        fun x ->
-        let open Lwt_result.Syntax in
-        let ({ Actor.uuid; _ } as entity : actor) = to_actor x in
-        let* mem = mem ?ctx uuid in
-        if mem
-        then find ?ctx uuid
-        else
-          let* () = insert ?ctx entity in
-          Lwt.return_ok entity
+      (** [decorate ?ctx to_actor] ensures the actor exists in the persistent
+          backend (idempotent upsert) and returns the current stored state. *)
+      let decorate ?ctx =
+        decorate_entity (fun (e : actor) -> e.Actor.uuid) insert find ?ctx
       ;;
     end
 
@@ -318,23 +313,10 @@ struct
       include Target
       include Repo.Target
 
-      (** [decorate ?ctx to_target] This convenience function should be used to
-          decorate the [target] * functions of authorizable modules. The newly
-          decorated function connects * to the persistent backend to ensure that
-          the authorizable's roles and ownership * are consistent in both
-          spaces. *)
-      let decorate ?ctx (to_target : 'a -> target)
-        : 'a -> (target, string) Lwt_result.t
-        =
-        fun x ->
-        let open Lwt_result.Syntax in
-        let ({ Target.uuid; _ } as entity : target) = to_target x in
-        let* mem = mem ?ctx uuid in
-        if mem
-        then find ?ctx uuid
-        else
-          let* () = insert ?ctx entity in
-          Lwt.return_ok entity
+      (** [decorate ?ctx to_target] ensures the target exists in the persistent
+          backend (idempotent upsert) and returns the current stored state. *)
+      let decorate ?ctx =
+        decorate_entity (fun (e : target) -> e.Target.uuid) insert find ?ctx
       ;;
     end
 
@@ -406,7 +388,7 @@ struct
           the provided role *)
       let can_assign_roles ?ctx =
         Repo.RoleAssignment.find_all_by_role ?ctx
-        %> Lwt.map (CCList.map target_role)
+        %> Lwt.map (CCList.map (fun ra -> ra.target_role))
       ;;
     end
 

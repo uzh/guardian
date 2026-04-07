@@ -1,5 +1,5 @@
 module type Sig = sig
-  val initialize : ?additinal_pools:(string * string) list -> unit -> unit
+  val initialize : ?additional_pools:(string * string) list -> unit -> unit
 
   val fetch_pool
     :  ?ctx:(string * string) list

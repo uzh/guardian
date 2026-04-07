@@ -14,12 +14,13 @@ module type Uuid = sig
   val unsafe_of_binary_string : string -> t
   val unsafe_to_binary_string : t -> string
   val of_string : ?pos:int -> string -> t option
+  val of_string_exn : ?pos:int -> string -> t
+  val of_string_res : ?pos:int -> string -> (t, string) result
   val to_string : ?upper:bool -> t -> string
   val pp : Format.formatter -> t -> unit
   val pp' : upper:bool -> Format.formatter -> t -> unit
   val to_yojson : t -> [> `String of string ]
   val of_yojson : [> `String of string ] -> (t, string) result
-  val of_string_exn : string -> t
   val sexp_of_t : t -> Sexplib0.Sexp.t
   val create : unit -> t
 end

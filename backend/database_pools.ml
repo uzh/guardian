@@ -48,7 +48,9 @@ module Make (Config : ConfigSig) = struct
       ; connection : connection [@opaque]
       ; n_retries : int
       }
-    [@@deriving fields]
+
+    let database_label { database_label; _ } = database_label
+    let connection { connection; _ } = connection
 
     let create ?(required = false) database_label database_url =
       { database_label
@@ -149,8 +151,8 @@ module Make (Config : ConfigSig) = struct
       Cache.remove name |> Lwt.return
   ;;
 
-  let initialize ?(additinal_pools : (string * string) list = []) () : unit =
-    Config.database :: additinal_pools
+  let initialize ?(additional_pools : (string * string) list = []) () : unit =
+    Config.database :: additional_pools
     |> CCList.filter (fst %> Cache.find_opt %> CCOption.is_none)
     |> CCList.iter (CCFun.uncurry (Pool.create ~required:true) %> Cache.replace)
   ;;
@@ -286,7 +288,8 @@ module Make (Config : ConfigSig) = struct
       Connection.rollback ()
       |> Lwt_result.map
            (CCFun.tap (fun _ ->
-              Logs.debug (fun m -> m "Successfully rolled back transaction")))
+              Logs.debug ~src (fun m ->
+                m "Successfully rolled back transaction")))
       |> raise_caqti_error label
     in
     Lwt.fail error
