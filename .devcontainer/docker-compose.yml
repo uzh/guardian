@@ -2,6 +2,7 @@ services:
   dev:
     container_name: guardian_dev
     image: ocaml/opam:debian-12-ocaml-5.3
+    env_file: [.env]
     volumes:
       # default user is "opam"
       - ..:/workspace:cached
