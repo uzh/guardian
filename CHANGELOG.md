@@ -4,6 +4,27 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [unreleased](https://github.com/uzh/guardian/tree/HEAD)
 
+### Added
+
+- Cache for target uuid to model resolution, so cached validations no longer require a database round trip
+- Indexes on `role` for `guardian_actor_roles` and `guardian_actor_role_targets`
+
+### Changed
+
+- Cache invalidation for a single actor now bumps a per-actor generation instead of scanning the whole cache
+- Role permission changes invalidate the cache in one step instead of querying and clearing all affected actors
+- `PermissionOnTarget.remove_duplicates` runs in linearithmic instead of quadratic time
+- `ActorRole.find_by_actor` and `find_by_target` use `UNION ALL`; validation queries use inner joins where applicable
+- `clean` and `delete` clear the caches
+
+### Removed
+
+- Redundant single-column indexes that duplicated unique-constraint prefixes
+
+### Fixed
+
+- Version prefix of sexp dependency
+
 ## [0.4.0](https://github.com/uzh/guardian/tree/0.4.0) - 2026-04-07
 
 ### Added

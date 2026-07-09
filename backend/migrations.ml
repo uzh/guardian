@@ -244,6 +244,45 @@ let remove_unused_mark_as_deleted_column =
   |sql}
 ;;
 
+let add_role_index_to_actor_roles =
+  {sql|
+    CREATE INDEX IF NOT EXISTS guardian_actor_roles_role_index
+    ON guardian_actor_roles (role)
+  |sql}
+;;
+
+let add_role_index_to_actor_role_targets =
+  {sql|
+    CREATE INDEX IF NOT EXISTS guardian_actor_role_targets_role_index
+    ON guardian_actor_role_targets (role)
+  |sql}
+;;
+
+(* The following indexes duplicate the leftmost prefix of a UNIQUE constraint
+   (or of the column-level UNIQUE index on uuid) on the same table, adding
+   write and storage cost without enabling any additional query plan. The
+   remaining unique indexes also keep satisfying the foreign keys. *)
+
+let drop_redundant_actors_uuid_index =
+  {sql|DROP INDEX IF EXISTS guardian_actors_uuid_index ON guardian_actors|sql}
+;;
+
+let drop_redundant_targets_uuid_index =
+  {sql|DROP INDEX IF EXISTS guardian_targets_uuid_index ON guardian_targets|sql}
+;;
+
+let drop_redundant_actor_roles_actor_uuid_index =
+  {sql|DROP INDEX IF EXISTS guardian_actor_roles_actor_uuid_index ON guardian_actor_roles|sql}
+;;
+
+let drop_redundant_actor_role_targets_actor_uuid_index =
+  {sql|DROP INDEX IF EXISTS guardian_actor_role_targets_actor_uuid_index ON guardian_actor_role_targets|sql}
+;;
+
+let drop_redundant_actor_permissions_actor_uuid_index =
+  {sql|DROP INDEX IF EXISTS guardian_actor_permissions_actor_uuid_index ON guardian_actor_permissions|sql}
+;;
+
 let all_tables =
   [ "guardian_actors"
   ; "guardian_actor_roles"
@@ -311,5 +350,26 @@ let all =
   ; ( "remove unused mark as deleted column"
     , "2024-01-26T15:00"
     , remove_unused_mark_as_deleted_column )
+  ; ( "add role index to guardian actor roles table"
+    , "2026-07-09T14:00"
+    , add_role_index_to_actor_roles )
+  ; ( "add role index to guardian actor role targets table"
+    , "2026-07-09T14:01"
+    , add_role_index_to_actor_role_targets )
+  ; ( "drop redundant uuid index on guardian actors table"
+    , "2026-07-09T14:02"
+    , drop_redundant_actors_uuid_index )
+  ; ( "drop redundant uuid index on guardian targets table"
+    , "2026-07-09T14:03"
+    , drop_redundant_targets_uuid_index )
+  ; ( "drop redundant actor uuid index on guardian actor roles table"
+    , "2026-07-09T14:04"
+    , drop_redundant_actor_roles_actor_uuid_index )
+  ; ( "drop redundant actor uuid index on guardian actor role targets table"
+    , "2026-07-09T14:05"
+    , drop_redundant_actor_role_targets_actor_uuid_index )
+  ; ( "drop redundant actor uuid index on guardian actor permissions table"
+    , "2026-07-09T14:06"
+    , drop_redundant_actor_permissions_actor_uuid_index )
   ]
 ;;

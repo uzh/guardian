@@ -254,11 +254,13 @@ struct
     ;;
 
     (* Flat LRU cache keyed by the full (actor, pool, any_id, permission,
-       target_uuid, model) tuple.  A total capacity cap means entries are
-       evicted in LRU order rather than growing without bound. *)
+       target_uuid, model) tuple plus a per-actor generation number.  A total
+       capacity cap means entries are evicted in LRU order rather than growing
+       without bound. *)
 
     type cache_key =
       { actor : string
+      ; generation : int
       ; pool : string option
       ; any_id : bool
       ; permission : Guard.Permission.t
@@ -271,6 +273,7 @@ struct
 
       let equal a b =
         String.equal a.actor b.actor
+        && Int.equal a.generation b.generation
         && CCOption.equal String.equal a.pool b.pool
         && Bool.equal a.any_id b.any_id
         && Guard.Permission.equal a.permission b.permission
@@ -293,32 +296,48 @@ struct
        actors.  Evicts the least-recently-used entry when the limit is hit. *)
     let capacity = 4096
     let _cache = ref (LruCache.create capacity)
-    let clear () = _cache := LruCache.create capacity
+
+    (* Per-actor generation numbers: bumping one changes every future cache
+       key of that actor, so its stale entries become unreachable and age out
+       via LRU eviction instead of requiring a scan over the whole cache.
+       [max_tracked_actors] keeps the table from growing with every actor
+       ever invalidated. *)
+    let generations : (string, int) Hashtbl.t = Hashtbl.create 256
+    let max_tracked_actors = 100_000
+
+    let clear () =
+      _cache := LruCache.create capacity;
+      Hashtbl.reset generations
+    ;;
+
+    let generation actor =
+      Hashtbl.find_opt generations actor |> CCOption.get_or ~default:0
+    ;;
 
     (** Remove all cached entries for a single actor. Used when that actor's
         roles or direct permissions change. *)
     let clear_actor uuid =
-      let actor_str = Guard.Uuid.Actor.to_string uuid in
-      let to_remove =
-        LruCache.fold
-          (fun k _ acc ->
-             if String.equal k.actor actor_str then k :: acc else acc)
-          []
-          !_cache
-      in
-      List.iter (fun k -> LruCache.remove k !_cache) to_remove
+      let actor = Guard.Uuid.Actor.to_string uuid in
+      match Hashtbl.find_opt generations actor with
+      | Some g -> Hashtbl.replace generations actor (g + 1)
+      | None when Hashtbl.length generations >= max_tracked_actors -> clear ()
+      | None -> Hashtbl.add generations actor 1
+    ;;
+
+    let make_key ctx any_id actor_uuid permission target_uuid model =
+      let actor = Guard.Uuid.Actor.to_string actor_uuid in
+      { actor
+      ; generation = generation actor
+      ; pool = pool_of_ctx ctx
+      ; any_id
+      ; permission
+      ; target_uuid
+      ; model
+      }
     ;;
 
     let find ctx any_id actor_uuid permission target_uuid model =
-      let key =
-        { actor = Guard.Uuid.Actor.to_string actor_uuid
-        ; pool = pool_of_ctx ctx
-        ; any_id
-        ; permission
-        ; target_uuid
-        ; model
-        }
-      in
+      let key = make_key ctx any_id actor_uuid permission target_uuid model in
       match LruCache.find key !_cache with
       | Some _ as v ->
         LruCache.promote key !_cache;
@@ -327,18 +346,67 @@ struct
     ;;
 
     let store ctx any_id actor_uuid permission target_uuid model result =
-      let key =
-        { actor = Guard.Uuid.Actor.to_string actor_uuid
-        ; pool = pool_of_ctx ctx
-        ; any_id
-        ; permission
-        ; target_uuid
-        ; model
-        }
-      in
-      LruCache.add key result !_cache;
+      LruCache.add
+        (make_key ctx any_id actor_uuid permission target_uuid model)
+        result
+        !_cache;
       LruCache.trim !_cache
     ;;
+  end
+
+  (* Caches the target uuid -> model resolution used by [validate], so a
+     validation-cache hit does not still cost a database round trip.
+     Invalidated by [Target.promote] and by [clear_cache]/[clean]/[delete]. *)
+  module ModelCache = struct
+    type model_key =
+      { pool : string option
+      ; target : string
+      }
+
+    module CacheKey = struct
+      type t = model_key
+
+      let equal a b =
+        CCOption.equal String.equal a.pool b.pool
+        && String.equal a.target b.target
+      ;;
+
+      let hash = Hashtbl.hash
+    end
+
+    module CacheValue = struct
+      type t = TargetModel.t
+
+      let weight _ = 1
+    end
+
+    module LruCache = Lru.M.Make (CacheKey) (CacheValue)
+
+    let capacity = 4096
+    let _cache = ref (LruCache.create capacity)
+    let clear () = _cache := LruCache.create capacity
+
+    let make_key ctx uuid =
+      { pool = DBCache.pool_of_ctx ctx
+      ; target = Guard.Uuid.Target.to_string uuid
+      }
+    ;;
+
+    let find ctx uuid =
+      let key = make_key ctx uuid in
+      match LruCache.find key !_cache with
+      | Some _ as v ->
+        LruCache.promote key !_cache;
+        v
+      | None -> None
+    ;;
+
+    let store ctx uuid model =
+      LruCache.add (make_key ctx uuid) model !_cache;
+      LruCache.trim !_cache
+    ;;
+
+    let remove ctx uuid = LruCache.remove (make_key ctx uuid) !_cache
   end
 
   include Guard.MakePersistence (struct
@@ -356,7 +424,10 @@ struct
       type validation_set = Guard.ValidationSet.t
 
       module Repo = struct
-        let clear_cache = DBCache.clear
+        let clear_cache () =
+          DBCache.clear ();
+          ModelCache.clear ()
+        ;;
 
         module Model = struct
           let role = Entity.Role.t
@@ -433,7 +504,7 @@ struct
                 FROM guardian_actor_role_targets AS role_targets
                 WHERE role_targets.actor_uuid = %{sql_value_fragment "$1"}
                   AND role_targets.mark_as_deleted IS NULL
-                UNION
+                UNION ALL
                 SELECT %{sql_select_fragment "roles.actor_uuid"}, roles.role, NULL
                 FROM guardian_actor_roles AS roles
                 WHERE roles.actor_uuid = %{sql_value_fragment "$1"}
@@ -456,7 +527,7 @@ struct
                 WHERE role_targets.role = $1
                   AND role_targets.target_uuid = %{Entity.Uuid.sql_value_fragment "$2"}
                   AND role_targets.mark_as_deleted IS NULL
-                UNION
+                UNION ALL
                 SELECT %{sql_select_fragment "roles.actor_uuid"}, roles.role, NULL
                 FROM guardian_actor_roles AS roles
                 WHERE roles.role = $1
@@ -578,13 +649,12 @@ struct
                   %{Uuid.sql_select_fragment "roles.target_uuid"}
                 FROM
                   guardian_actor_role_targets AS roles
-                LEFT JOIN guardian_role_permissions AS role_permissions
+                JOIN guardian_role_permissions AS role_permissions
                   ON role_permissions.role = roles.role
                   AND role_permissions.mark_as_deleted IS NULL
                 WHERE
                   roles.mark_as_deleted IS NULL
                   AND roles.actor_uuid = %{Uuid.sql_value_fragment "$1"}
-                  AND `permission` IS NOT null
                 UNION
                 SELECT
                   role_permissions.permission,
@@ -592,13 +662,12 @@ struct
                   NULL
                 FROM
                   guardian_actor_roles AS roles
-                LEFT JOIN guardian_role_permissions AS role_permissions
+                JOIN guardian_role_permissions AS role_permissions
                   ON role_permissions.role = roles.role
                   AND role_permissions.mark_as_deleted IS NULL
                 WHERE
                   roles.mark_as_deleted IS NULL
                   AND roles.actor_uuid = %{Uuid.sql_value_fragment "$1"}
-                  AND `permission` IS NOT null
                 UNION
                 SELECT
                   actor_permissions.permission,
@@ -612,7 +681,6 @@ struct
                 WHERE
                   actor_permissions.actor_uuid = %{Uuid.sql_value_fragment "$1"}
                   AND actor_permissions.mark_as_deleted IS NULL
-                  AND `permission` IS NOT null
               |sql}]
             |> Uuid.Actor.t ->* PermissionOnTarget.t
           ;;
@@ -647,27 +715,6 @@ struct
                   AND role = $2
               |sql}]
             |> Caqti_type.(t2 Uuid.Actor.t Model.role ->. unit)
-          ;;
-
-          let find_all_actors_with_role_request =
-            [%string
-              {sql|
-                SELECT %{Entity.Uuid.sql_select_fragment "actor_uuid"} FROM (
-                  SELECT actor_uuid FROM guardian_actor_roles
-                    WHERE role = ? AND mark_as_deleted IS NULL
-                  UNION
-                  SELECT actor_uuid FROM guardian_actor_role_targets
-                    WHERE role = ? AND mark_as_deleted IS NULL
-                ) AS combined
-              |sql}]
-            |> Caqti_type.t2 Entity.Role.t Entity.Role.t ->* Entity.Uuid.Actor.t
-          ;;
-
-          (** Find all actor UUIDs that have [role] assigned (globally or
-              per-target). Used to invalidate cache entries when a role
-              permission rule changes. *)
-          let find_all_actors_with_role ?ctx role =
-            Database.collect ?ctx find_all_actors_with_role_request (role, role)
           ;;
 
           let delete ?ctx role =
@@ -734,13 +781,10 @@ struct
           ;;
 
           let insert ?ctx rp =
-            let open Lwt.Syntax in
-            let* actor_uuids =
-              ActorRole.find_all_actors_with_role
-                ?ctx
-                rp.Guard.RolePermission.role
-            in
-            List.iter DBCache.clear_actor actor_uuids;
+            (* A changed rule affects every actor holding the role; dropping
+               the bounded cache outright is cheaper than enumerating those
+               actors. *)
+            let () = DBCache.clear () in
             Database.exec ?ctx insert_request rp |> Lwt_result.ok
           ;;
 
@@ -757,13 +801,8 @@ struct
           ;;
 
           let delete ?ctx rp =
-            let open Lwt.Syntax in
-            let* actor_uuids =
-              ActorRole.find_all_actors_with_role
-                ?ctx
-                rp.Guard.RolePermission.role
-            in
-            List.iter DBCache.clear_actor actor_uuids;
+            (* See [insert]: invalidate all actors at once. *)
+            let () = DBCache.clear () in
             Database.exec ?ctx delete_request rp |> Lwt_result.ok
           ;;
         end
@@ -1017,7 +1056,10 @@ struct
             |> Caqti_type.(t2 Uuid.Target.t TargetModel.t ->. unit)
           ;;
 
-          let promote ?ctx = CCFun.curry (Database.exec ?ctx promote_request)
+          let promote ?ctx uuid model =
+            let () = ModelCache.remove ctx uuid in
+            Database.exec ?ctx promote_request (uuid, model)
+          ;;
         end
 
         module RoleAssignment = struct
@@ -1097,7 +1139,7 @@ struct
                 SELECT (
                   SELECT TRUE
                   FROM guardian_actor_roles AS roles
-                  LEFT JOIN guardian_role_permissions AS role_permissions
+                  JOIN guardian_role_permissions AS role_permissions
                     ON roles.role = role_permissions.role
                     AND role_permissions.mark_as_deleted IS NULL
                   WHERE roles.mark_as_deleted IS NULL
@@ -1157,7 +1199,7 @@ struct
                 ) OR (
                   SELECT TRUE
                   FROM guardian_actor_role_targets AS role_targets
-                    LEFT JOIN guardian_role_permissions AS role_permissions
+                    JOIN guardian_role_permissions AS role_permissions
                       ON role_targets.role = role_permissions.role
                       AND role_permissions.mark_as_deleted IS NULL
                     WHERE role_targets.mark_as_deleted IS NULL
@@ -1210,7 +1252,7 @@ struct
                 SELECT (
                   SELECT TRUE
                   FROM guardian_actor_roles AS roles
-                  LEFT JOIN guardian_role_permissions AS role_permissions
+                  JOIN guardian_role_permissions AS role_permissions
                     ON roles.role = role_permissions.role
                     AND role_permissions.mark_as_deleted IS NULL
                   WHERE roles.mark_as_deleted IS NULL
@@ -1221,7 +1263,7 @@ struct
                 ) OR (
                   SELECT TRUE
                   FROM guardian_actor_role_targets AS role_targets
-                  LEFT JOIN guardian_role_permissions AS role_permissions
+                  JOIN guardian_role_permissions AS role_permissions
                     ON role_targets.role = role_permissions.role
                     AND role_permissions.mark_as_deleted IS NULL
                   WHERE role_targets.mark_as_deleted IS NULL
@@ -1329,8 +1371,16 @@ struct
           | false, Some target_uuid, None ->
             (* Resolve the model up front so both the DB query and the cache
                key use the concrete model, preventing stale model=None entries
-               if the target's model later changes (e.g. via Target.promote). *)
-            Target.find_model ?ctx target_uuid
+               if the target's model later changes (e.g. via Target.promote).
+               The resolution itself is cached so a validation-cache hit does
+               not still cost a database round trip. *)
+            (match ModelCache.find ctx target_uuid with
+             | Some model -> Lwt.return_ok model
+             | None ->
+               Target.find_model ?ctx target_uuid
+               >|= CCResult.map (fun model ->
+                 ModelCache.store ctx target_uuid model;
+                 model))
             >>= (function
              | Error _ as e ->
                let granted = CCResult.is_ok e in
@@ -1383,9 +1433,13 @@ struct
       ;;
 
       (** [clean ?ctx ()] runs clean on a specified context [?ctx] **)
-      let clean ?ctx () = find_clean () |> run_without_fk_checks ?ctx "Clean"
+      let clean ?ctx () =
+        let () = Repo.clear_cache () in
+        find_clean () |> run_without_fk_checks ?ctx "Clean"
+      ;;
 
       let delete ?ctx () =
+        let () = Repo.clear_cache () in
         Migrations.all_tables
         |> CCList.map (fun m -> m, Format.asprintf "DROP TABLE IF EXISTS %s" m)
         |> run_without_fk_checks ?ctx "Delete"
