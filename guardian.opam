@@ -16,9 +16,9 @@ depends: [
   "dune" {>= "2.9"}
   "alcotest" {with-test & >= "1.9.1"}
   "alcotest-lwt" {with-test}
-  "caqti" {>= "2.2.4"}
-  "caqti-driver-mariadb" {>= "2.0.1"}
-  "caqti-lwt" {>= "2.0.1"}
+  "caqti" {>= "2.3.0"}
+  "caqti-driver-mariadb" {>= "2.3.0"}
+  "caqti-lwt" {>= "2.3.0"}
   "containers" {>= "3.6"}
   "containers-data" {>= "3.6"}
   "dune-release" {with-dev-setup}
@@ -34,7 +34,7 @@ depends: [
   "odoc" {with-doc}
   "ppx_deriving" {>= "5.2.1"}
   "ppx_deriving_yojson" {>= "3.6.1"}
-  "ppx_sexp_conv" {>= "0.15.1"}
+  "ppx_sexp_conv" {>= "v0.15.1"}
   "ppx_string"
   "result" {>= "1.5"}
   "sexplib0"

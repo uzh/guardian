@@ -35,11 +35,11 @@
     (>= 1.9.1)))
   (alcotest-lwt :with-test)
   (caqti
-   (>= 2.2.4))
+   (>= 2.3.0))
   (caqti-driver-mariadb
-   (>= 2.0.1))
+   (>= 2.3.0))
   (caqti-lwt
-   (>= 2.0.1))
+   (>= 2.3.0))
   (containers
    (>= 3.6))
   (containers-data
@@ -69,7 +69,7 @@
   (ppx_deriving_yojson
    (>= 3.6.1))
   (ppx_sexp_conv
-   (>= 0.15.1))
+   (>= v0.15.1))
   ppx_string
   (result
    (>= 1.5))

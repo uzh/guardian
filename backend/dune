@@ -3,6 +3,7 @@
  (name Guardian_backend)
  (libraries
   caqti
+  caqti.classic
   caqti-driver-mariadb
   caqti-lwt
   caqti-lwt.unix
