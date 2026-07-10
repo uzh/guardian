@@ -206,7 +206,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   ;;
 
   let save_existing_rule ?ctx (_ : 'a) () =
-    let existing_rule = List.hd global_role_permission in
+    let existing_rule = CCList.hd global_role_permission in
     (let* () = Backend.RolePermission.insert ?ctx existing_rule in
      Backend.RolePermission.insert ?ctx existing_rule)
     >|= Alcotest.(check (result unit string)) "Save existing permission" (Ok ())

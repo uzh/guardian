@@ -1,4 +1,4 @@
-open CCFun
+open CCFun.Infix
 open Lwt.Infix
 open Caqti_request.Infix
 
@@ -272,16 +272,16 @@ struct
       type t = cache_key
 
       let equal a b =
-        String.equal a.actor b.actor
-        && Int.equal a.generation b.generation
-        && CCOption.equal String.equal a.pool b.pool
-        && Bool.equal a.any_id b.any_id
+        CCString.equal a.actor b.actor
+        && CCInt.equal a.generation b.generation
+        && CCOption.equal CCString.equal a.pool b.pool
+        && CCBool.equal a.any_id b.any_id
         && Guard.Permission.equal a.permission b.permission
         && CCOption.equal Guard.Uuid.Target.equal a.target_uuid b.target_uuid
         && CCOption.equal TargetModel.equal a.model b.model
       ;;
 
-      let hash = Hashtbl.hash
+      let hash = CCHash.poly
     end
 
     module CacheValue = struct
@@ -302,26 +302,27 @@ struct
        via LRU eviction instead of requiring a scan over the whole cache.
        [max_tracked_actors] keeps the table from growing with every actor
        ever invalidated. *)
-    let generations : (string, int) Hashtbl.t = Hashtbl.create 256
+    module Generations = CCHashtbl.Make (CCString)
+
+    let generations : int Generations.t = Generations.create 256
     let max_tracked_actors = 100_000
 
     let clear () =
       _cache := LruCache.create capacity;
-      Hashtbl.reset generations
+      Generations.reset generations
     ;;
 
-    let generation actor =
-      Hashtbl.find_opt generations actor |> CCOption.get_or ~default:0
-    ;;
+    let generation actor = Generations.get_or generations actor ~default:0
 
     (** Remove all cached entries for a single actor. Used when that actor's
         roles or direct permissions change. *)
     let clear_actor uuid =
       let actor = Guard.Uuid.Actor.to_string uuid in
-      match Hashtbl.find_opt generations actor with
-      | Some g -> Hashtbl.replace generations actor (g + 1)
-      | None when Hashtbl.length generations >= max_tracked_actors -> clear ()
-      | None -> Hashtbl.add generations actor 1
+      if
+        Generations.length generations >= max_tracked_actors
+        && not (Generations.mem generations actor)
+      then clear ()
+      else Generations.incr generations actor
     ;;
 
     let make_key ctx any_id actor_uuid permission target_uuid model =
@@ -367,11 +368,11 @@ struct
       type t = model_key
 
       let equal a b =
-        CCOption.equal String.equal a.pool b.pool
-        && String.equal a.target b.target
+        let open CCString in
+        CCOption.equal equal a.pool b.pool && equal a.target b.target
       ;;
 
-      let hash = Hashtbl.hash
+      let hash = CCHash.poly
     end
 
     module CacheValue = struct

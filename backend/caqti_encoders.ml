@@ -36,7 +36,7 @@ let custom
   =
   fun ~encode ~decode schema ->
   let typ = Schema.make_type schema in
-  let encode data = encode data |> Result.map Data.make_value in
+  let encode data = encode data |> CCResult.map Data.make_value in
   Caqti_type.custom ~encode ~decode typ
 ;;
 
@@ -44,7 +44,7 @@ let custom_ok
   : type a b.
     encode:(b -> a Data.t) -> decode:(a -> b) -> a Schema.t -> b Caqti_type.t
   =
-  let open CCFun in
+  let open CCFun.Infix in
   fun ~encode ~decode schema ->
     let typ = Schema.make_type schema in
     let encode = CCResult.(encode %> return %> map Data.make_value) in

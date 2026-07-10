@@ -1,4 +1,4 @@
-open CCFun
+open CCFun.Infix
 
 let hide_typ f (_ : 'a) = Format.pp_print_string f ""
 

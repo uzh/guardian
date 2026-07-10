@@ -354,7 +354,6 @@ struct
             (validation_set : ValidationSet.t)
             actor
         =
-        let open CCFun in
         let rec find_checker : validation_set -> bool =
           let open ValidationSet in
           function
@@ -375,7 +374,7 @@ struct
              | true -> true
              | false ->
                CCList.fold_left
-                 (flip (fun rule -> function
+                 (CCFun.flip (fun rule -> function
                     | true -> true
                     | false -> find_checker rule))
                  false
@@ -385,7 +384,7 @@ struct
              | false -> false
              | true ->
                CCList.fold_left
-                 (flip (fun rule -> function
+                 (CCFun.flip (fun rule -> function
                     | true -> find_checker rule
                     | false -> false))
                  true
@@ -436,8 +435,7 @@ struct
           actor
       : (unit, 'etyp) Lwt_result.t
       =
-      let open CCFun in
-      let ( |>> ) = flip Lwt.map in
+      let ( |>> ) = CCFun.flip Lwt.map in
       let rec find_checker =
         let open ValidationSet in
         function
@@ -448,7 +446,7 @@ struct
            | true -> Lwt.return_true
            | false ->
              Lwt_list.fold_left_s
-               (flip (fun rule -> function
+               (CCFun.flip (fun rule -> function
                   | true -> Lwt.return_true
                   | false -> find_checker rule))
                false
@@ -458,7 +456,7 @@ struct
            | false -> Lwt.return_false
            | true ->
              Lwt_list.fold_left_s
-               (flip (fun rule -> function
+               (CCFun.flip (fun rule -> function
                   | true -> find_checker rule
                   | false -> Lwt.return_false))
                true
