@@ -1,24 +1,24 @@
 services:
   dev:
     container_name: guardian_dev
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ocaml/opam:debian-12-ocaml-5.3
+    env_file: [.env]
     volumes:
       # default user is "opam"
       - ..:/workspace:cached
       - opam:/home/opam/.opam:cached
       - build:/workspace/_build:cached
-      - ${HOME}/.gitconfig:/home/opam/.gitconfig:ro
-    depends_on: [ database ]
-    ports: [ 3020:3000 ]
-    command: /workspace/.devcontainer/wait-for-database.sh test sleep infinity
+      - db:/databases/dev/:ro
+      - ${HOME}/.claude:/home/opam/.claude
+    depends_on: [database]
+    ports: [3020:3000]
+    command: sleep infinity
 
   database:
     container_name: guardian_database
     image: mariadb:10.6.3
     command: --max_allowed_packet=629145600
-    ports: [ 3320:3306 ]
+    ports: [3320:3306]
     environment:
       - TZ=Europe/Zurich
       - MYSQL_ALLOW_EMPTY_PASSWORD='yes'
@@ -26,15 +26,16 @@ services:
       - MYSQL_DATABASE=development
       - MYSQL_USER=root
     volumes:
-      - ./data/db:/var/lib/mysql
+      - db:/var/lib/mysql
       - ./init:/docker-entrypoint-initdb.d/:ro
 
   adminer:
     image: adminer:standalone
     restart: always
-    ports: [ 8080:8080 ]
-    depends_on: [ database ]
+    ports: [8080:8080]
+    depends_on: [database]
 
 volumes:
   opam:
   build:
+  db:

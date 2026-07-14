@@ -1,6 +1,3 @@
-// For format details, see https://aka.ms/vscode-remote/devcontainer.json or the definition README at
-// https://github.com/microsoft/vscode-dev-containers/tree/master/containers/python-3 or the
-// devcontainer docu https://code.visualstudio.com/docs/remote/containers#_devcontainerjson-reference
 {
   "name": "Guardian dev",
   "dockerComposeFile": "./docker-compose.yml",
@@ -8,45 +5,35 @@
   "runServices": [
     "dev",
     "database"
-    // "adminer" // uncomment if adminer should run to see the database
+    // "adminer"
   ],
   "workspaceFolder": "/workspace",
-  "remoteEnv": {
-    "VERSION": "dev",
-    "OPAMWORKINGDIR": "true",
-    "OPAMSOLVERTIMEOUT": "180"
+  "features": {
+    "cr.gitlab.uzh.ch/econ/it/devcontainer-features/econ-common:1": {},
+    "cr.gitlab.uzh.ch/econ/it/devcontainer-features/econ-git-credentials:1": {
+      "git_remote_host": "github.com"
+    },
+    "cr.gitlab.uzh.ch/econ/it/devcontainer-features/econ-hadolint:1": {},
+    "cr.gitlab.uzh.ch/econ/it/devcontainer-features/econ-wait-for-databases:1": {
+      "databases": "dev/test"
+    },
+    "cr.gitlab.uzh.ch/econ/it/devcontainer-features/econ-ocaml:1": {
+      "opam_version": "2.3",
+      "folders": [
+        "/workspace/_build",
+        "/home/opam/.cache"
+      ]
+    },
+    "cr.gitlab.uzh.ch/econ/it/devcontainer-features/econ-version:2": {
+      "version_source": "guardian.opam::^version: \\\"([^\\\"]+)\\\"",
+      "ocaml": true
+    }
   },
-  "postCreateCommand": ".devcontainer/wait-for-database.sh test .devcontainer/postCreate.sh",
-  // Use 'settings' to set *default* container specific settings.json values on container create.
-  // You can edit these settings after create using File > Preferences > Settings > Remote.
+  "postCreateCommand": "wait-for-databases make deps",
   "customizations": {
     "vscode": {
-      "settings": {
-        "terminal.integrated.profiles.linux": {
-          "zsh": {
-            "path": "/bin/zsh"
-          }
-        },
-        "terminal.integrated.defaultProfile.linux": "zsh",
-        "editor.formatOnSave": true,
-        "files.associations": {
-          "*.ml": "ocaml",
-          "*.mli": "ocaml"
-        },
-        "git.mergeEditor": false,
-        "ocaml.sandbox": {
-          "kind": "global"
-        }
-      },
-      // Add the IDs of extensions you want installed when the container is created in the array below.
       "extensions": [
-        "donjayamanne.githistory",
-        "eamodio.gitlens",
-        "exiasr.hadolint",
-        "irongeek.vscode-env",
-        "ocamllabs.ocaml-platform",
-        "DavidAnson.vscode-markdownlint",
-        "ms-vscode.makefile-tools"
+        "Anthropic.claude-code"
       ]
     }
   }

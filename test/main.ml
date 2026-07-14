@@ -206,7 +206,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   ;;
 
   let save_existing_rule ?ctx (_ : 'a) () =
-    let existing_rule = List.hd global_role_permission in
+    let existing_rule = CCList.hd global_role_permission in
     (let* () = Backend.RolePermission.insert ?ctx existing_rule in
      Backend.RolePermission.insert ?ctx existing_rule)
     >|= Alcotest.(check (result unit string)) "Save existing permission" (Ok ())
@@ -1074,6 +1074,142 @@ module Tests (Backend : Guard.PersistenceSig) = struct
       (CCResult.is_error result);
     Lwt.return_unit
   ;;
+
+  (* Cache behaviour: cached validations must be invalidated when the actor's
+     roles change, when role permission rules change, and when a target is
+     promoted to another model. Each test validates before mutating so a
+     cached (stale) entry exists when the mutation happens. *)
+
+  let test_cache_role_invalidation ?ctx (_ : 'a) () =
+    let actor_uuid = Uuid.Actor.create () in
+    let actor = Actor.create `User actor_uuid in
+    let set = ValidationSet.one_of_tuple (Read, `Post, None) in
+    let validate () = Backend.validate ?ctx id set actor in
+    let check msg expected result =
+      Alcotest.(check bool) msg expected (CCResult.is_ok result)
+    in
+    (let* () = Backend.Actor.insert ?ctx actor in
+     let%lwt denied = validate () in
+     check "no role: denied" false denied;
+     let%lwt denied_cached = validate () in
+     check "no role: still denied from cache" false denied_cached;
+     let role = ActorRole.create actor_uuid `Reader in
+     let%lwt () = Backend.ActorRole.upsert ?ctx role in
+     let%lwt granted = validate () in
+     check "role granted: cached denial invalidated" true granted;
+     let%lwt () = Backend.ActorRole.delete ?ctx role in
+     let%lwt denied_again = validate () in
+     check "role revoked: cached grant invalidated" false denied_again;
+     Lwt.return_ok ())
+    >|= Alcotest.(check (result unit string))
+          "cache follows role changes"
+          (Ok ())
+  ;;
+
+  let test_cache_rule_invalidation ?ctx (_ : 'a) () =
+    let actor_uuid = Uuid.Actor.create () in
+    let actor = Actor.create `User actor_uuid in
+    let rule = RolePermission.create `Author Read `Note in
+    let set = ValidationSet.one_of_tuple (Read, `Note, None) in
+    let validate () = Backend.validate ?ctx id set actor in
+    let check msg expected result =
+      Alcotest.(check bool) msg expected (CCResult.is_ok result)
+    in
+    (let* () = Backend.Actor.insert ?ctx actor in
+     let%lwt () =
+       Backend.ActorRole.upsert ?ctx (ActorRole.create actor_uuid `Author)
+     in
+     let%lwt denied = validate () in
+     check "no rule: denied" false denied;
+     let* () = Backend.RolePermission.insert ?ctx rule in
+     let%lwt granted = validate () in
+     check "rule inserted: cached denial invalidated" true granted;
+     let* () = Backend.RolePermission.delete ?ctx rule in
+     let%lwt denied_again = validate () in
+     check "rule deleted: cached grant invalidated" false denied_again;
+     Lwt.return_ok ())
+    >|= Alcotest.(check (result unit string))
+          "cache follows rule changes"
+          (Ok ())
+  ;;
+
+  let test_promote_refreshes_model ?ctx (_ : 'a) () =
+    let actor_uuid = Uuid.Actor.create () in
+    let actor = Actor.create `User actor_uuid in
+    let target_uuid = Uuid.Target.create () in
+    (* validate by uuid only, so the backend resolves (and caches) the
+       target's model itself *)
+    let validate () = Backend.Repo.validate ?ctx ~target_uuid Read actor in
+    (let* () = Backend.Actor.insert ?ctx actor in
+     let%lwt () =
+       Backend.ActorRole.upsert ?ctx (ActorRole.create actor_uuid `Reader)
+     in
+     let* () = Backend.Target.insert ?ctx (Target.create `Note target_uuid) in
+     let%lwt denied = validate () in
+     Alcotest.(check bool) "note target: reader denied" false denied;
+     let%lwt () = Backend.Target.promote ?ctx target_uuid `Post in
+     let%lwt granted = validate () in
+     Alcotest.(check bool)
+       "promoted to post: model resolution is not stale"
+       true
+       granted;
+     Lwt.return_ok ())
+    >|= Alcotest.(check (result unit string))
+          "promote refreshes target model"
+          (Ok ())
+  ;;
+
+  let test_mixed_role_scopes ?ctx (_ : 'a) () =
+    let actor_uuid = Uuid.Actor.create () in
+    let actor = Actor.create `User actor_uuid in
+    let target_uuid = Uuid.Target.create () in
+    let model_role = ActorRole.create actor_uuid `Editor in
+    let targeted_role = ActorRole.create ~target_uuid actor_uuid `Editor in
+    (let* () = Backend.Actor.insert ?ctx actor in
+     let* () =
+       Backend.Target.insert ?ctx (Target.create `Article target_uuid)
+     in
+     let%lwt () = Backend.ActorRole.upsert ?ctx model_role in
+     let%lwt () = Backend.ActorRole.upsert ?ctx targeted_role in
+     let%lwt roles = Backend.ActorRole.find_by_actor ?ctx actor_uuid in
+     let mem role = CCList.mem ~eq:ActorRole.equal role roles in
+     Alcotest.(check bool) "model-scoped role returned" true (mem model_role);
+     Alcotest.(check bool)
+       "target-scoped role returned"
+       true
+       (mem targeted_role);
+     Alcotest.(check int)
+       "exactly the two granted roles"
+       2
+       (CCList.length roles);
+     Lwt.return_ok ())
+    >|= Alcotest.(check (result unit string))
+          "model and targeted roles of the same name coexist"
+          (Ok ())
+  ;;
+
+  let test_permission_duplicate_sources ?ctx (_ : 'a) () =
+    (* the same (permission, model) grant coming from both a role rule and a
+       direct actor permission must appear only once *)
+    let actor_uuid = Uuid.Actor.create () in
+    let actor = Actor.create `User actor_uuid in
+    let direct = ActorPermission.create_for_model actor_uuid Update `Article in
+    (let* () = Backend.Actor.insert ?ctx actor in
+     let%lwt () =
+       Backend.ActorRole.upsert ?ctx (ActorRole.create actor_uuid `Author)
+     in
+     let* () = Backend.ActorPermission.insert ?ctx direct in
+     let%lwt perms = Backend.ActorRole.permissions_of_actor ?ctx actor_uuid in
+     let expected = PermissionOnTarget.of_tuple (Update, `Article, None) in
+     let occurrences =
+       CCList.filter (PermissionOnTarget.equal expected) perms |> CCList.length
+     in
+     Alcotest.(check int) "duplicate grant appears once" 1 occurrences;
+     Backend.ActorPermission.delete ?ctx direct)
+    >|= Alcotest.(check (result unit string))
+          "grant from role rule and actor permission is deduplicated"
+          (Ok ())
+  ;;
 end
 
 let role_model_tests =
@@ -1250,6 +1386,24 @@ let () =
               "denied for any One permission"
               `Quick
               (test_actor_no_roles ?ctx)
+          ] )
+      ; ( Format.asprintf "(%s) Cache invalidation" name
+        , [ test_case "role changes" `Quick (test_cache_role_invalidation ?ctx)
+          ; test_case "rule changes" `Quick (test_cache_rule_invalidation ?ctx)
+          ; test_case
+              "promote refreshes target model"
+              `Quick
+              (test_promote_refreshes_model ?ctx)
+          ] )
+      ; ( Format.asprintf "(%s) Role scopes and duplicate grants" name
+        , [ test_case
+              "model and targeted roles"
+              `Quick
+              (test_mixed_role_scopes ?ctx)
+          ; test_case
+              "duplicate grant appears once"
+              `Quick
+              (test_permission_duplicate_sources ?ctx)
           ] )
       ]
   in

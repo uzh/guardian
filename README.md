@@ -70,7 +70,23 @@ Example usage:
 
 ## Development
 
-A guide how to setup the project with devcontainers can be found in [this README](./.devcontainer/README.md).
+This project runs in a DevContainer. All credentials are passed via a local `.env` file — no host SSH keys required.
+
+1. Follow the general DevContainer instructions in the [Engineering Wiki](https://gitlab.uzh.ch/econ/it/engineering/-/wikis/2_best-practices/DevContainer).
+1. Copy the env template and fill in the values: `cp .devcontainer/.env.example .devcontainer/.env`
+1. Click the `><` icon in the bottom-left corner of VS Code and select **Reopen in Container**.
+
+> **NOTE**: When the setup is fully installed, select `View` -> `Command Palette...` and run the command `OCaml: Restart Language Server`
+
+### Database View
+
+There is an `Adminer` container added to the development package. To be able to use it, follow these few steps:
+
+1. Uncomment its line in the `.devcontainer/devcontainer.json` under `runServices`
+1. Use `Remote-Containers: Rebuild Container` that it will also create and startup the `Adminer` container
+1. Open your web browser and open `localhost:8080`
+1. Use the _development_ credentials defined for the development database in your `.env` file
+    (default: `user: root`, `password: <empty/none>`, `host: database`, `database: development` )
 
 ### Commands
 

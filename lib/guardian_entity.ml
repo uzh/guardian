@@ -139,6 +139,27 @@ struct
     ;;
 
     let remove_duplicates (perms : t list) : t list =
+      let module PotSet = CCSet.Make (struct
+          type nonrec t = t
+
+          let compare = compare
+        end)
+      in
+      (* Membership indexes over the whole input — grants without a target
+         uuid and per-uuid Manage grants — so each element is judged in
+         O(log n) instead of rescanning the list. *)
+      let model_wide, manage_on_uuid =
+        CCList.fold_left
+          (fun (model_wide, manage_on_uuid)
+            ({ permission; target_uuid; _ } as perm) ->
+             match target_uuid with
+             | None -> PotSet.add perm model_wide, manage_on_uuid
+             | Some _ when Permission.(equal Manage permission) ->
+               model_wide, PotSet.add perm manage_on_uuid
+             | Some _ -> model_wide, manage_on_uuid)
+          (PotSet.empty, PotSet.empty)
+          perms
+      in
       CCList.fold_left
         (fun init
           ({ permission; model; target_uuid } as permission_on_target) ->
@@ -148,13 +169,16 @@ struct
                permission_on_target
            in
            let model_permission () =
-             let in_list perm =
-               CCList.mem ~eq:equal (of_tuple (perm, model, None)) perms
+             let in_index perm =
+               PotSet.mem (of_tuple (perm, model, None)) model_wide
              in
-             in_list permission || in_list Permission.Manage
+             in_index permission || in_index Permission.Manage
            in
            let manage_permission () =
-             CCList.mem (of_tuple (Permission.Manage, model, target_uuid)) perms
+             let manage = of_tuple (Permission.Manage, model, target_uuid) in
+             match target_uuid with
+             | None -> PotSet.mem manage model_wide
+             | Some _ -> PotSet.mem manage manage_on_uuid
            in
            match target_uuid with
            | None when is_manage_model () -> permission_on_target :: init
@@ -330,7 +354,6 @@ struct
             (validation_set : ValidationSet.t)
             actor
         =
-        let open CCFun in
         let rec find_checker : validation_set -> bool =
           let open ValidationSet in
           function
@@ -351,7 +374,7 @@ struct
              | true -> true
              | false ->
                CCList.fold_left
-                 (flip (fun rule -> function
+                 (CCFun.flip (fun rule -> function
                     | true -> true
                     | false -> find_checker rule))
                  false
@@ -361,7 +384,7 @@ struct
              | false -> false
              | true ->
                CCList.fold_left
-                 (flip (fun rule -> function
+                 (CCFun.flip (fun rule -> function
                     | true -> find_checker rule
                     | false -> false))
                  true
@@ -412,8 +435,7 @@ struct
           actor
       : (unit, 'etyp) Lwt_result.t
       =
-      let open CCFun in
-      let ( |>> ) = flip Lwt.map in
+      let ( |>> ) = CCFun.flip Lwt.map in
       let rec find_checker =
         let open ValidationSet in
         function
@@ -424,7 +446,7 @@ struct
            | true -> Lwt.return_true
            | false ->
              Lwt_list.fold_left_s
-               (flip (fun rule -> function
+               (CCFun.flip (fun rule -> function
                   | true -> Lwt.return_true
                   | false -> find_checker rule))
                false
@@ -434,7 +456,7 @@ struct
            | false -> Lwt.return_false
            | true ->
              Lwt_list.fold_left_s
-               (flip (fun rule -> function
+               (CCFun.flip (fun rule -> function
                   | true -> find_checker rule
                   | false -> Lwt.return_false))
                true

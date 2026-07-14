@@ -97,7 +97,7 @@ module Make (Config : ConfigSig) = struct
     module Hashtbl = CCHashtbl.Make (CCString)
 
     let pools : Pool.t Hashtbl.t =
-      Hashtbl.create (max 1 Config.expected_databases)
+      Hashtbl.create (CCInt.max 1 Config.expected_databases)
     ;;
 
     let add = Hashtbl.add pools
@@ -273,7 +273,6 @@ module Make (Config : ConfigSig) = struct
   ;;
 
   let exec_each connection =
-    let open CCFun.Infix in
     Lwt_list.map_s (fun request -> request connection)
     %> Lwt.map CCResult.flatten_l
     %> Lwt_result.map (fun (_ : unit list) -> ())
