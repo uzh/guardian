@@ -99,8 +99,6 @@ Most used commands can be found in the following list. For the full list of comm
 ## 🚀 Release new version
 
 1. Update `CHANGELOG.md` and document changes made. Ensure the version to be releases has a header matching the version, follow previous releases.
-1. Edit the file `dune-project` and update version `(version 0.0.0)`.
-1. Build the project `dune build` __OR__ edit the file `pool.opam` and update version `version: "0.0.0"`
-1. Commit your changes.
-1. Tag the commit and push changes and git tag
+1. Run `econ-version --[patch|minor|major]`
+1. Push changes and git tag
 1. create opam release (`opam publish`)
