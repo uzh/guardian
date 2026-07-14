@@ -254,12 +254,13 @@ struct
     ;;
 
     (* Flat LRU cache keyed by the full (actor, pool, any_id, permission,
-       target_uuid, model) tuple plus a per-actor generation number.  A total
-       capacity cap means entries are evicted in LRU order rather than growing
-       without bound. *)
+       target_uuid, model) tuple plus a global epoch and a per-actor
+       generation number.  A total capacity cap means entries are evicted in
+       LRU order rather than growing without bound. *)
 
     type cache_key =
-      { actor : string
+      { epoch : int
+      ; actor : string
       ; generation : int
       ; pool : string option
       ; any_id : bool
@@ -272,7 +273,8 @@ struct
       type t = cache_key
 
       let equal a b =
-        CCString.equal a.actor b.actor
+        CCInt.equal a.epoch b.epoch
+        && CCString.equal a.actor b.actor
         && CCInt.equal a.generation b.generation
         && CCOption.equal CCString.equal a.pool b.pool
         && CCBool.equal a.any_id b.any_id
@@ -297,17 +299,26 @@ struct
     let capacity = 4096
     let _cache = ref (LruCache.create capacity)
 
-    (* Per-actor generation numbers: bumping one changes every future cache
-       key of that actor, so its stale entries become unreachable and age out
-       via LRU eviction instead of requiring a scan over the whole cache.
-       [max_tracked_actors] keeps the table from growing with every actor
-       ever invalidated. *)
+    (* [epoch] scopes every key at once: bumping it makes all previously
+       stored keys unreachable.  [generations] scopes a single actor's keys.
+       Both are snapshotted into the key by [make_key] and therefore captured
+       when a validation *starts*; if an invalidation races an in-flight
+       validation, the result is stored under the (now stale) snapshot and is
+       unreachable to later lookups instead of overwriting the invalidation.
+       [max_tracked_actors] keeps the generations table from growing with
+       every actor ever invalidated. *)
+    let epoch = ref 0
+
     module Generations = CCHashtbl.Make (CCString)
 
     let generations : int Generations.t = Generations.create 256
     let max_tracked_actors = 100_000
 
+    (* Bumping [epoch] invalidates every key (including snapshots taken by
+       in-flight validations), so resetting [generations] back to 0 here is
+       safe: no surviving entry can share the new epoch. *)
     let clear () =
+      incr epoch;
       _cache := LruCache.create capacity;
       Generations.reset generations
     ;;
@@ -327,7 +338,8 @@ struct
 
     let make_key ctx any_id actor_uuid permission target_uuid model =
       let actor = Guard.Uuid.Actor.to_string actor_uuid in
-      { actor
+      { epoch = !epoch
+      ; actor
       ; generation = generation actor
       ; pool = pool_of_ctx ctx
       ; any_id
@@ -337,8 +349,10 @@ struct
       }
     ;;
 
-    let find ctx any_id actor_uuid permission target_uuid model =
-      let key = make_key ctx any_id actor_uuid permission target_uuid model in
+    (* [find] and [store] take a key precomputed by [make_key] so a single
+       validation snapshots the epoch/generation once and reuses it for both
+       the lookup and the store. *)
+    let find key =
       match LruCache.find key !_cache with
       | Some _ as v ->
         LruCache.promote key !_cache;
@@ -346,11 +360,8 @@ struct
       | None -> None
     ;;
 
-    let store ctx any_id actor_uuid permission target_uuid model result =
-      LruCache.add
-        (make_key ctx any_id actor_uuid permission target_uuid model)
-        result
-        !_cache;
+    let store key result =
+      LruCache.add key result !_cache;
       LruCache.trim !_cache
     ;;
   end
@@ -360,7 +371,8 @@ struct
      Invalidated by [Target.promote] and by [clear_cache]/[clean]/[delete]. *)
   module ModelCache = struct
     type model_key =
-      { pool : string option
+      { epoch : int
+      ; pool : string option
       ; target : string
       }
 
@@ -369,7 +381,9 @@ struct
 
       let equal a b =
         let open CCString in
-        CCOption.equal equal a.pool b.pool && equal a.target b.target
+        CCInt.equal a.epoch b.epoch
+        && CCOption.equal equal a.pool b.pool
+        && equal a.target b.target
       ;;
 
       let hash = CCHash.poly
@@ -385,16 +399,23 @@ struct
 
     let capacity = 4096
     let _cache = ref (LruCache.create capacity)
-    let clear () = _cache := LruCache.create capacity
+
+    (* [epoch] is snapshotted into the key when a resolution *starts*.
+       Bumping it (via [invalidate]/[clear]) makes every earlier key
+       unreachable, so a [promote] that races an in-flight resolution cannot
+       be overwritten by the stale model the resolution was still computing;
+       the stale entry ages out via LRU instead. *)
+    let epoch = ref 0
+    let clear () = incr epoch
 
     let make_key ctx uuid =
-      { pool = DBCache.pool_of_ctx ctx
+      { epoch = !epoch
+      ; pool = DBCache.pool_of_ctx ctx
       ; target = Guard.Uuid.Target.to_string uuid
       }
     ;;
 
-    let find ctx uuid =
-      let key = make_key ctx uuid in
+    let find key =
       match LruCache.find key !_cache with
       | Some _ as v ->
         LruCache.promote key !_cache;
@@ -402,12 +423,17 @@ struct
       | None -> None
     ;;
 
-    let store ctx uuid model =
-      LruCache.add (make_key ctx uuid) model !_cache;
+    let store key model =
+      LruCache.add key model !_cache;
       LruCache.trim !_cache
     ;;
 
-    let remove ctx uuid = LruCache.remove (make_key ctx uuid) !_cache
+    (* A promoted target changes model, so drop its cached resolution and bump
+       the epoch to also discard any in-flight resolution of the old model. *)
+    let invalidate ctx uuid =
+      LruCache.remove (make_key ctx uuid) !_cache;
+      incr epoch
+    ;;
   end
 
   include Guard.MakePersistence (struct
@@ -1058,7 +1084,7 @@ struct
           ;;
 
           let promote ?ctx uuid model =
-            let () = ModelCache.remove ctx uuid in
+            let () = ModelCache.invalidate ctx uuid in
             Database.exec ?ctx promote_request (uuid, model)
           ;;
         end
@@ -1330,11 +1356,20 @@ struct
           (* [run_and_cache cache_model query] checks the cache keyed by
              [cache_model], runs [query] on a miss, then stores the result
              under the same key.  Callers must pass the fully-resolved model
-             so the key is stable and concrete. *)
+             so the key is stable and concrete.  The key is snapshotted once,
+             before running [query], so an invalidation that races the query
+             cannot be overwritten by this (now stale) result. *)
           let run_and_cache cache_model query =
-            match
-              DBCache.find ctx any_id uuid permission target_uuid cache_model
-            with
+            let key =
+              DBCache.make_key
+                ctx
+                any_id
+                uuid
+                permission
+                target_uuid
+                cache_model
+            in
+            match DBCache.find key with
             | Some granted ->
               log_result granted;
               Lwt.return granted
@@ -1343,16 +1378,7 @@ struct
               >|= fun result ->
               let granted = CCResult.is_ok result in
               log_result granted;
-              let () =
-                DBCache.store
-                  ctx
-                  any_id
-                  uuid
-                  permission
-                  target_uuid
-                  cache_model
-                  granted
-              in
+              let () = DBCache.store key granted in
               granted
           in
           match any_id, target_uuid, model with
@@ -1374,13 +1400,16 @@ struct
                key use the concrete model, preventing stale model=None entries
                if the target's model later changes (e.g. via Target.promote).
                The resolution itself is cached so a validation-cache hit does
-               not still cost a database round trip. *)
-            (match ModelCache.find ctx target_uuid with
+               not still cost a database round trip.  The model-cache key is
+               snapshotted before the resolution query so a racing promote is
+               not overwritten by the stale model being resolved here. *)
+            let model_key = ModelCache.make_key ctx target_uuid in
+            (match ModelCache.find model_key with
              | Some model -> Lwt.return_ok model
              | None ->
                Target.find_model ?ctx target_uuid
                >|= CCResult.map (fun model ->
-                 ModelCache.store ctx target_uuid model;
+                 ModelCache.store model_key model;
                  model))
             >>= (function
              | Error _ as e ->

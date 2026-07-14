@@ -70,7 +70,7 @@ Example usage:
 
 ## Development
 
-This project runs in a DevContainer. All credentials are passed via a local `.env` file — no host shell variables or SSH keys required.
+This project runs in a DevContainer. All credentials are passed via a local `.env` file — no host SSH keys required.
 
 1. Follow the general DevContainer instructions in the [Engineering Wiki](https://gitlab.uzh.ch/econ/it/engineering/-/wikis/2_best-practices/DevContainer).
 1. Copy the env template and fill in the values: `cp .devcontainer/.env.example .devcontainer/.env`

@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ### Changed
 
-- Cache invalidation for a single actor now bumps a per-actor generation instead of scanning the whole cache
+- Cache invalidation for a single actor now bumps a per-actor generation (and a global epoch for full clears) instead of scanning the whole cache; keys are snapshotted when a validation starts so an invalidation that races an in-flight validation is not lost
 - Role permission changes invalidate the cache in one step instead of querying and clearing all affected actors
 - `PermissionOnTarget.remove_duplicates` runs in linearithmic instead of quadratic time
 - `ActorRole.find_by_actor` and `find_by_target` use `UNION ALL`; validation queries use inner joins where applicable
