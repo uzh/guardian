@@ -4,6 +4,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [unreleased](https://github.com/uzh/guardian/tree/HEAD)
 
+## [0.5.0](https://github.com/uzh/guardian/tree/0.4.0) - 2026-07-14
+
 ### Added
 
 - Cache for target uuid to model resolution, so cached validations no longer require a database round trip
