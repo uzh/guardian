@@ -1,2 +1,4 @@
-module Pools = Database_pools
-module MariaDb = Mariadb_backend
+module Backend = Backend
+module Capabilities = Capabilities
+module Database = Database
+module Dialect = Dialect

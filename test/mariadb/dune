@@ -1,0 +1,23 @@
+(test
+ (name main)
+ (package guardian-mariadb)
+ (libraries
+  alcotest-lwt
+  containers
+  guardian
+  guardian_test_suite
+  ppx_deriving.runtime
+  ppx_deriving_yojson.runtime
+  sexplib0
+  yojson
+  guardian.backend
+  guardian-mariadb
+  lwt
+  veins
+  veins-mariadb)
+ (ocamlopt_flags
+  (:standard -O3))
+ (preprocess
+  (pps lwt_ppx))
+ (action
+  (run %{test} -e)))

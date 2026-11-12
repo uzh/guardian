@@ -7,13 +7,18 @@ let combine_lwt m =
   k
 ;;
 
+let read request = Veins.Request.create ~needs:[ Capabilities.read ] request
+let write request = Veins.Request.create ~needs:[ Capabilities.write ] request
+let schema request = Veins.Request.create ~needs:[ Capabilities.schema ] request
+
 module Make
+    (Dialect : Dialect.Sig)
     (ActorModel : Guardian.RoleSig)
     (Role : Guardian.RoleSig)
     (TargetModel : Guardian.RoleSig)
-    (Database : Database_pools.Sig) =
+    (Database : Database.Sig) =
 struct
-  let src = Logs.Src.create "guardian.backend.mariadb"
+  let src = Logs.Src.create ("guardian.backend." ^ Dialect.name)
 
   module Guard = Guardian.Make (ActorModel) (Role) (TargetModel)
 
@@ -23,22 +28,8 @@ struct
 
   module Entity = struct
     module Uuid = struct
-      let sql_select_fragment field =
-        [%string
-          {sql|
-            LOWER(CONCAT(
-              SUBSTR(HEX(%{field}), 1, 8), '-',
-              SUBSTR(HEX(%{field}), 9, 4), '-',
-              SUBSTR(HEX(%{field}), 13, 4), '-',
-              SUBSTR(HEX(%{field}), 17, 4), '-',
-              SUBSTR(HEX(%{field}), 21)
-            ))
-        |sql}]
-      ;;
-
-      let sql_value_fragment name =
-        [%string {sql| UNHEX(REPLACE(%{name}, '-', '')) |sql}]
-      ;;
+      let sql_select_fragment = Dialect.uuid_select
+      let sql_value_fragment = Dialect.uuid_value
 
       module UuidBase (Core : Guard.Uuid.Sig) = struct
         include Core
@@ -249,9 +240,7 @@ struct
   end
 
   module DBCache = struct
-    let pool_of_ctx =
-      CCOption.flat_map (CCList.assoc_opt ~eq:CCString.equal "pool")
-    ;;
+    let pool_of_ctx ctx = Database.label ?ctx ()
 
     (* Flat LRU cache keyed by the full (actor, pool, any_id, permission,
        target_uuid, model) tuple plus a global epoch and a per-actor
@@ -262,7 +251,7 @@ struct
       { epoch : int
       ; actor : string
       ; generation : int
-      ; pool : string option
+      ; pool : string
       ; any_id : bool
       ; permission : Guard.Permission.t
       ; target_uuid : Guard.Uuid.Target.t option
@@ -276,7 +265,7 @@ struct
         CCInt.equal a.epoch b.epoch
         && CCString.equal a.actor b.actor
         && CCInt.equal a.generation b.generation
-        && CCOption.equal CCString.equal a.pool b.pool
+        && CCString.equal a.pool b.pool
         && CCBool.equal a.any_id b.any_id
         && Guard.Permission.equal a.permission b.permission
         && CCOption.equal Guard.Uuid.Target.equal a.target_uuid b.target_uuid
@@ -372,7 +361,7 @@ struct
   module ModelCache = struct
     type model_key =
       { epoch : int
-      ; pool : string option
+      ; pool : string
       ; target : string
       }
 
@@ -382,7 +371,7 @@ struct
       let equal a b =
         let open CCString in
         CCInt.equal a.epoch b.epoch
-        && CCOption.equal equal a.pool b.pool
+        && equal a.pool b.pool
         && equal a.target b.target
       ;;
 
@@ -436,7 +425,20 @@ struct
     ;;
   end
 
+  (* [invalidating ?ctx invalidate write] drops cache entries before [write]
+     (so this process stops serving them right away) and again once the write
+     is visible to other connections: immediately outside a transaction, after
+     COMMIT inside one. The second pass removes entries that a concurrent
+     reader re-populated from the old, still committed state in between. *)
+  let invalidating ?ctx invalidate write =
+    let () = invalidate () in
+    let%lwt result = write in
+    let () = Database.after_commit ?ctx invalidate in
+    Lwt.return result
+  ;;
+
   include Guard.MakePersistence (struct
+      type 'a context = 'a Database.ctx
       type actor = Guard.Actor.t
       type actor_model = ActorModel.t
       type actor_permission = Guard.ActorPermission.t
@@ -491,11 +493,10 @@ struct
                   ?,
                   %{sql_value_fragment "?"}
                 )
-                ON DUPLICATE KEY UPDATE
-                  mark_as_deleted = NULL,
-                  updated_at = NOW()
+                %{Dialect.restore_on_conflict "actor_uuid, role, target_uuid"}
               |sql}]
             |> Entity.ActorRole.targets ->. Caqti_type.unit
+            |> write
           ;;
 
           let upsert_model_request =
@@ -503,18 +504,18 @@ struct
               {sql|
                 INSERT INTO guardian_actor_roles (actor_uuid, role)
                 VALUES (%{Entity.Uuid.sql_value_fragment "?"}, ?)
-                ON DUPLICATE KEY UPDATE
-                  mark_as_deleted = NULL,
-                  updated_at = NOW()
+                %{Dialect.restore_on_conflict "actor_uuid, role"}
               |sql}]
             |> Entity.ActorRole.role ->. Caqti_type.unit
+            |> write
           ;;
 
           let upsert
                 ?ctx
                 ({ Entity.ActorRole.target_uuid; actor_uuid; _ } as role)
             =
-            let () = DBCache.clear_actor actor_uuid in
+            invalidating ?ctx (fun () -> DBCache.clear_actor actor_uuid)
+            @@
             match target_uuid with
             | Some _ -> Database.exec ?ctx upsert_uuid_request role
             | None -> Database.exec ?ctx upsert_model_request role
@@ -538,6 +539,7 @@ struct
                   AND roles.mark_as_deleted IS NULL
               |sql}]
             |> Entity.(Uuid.Actor.t ->* ActorRole.t)
+            |> read
           ;;
 
           let find_by_actor ?ctx = Database.collect ?ctx find_by_actor_request
@@ -561,6 +563,7 @@ struct
                   AND roles.mark_as_deleted IS NULL
               |sql}]
             |> Entity.(Caqti_type.t2 Role.t Uuid.Target.t ->* ActorRole.t)
+            |> read
           ;;
 
           let find_by_target ?ctx = Database.collect ?ctx find_by_target_request
@@ -624,6 +627,7 @@ struct
                   %{exclude_sql}
               |sql}]
             |> params ->* Entity.Uuid.Actor.t
+            |> read
           ;;
 
           let find_actors_by_target_request ?(exclude_sql = "") params =
@@ -637,6 +641,7 @@ struct
                   %{exclude_sql}
               |sql}]
             |> params ->* Entity.Uuid.Actor.t
+            |> read
           ;;
 
           let find_actors_by_role ?ctx ?(exclude = []) (role, target_uuid) =
@@ -710,6 +715,7 @@ struct
                   AND actor_permissions.mark_as_deleted IS NULL
               |sql}]
             |> Uuid.Actor.t ->* PermissionOnTarget.t
+            |> read
           ;;
 
           let permissions_of_actor ?ctx
@@ -730,6 +736,7 @@ struct
                   AND target_uuid = %{Entity.Uuid.sql_value_fragment "$3"}
               |sql}]
             |> Entity.ActorRole.targets ->. Caqti_type.unit
+            |> write
           ;;
 
           let delete_role_model_request =
@@ -742,11 +749,13 @@ struct
                   AND role = $2
               |sql}]
             |> Caqti_type.(t2 Uuid.Actor.t Model.role ->. unit)
+            |> write
           ;;
 
           let delete ?ctx role =
             let open Guard.ActorRole in
-            let () = DBCache.clear_actor role.actor_uuid in
+            invalidating ?ctx (fun () -> DBCache.clear_actor role.actor_uuid)
+            @@
             match role.target_uuid with
             | Some _ -> Database.exec ?ctx delete_role_uuid_request role
             | None ->
@@ -779,6 +788,7 @@ struct
           let find_all_request =
             combine_sql select_sql
             |> Caqti_type.unit ->* Entity.RolePermission.t
+            |> read
           ;;
 
           let find_all ?ctx = Database.collect ?ctx find_all_request
@@ -789,6 +799,7 @@ struct
             in
             combine_sql ~where_additions select_sql
             |> Entity.(TargetModel.t ->* RolePermission.t)
+            |> read
           ;;
 
           let find_all_of_model ?ctx =
@@ -805,14 +816,16 @@ struct
                 updated_at = NOW()
             |sql}
             |> RolePermission.t ->. Caqti_type.unit
+            |> write
           ;;
 
           let insert ?ctx rp =
             (* A changed rule affects every actor holding the role; dropping
                the bounded cache outright is cheaper than enumerating those
                actors. *)
-            let () = DBCache.clear () in
-            Database.exec ?ctx insert_request rp |> Lwt_result.ok
+            Database.exec ?ctx insert_request rp
+            |> invalidating ?ctx DBCache.clear
+            |> Lwt_result.ok
           ;;
 
           let delete_request =
@@ -825,12 +838,14 @@ struct
                 AND target_model = ?
             |sql}
             |> RolePermission.t ->. Caqti_type.unit
+            |> write
           ;;
 
           let delete ?ctx rp =
             (* See [insert]: invalidate all actors at once. *)
-            let () = DBCache.clear () in
-            Database.exec ?ctx delete_request rp |> Lwt_result.ok
+            Database.exec ?ctx delete_request rp
+            |> invalidating ?ctx DBCache.clear
+            |> Lwt_result.ok
           ;;
         end
 
@@ -858,6 +873,7 @@ struct
           let find_all_request =
             combine_sql select_sql
             |> Caqti_type.unit ->* Entity.ActorPermission.t
+            |> read
           ;;
 
           let find_all ?ctx = Database.collect ?ctx find_all_request
@@ -874,6 +890,7 @@ struct
             in
             combine_sql ~joins ~where_additions select_sql
             |> Entity.(Uuid.Target.t ->* ActorPermission.t)
+            |> read
           ;;
 
           let find_all_of_model_request =
@@ -887,6 +904,7 @@ struct
             in
             combine_sql ~joins ~where_additions select_sql
             |> Entity.(TargetModel.t ->* ActorPermission.t)
+            |> read
           ;;
 
           let find_all_of_entity ?ctx =
@@ -902,16 +920,16 @@ struct
               {sql|
                 INSERT INTO guardian_actor_permissions (actor_uuid, permission, target_model, target_uuid)
                 VALUES (%{Entity.Uuid.sql_value_fragment "?"}, ?, ?, %{Entity.Uuid.sql_value_fragment "?"})
-                ON DUPLICATE KEY UPDATE
-                  mark_as_deleted = NULL,
-                  updated_at = NOW()
+                %{Dialect.restore_on_conflict "actor_uuid, permission, target_model, target_uuid"}
               |sql}]
             |> Entity.ActorPermission.t ->. Caqti_type.unit
+            |> write
           ;;
 
           let insert ?ctx ({ Guard.ActorPermission.actor_uuid; _ } as ap) =
-            DBCache.clear_actor actor_uuid;
-            Database.exec ?ctx insert_request ap |> Lwt_result.ok
+            Database.exec ?ctx insert_request ap
+            |> invalidating ?ctx (fun () -> DBCache.clear_actor actor_uuid)
+            |> Lwt_result.ok
           ;;
 
           let delete_request =
@@ -926,14 +944,16 @@ struct
                   AND (($4 IS NULL AND target_uuid IS NULL) OR target_uuid = %{sql_value_fragment "$4"})
               |sql}]
             |> Entity.ActorPermission.t ->. Caqti_type.unit
+            |> write
           ;;
 
           let delete
                 ?ctx
                 ({ Guard.ActorPermission.actor_uuid; _ } as permission)
             =
-            DBCache.clear_actor actor_uuid;
-            Database.exec ?ctx delete_request permission |> Lwt_result.ok
+            Database.exec ?ctx delete_request permission
+            |> invalidating ?ctx (fun () -> DBCache.clear_actor actor_uuid)
+            |> Lwt_result.ok
           ;;
         end
 
@@ -958,11 +978,10 @@ struct
               {sql|
                 INSERT INTO guardian_actors (uuid, model)
                 VALUES (%{Entity.Uuid.sql_value_fragment "?"}, ?)
-                ON DUPLICATE KEY UPDATE
-                  mark_as_deleted = NULL,
-                  updated_at = NOW()
+                %{Dialect.restore_on_conflict "uuid"}
               |sql}]
             |> Entity.Actor.t ->. Caqti_type.unit
+            |> write
           ;;
 
           let insert ?ctx = Database.exec ?ctx insert_request %> Lwt_result.ok
@@ -974,6 +993,7 @@ struct
                   {sql|actors.uuid = %{Entity.Uuid.sql_value_fragment "?"}|sql}]
               {sql|TRUE|sql}
             |> Entity.Uuid.Actor.t ->? Caqti_type.bool
+            |> read
           ;;
 
           let mem ?ctx id =
@@ -989,6 +1009,7 @@ struct
                   {sql|actors.uuid = %{Entity.Uuid.sql_value_fragment "?"}|sql}]
               select_sql
             |> Entity.(Uuid.Actor.t ->? Actor.t)
+            |> read
           ;;
 
           let find ?ctx id =
@@ -1018,11 +1039,10 @@ struct
               {sql|
                 INSERT INTO guardian_targets (uuid, model)
                 VALUES (%{Entity.Uuid.sql_value_fragment "?"}, ?)
-                ON DUPLICATE KEY UPDATE
-                  mark_as_deleted = NULL,
-                  updated_at = NOW()
+                %{Dialect.restore_on_conflict "uuid"}
               |sql}]
             |> Caqti_type.(Entity.Target.t ->. unit)
+            |> write
           ;;
 
           let insert ?ctx = Database.exec ?ctx insert_request %> Lwt_result.ok
@@ -1034,6 +1054,7 @@ struct
                   {sql|targets.uuid = %{Entity.Uuid.sql_value_fragment "?"}|sql}]
               {sql|TRUE|sql}
             |> Entity.Uuid.Target.t ->? Caqti_type.bool
+            |> read
           ;;
 
           let mem ?ctx id =
@@ -1049,6 +1070,7 @@ struct
                   {sql|targets.uuid = %{Entity.Uuid.sql_value_fragment "?"}|sql}]
               select_sql
             |> Entity.(Uuid.Target.t ->? Target.t)
+            |> read
           ;;
 
           let find ?ctx target_uuid =
@@ -1064,6 +1086,7 @@ struct
                   {sql|targets.uuid = %{Entity.Uuid.sql_value_fragment "?"}|sql}]
               {sql|targets.model|sql}
             |> Entity.(Uuid.Target.t ->? TargetModel.t)
+            |> read
           ;;
 
           let find_model ?ctx id =
@@ -1081,11 +1104,12 @@ struct
                 WHERE uuid = %{Uuid.sql_value_fragment "$1"}
               |sql}]
             |> Caqti_type.(t2 Uuid.Target.t TargetModel.t ->. unit)
+            |> write
           ;;
 
           let promote ?ctx uuid model =
-            let () = ModelCache.invalidate ctx uuid in
             Database.exec ?ctx promote_request (uuid, model)
+            |> invalidating ?ctx (fun () -> ModelCache.invalidate ctx uuid)
           ;;
         end
 
@@ -1100,7 +1124,7 @@ struct
           ;;
 
           let find_request_sql =
-            Mariadb_utils.find_request_sql
+            Sql_utils.find_request_sql
               sql_select_columns
               table_name
               ~default_where:None
@@ -1109,6 +1133,7 @@ struct
 
           let insert ?ctx =
             Database.populate
+              ~needs:[ Capabilities.write ]
               ?ctx
               table_name
               sql_insert_columns
@@ -1116,7 +1141,9 @@ struct
           ;;
 
           let find_all_request =
-            find_request_sql "" |> Caqti_type.(unit ->* Model.role_assignment)
+            find_request_sql ""
+            |> Caqti_type.(unit ->* Model.role_assignment)
+            |> read
           ;;
 
           let find_all ?ctx = Database.collect ?ctx find_all_request
@@ -1124,6 +1151,7 @@ struct
           let find_all_by_role_request =
             find_request_sql {sql|WHERE role = ?|sql}
             |> Model.(role ->* role_assignment)
+            |> read
           ;;
 
           let find_all_by_role ?ctx =
@@ -1135,6 +1163,7 @@ struct
               INSERT INTO guardian_assign_roles_history (role, target_role, comment) VALUES (?,?,?)
             |sql}
             |> Caqti_type.(t2 Model.role_assignment (option string) ->. unit)
+            |> write
           ;;
 
           let delete_remove_request =
@@ -1142,14 +1171,16 @@ struct
                 DELETE FROM guardian_assign_roles WHERE role = ? AND target_role = ?
             |sql}
             |> Model.role_assignment ->. Caqti_type.unit
+            |> write
           ;;
 
           let delete ?ctx ?comment role =
             let with_connection request input connection =
               let (module Connection : Caqti_lwt.CONNECTION) = connection in
-              Connection.exec request input
+              Connection.exec (Veins.Request.caqti request) input
             in
             Database.transaction_iter
+              ~needs:[ Capabilities.write ]
               ?ctx
               [ with_connection delete_add_history_request (role, comment)
               ; with_connection delete_remove_request role
@@ -1186,6 +1217,7 @@ struct
               |sql}]
             |> Caqti_type.(
                  t3 Uuid.Actor.t Permission.t TargetModel.t ->? option bool)
+            |> read
           in
           Database.find_opt ?ctx validate_request (actor_uuid, permission, model)
           >|= CCOption.(flatten %> value ~default:false)
@@ -1254,6 +1286,7 @@ struct
                    Uuid.Actor.t
                    (t2 Permission.t (t2 TargetModel.t Uuid.Target.t))
                  ->? option bool)
+            |> read
           in
           Database.find_opt
             ?ctx
@@ -1313,6 +1346,7 @@ struct
               |sql}]
             |> Caqti_type.(
                  t3 Uuid.Actor.t Permission.t TargetModel.t ->? option bool)
+            |> read
           in
           Database.find_opt ?ctx validate_request (actor_uuid, permission, model)
           >|= CCOption.(flatten %> value ~default:false)
@@ -1353,6 +1387,11 @@ struct
                 (Guard.Permission.show permission)
                 target)
           in
+          (* Inside a transaction reads may see uncommitted rows that can still
+             be rolled back, and this transaction may already have changed the
+             actor's permissions: neither read from nor write to the shared
+             caches there. *)
+          let use_cache = not (Database.is_transaction ?ctx ()) in
           (* [run_and_cache cache_model query] checks the cache keyed by
              [cache_model], runs [query] on a miss, then stores the result
              under the same key.  Callers must pass the fully-resolved model
@@ -1369,7 +1408,7 @@ struct
                 target_uuid
                 cache_model
             in
-            match DBCache.find key with
+            match if use_cache then DBCache.find key else None with
             | Some granted ->
               log_result granted;
               Lwt.return granted
@@ -1378,7 +1417,7 @@ struct
               >|= fun result ->
               let granted = CCResult.is_ok result in
               log_result granted;
-              let () = DBCache.store key granted in
+              let () = if use_cache then DBCache.store key granted in
               granted
           in
           match any_id, target_uuid, model with
@@ -1404,12 +1443,12 @@ struct
                snapshotted before the resolution query so a racing promote is
                not overwritten by the stale model being resolved here. *)
             let model_key = ModelCache.make_key ctx target_uuid in
-            (match ModelCache.find model_key with
+            (match if use_cache then ModelCache.find model_key else None with
              | Some model -> Lwt.return_ok model
              | None ->
                Target.find_model ?ctx target_uuid
                >|= CCResult.map (fun model ->
-                 ModelCache.store model_key model;
+                 if use_cache then ModelCache.store model_key model;
                  model))
             >>= (function
              | Error _ as e ->
@@ -1436,13 +1475,12 @@ struct
 
       (** [find_migrations ()] returns a list of all migrations as a tuple with
           key, datetime and sql query **)
-      let find_migrations () = Migrations.all
+      let find_migrations () = Dialect.migrations
 
       (** [find_clean ()] returns a list of all migrations as a tuple with key and
           sql query **)
       let find_clean () =
-        Migrations.all_tables
-        |> CCList.map (fun m -> m, [%string "TRUNCATE TABLE %{m}"])
+        Dialect.tables |> CCList.map (fun m -> m, Dialect.truncate m)
       ;;
 
       (** [migrate ?ctx ()] runs all migration on a specified context [?ctx] **)
@@ -1451,15 +1489,44 @@ struct
         |> find_migrations
         |> Lwt_list.iter_s (fun (key, date, sql) ->
           Logs.debug ~src (fun m -> m "Migration: Run '%s' from '%s'" key date);
-          Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
+          Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit) |> schema) ())
       ;;
 
+      (* Turning off foreign key checks is session state, so the statements and
+         both toggles must run on the same connection. *)
       let run_without_fk_checks ?ctx label stmts =
-        (("disable foreign key checks", "SET FOREIGN_KEY_CHECKS = 0") :: stmts)
-        @ [ "enable foreign key checks", "SET FOREIGN_KEY_CHECKS = 1" ]
-        |> Lwt_list.iter_s (fun (key, sql) ->
-          Logs.debug ~src (fun m -> m "%s: Run '%s'" label key);
-          Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit)) ())
+        let set_fk_checks enabled =
+          Dialect.set_fk_checks enabled
+          |> CCOption.map (fun sql -> sql |> Caqti_type.(unit ->. unit))
+        in
+        let exec_opt (module Connection : Caqti_lwt.CONNECTION) = function
+          | Some request -> Connection.exec request ()
+          | None -> Lwt_result.return ()
+        in
+        Database.query
+          ~needs:[ Capabilities.schema ]
+          ?ctx
+          (fun ((module Connection : Caqti_lwt.CONNECTION) as connection) ->
+             let open Lwt_result.Syntax in
+             let* () = exec_opt connection (set_fk_checks false) in
+             (CCList.fold_left
+                (fun acc (key, sql) ->
+                   let* () = acc in
+                   Logs.debug ~src (fun m -> m "%s: Run '%s'" label key);
+                   Connection.exec (sql |> Caqti_type.(unit ->. unit)) ())
+                (Lwt_result.return ())
+                stmts)
+               [%lwt.finally
+                 exec_opt connection (set_fk_checks true)
+                 |> Lwt.map (function
+                   | Ok () -> ()
+                   | Error err ->
+                     Logs.err ~src (fun m ->
+                       m
+                         "%s: Failed to re-enable foreign key checks: %a"
+                         label
+                         Caqti_error.pp
+                         err))])
       ;;
 
       (** [clean ?ctx ()] runs clean on a specified context [?ctx] **)
@@ -1470,8 +1537,8 @@ struct
 
       let delete ?ctx () =
         let () = Repo.clear_cache () in
-        Migrations.all_tables
-        |> CCList.map (fun m -> m, Format.asprintf "DROP TABLE IF EXISTS %s" m)
+        Dialect.tables
+        |> CCList.map (fun m -> m, Dialect.drop m)
         |> run_without_fk_checks ?ctx "Delete"
       ;;
     end)

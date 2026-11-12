@@ -1,4 +1,6 @@
 module Make (Backend : Guard.PersistenceSig) = struct
+  type 'a context = 'a Backend.context
+
   open Guard
   module User = User.MakeActor (Backend)
 

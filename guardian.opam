@@ -16,9 +16,9 @@ depends: [
   "dune" {>= "2.9"}
   "alcotest" {with-test & >= "1.9.1"}
   "alcotest-lwt" {with-test}
-  "caqti" {>= "2.3.0"}
-  "caqti-driver-mariadb" {>= "2.3.0"}
-  "caqti-lwt" {>= "2.3.0"}
+  "caqti" {>= "3.0.0"}
+  "caqti-driver-mariadb" {with-test & >= "3.0.0"}
+  "caqti-lwt" {>= "3.0.0"}
   "containers" {>= "3.6"}
   "containers-data" {>= "3.6"}
   "dune-release" {with-dev-setup}
@@ -27,8 +27,7 @@ depends: [
   "lru" {>= "0.3.1"}
   "lwt" {>= "5.6.1"}
   "lwt_ppx" {>= "2.1.0"}
-  "mariadb" {>= "1.2.0"}
-  "ocaml" {>= "4.12.0"}
+  "ocaml" {>= "5.0.0"}
   "ocaml-lsp-server" {with-dev-setup}
   "ocamlformat" {with-dev-setup}
   "odoc" {with-doc}
@@ -40,6 +39,8 @@ depends: [
   "sexplib0"
   "uri" {>= "4.2.0"}
   "uuidm" {>= "0.9.9"}
+  "veins" {>= "0.2.0"}
+  "veins-mariadb" {with-test & >= "0.2.0"}
   "yojson" {>= "2.0.2"}
 ]
 build: [
@@ -59,3 +60,9 @@ build: [
   ["dune" "install" "-p" name "--create-install-files" name]
 ]
 dev-repo: "git+https://github.com/uzh/guardian.git"
+# veins isn't on opam yet; move to a release tag once uzh/veins 0.2.0 is tagged
+pin-depends: [
+  ["veins.0.2.0" "git+https://github.com/uzh/veins.git#main"]
+  ["veins-mariadb.0.2.0" "git+https://github.com/uzh/veins.git#main"]
+  ["veins-postgresql.0.2.0" "git+https://github.com/uzh/veins.git#main"]
+]
