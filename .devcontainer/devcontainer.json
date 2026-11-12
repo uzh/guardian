@@ -1,39 +1,70 @@
+// For format details, see https://aka.ms/vscode-remote/devcontainer.json or the definition README at
+// https://github.com/microsoft/vscode-dev-containers/tree/master/containers/python-3 or the
+// devcontainer docu https://code.visualstudio.com/docs/remote/containers#_devcontainerjson-reference
 {
-  "name": "Guardian dev",
-  "dockerComposeFile": "./docker-compose.yml",
+  "name": "Guardian",
+  "dockerComposeFile": [
+    "./docker-compose.yml",
+    "./docker-compose.override.yml"
+  ],
   "service": "dev",
   "runServices": [
     "dev",
-    "database"
-    // "adminer"
+    "database",
+    "database-postgres"
   ],
   "workspaceFolder": "/workspace",
+  "remoteUser": "opam",
+  // NOTE: Dev Containers forwards the host's SSH agent into every terminal and extension,
+  // clear it so remote access only works with the scoped PAT from .env (see postCreate.sh)
+  "remoteEnv": {
+    "SSH_AUTH_SOCK": ""
+  },
   "features": {
-    "cr.gitlab.uzh.ch/econ/it/devcontainer-features/econ-common:1": {},
-    "cr.gitlab.uzh.ch/econ/it/devcontainer-features/econ-git-credentials:1": {
-      "git_remote_host": "github.com"
-    },
-    "cr.gitlab.uzh.ch/econ/it/devcontainer-features/econ-hadolint:1": {},
-    "cr.gitlab.uzh.ch/econ/it/devcontainer-features/econ-wait-for-databases:1": {
-      "databases": "dev/test"
-    },
-    "cr.gitlab.uzh.ch/econ/it/devcontainer-features/econ-ocaml:1": {
-      "opam_version": "2.3",
-      "folders": [
-        "/workspace/_build",
-        "/home/opam/.cache"
-      ]
-    },
-    "cr.gitlab.uzh.ch/econ/it/devcontainer-features/econ-version:2": {
-      "version_source": "guardian.opam::^version: \\\"([^\\\"]+)\\\"",
-      "ocaml": true
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "username": "opam",
+      "installZsh": true,
+      "configureZshAsDefaultShell": true,
+      "installOhMyZsh": true,
+      "installOhMyZshConfig": true,
+      // base image is already updated, keep the build reproducible
+      "upgradePackages": false
     }
   },
-  "postCreateCommand": "wait-for-databases make deps",
+  "postCreateCommand": "/bin/bash .devcontainer/wait-for-database.sh -d db-mariadb/test -d db-postgres/18/docker/base .devcontainer/postCreate.sh",
+  // Use 'settings' to set *default* container specific settings.json values on container create.
+  // You can edit these settings after create using File > Preferences > Settings > Remote.
   "customizations": {
     "vscode": {
+      "settings": {
+        "terminal.integrated.profiles.linux": {
+          "zsh": {
+            "path": "/bin/zsh"
+          }
+        },
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "editor.formatOnSave": true,
+        "files.insertFinalNewline": true,
+        "files.associations": {
+          "*.ml": "ocaml",
+          "*.mli": "ocaml",
+          ".env*": "dotenv"
+        },
+        "ocaml.sandbox": {
+          "kind": "opam",
+          "switch": "5.5.2"
+        }
+      },
+      // Add the IDs of extensions you want installed when the container is created in the array below.
       "extensions": [
-        "Anthropic.claude-code"
+        "Anthropic.claude-code",
+        "DavidAnson.vscode-markdownlint",
+        "donjayamanne.githistory",
+        "eamodio.gitlens",
+        "exiasr.hadolint",
+        "irongeek.vscode-env",
+        "ms-vscode.makefile-tools",
+        "ocamllabs.ocaml-platform"
       ]
     }
   }
