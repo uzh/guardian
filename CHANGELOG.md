@@ -4,6 +4,39 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [unreleased](https://github.com/uzh/guardian/tree/HEAD)
 
+### 💥 Breaking: veins, and one package per database
+
+Guardian runs on [veins](https://github.com/uzh/veins) connection pools and contexts, whose design comes from Reynir
+Björnsson's database refactoring of the pool tool (uzh/z-pool-tool#647).
+
+### Added
+
+- `guardian-mariadb` (`Guardian_mariadb.Make`) and `guardian-postgresql` (`Guardian_postgresql.Make`, PostgreSQL 15+)
+  packages; `Guardian_backend.Backend.Make` is the shared backend over `Guardian_backend.Dialect.Sig`
+- `Guardian_backend.Database.Make`: runs guardian on your own database layer from a small `Core` (`default_ctx`,
+  `label`, `is_transaction`, `after_commit`, `query`, `transaction_iter`) over your own `_ ctx` type; guardian
+  writes commit or roll back with the caller's transaction. `Database.Of_veins` is that core for a veins pool
+- `Guardian_backend.Capabilities` (`read`, `write`, `schema`): every statement declares what it needs, so guardian
+  runs on role-based veins databases
+
+### Changed
+
+- **Breaking:** the context type is no longer `(string * string) list`. It's `_ context` in `Persistence.Backend`,
+  set by the database module, so a caller's own context (e.g. `Veins.Ctx.t`) is passed as-is.
+  `ActorSig`/`TargetSig` declare `type _ context`
+- **Breaking:** `MakePersistence` returns `PersistenceSig with type 'a context = 'a Backend.context`; `find_clean`
+  returns `(string * string) list`
+- **Breaking:** the bundled `Pools` and `MariaDb` modules are gone: use veins and `Guardian_mariadb.Make`. Requires
+  OCaml 5 and caqti 3
+- Cache entries are invalidated before a write and again once it's committed, so a concurrent reader can't re-cache
+  the old state. Validations inside a transaction bypass the caches
+- `clean`/`delete` disable foreign key checks on the same connection that runs the statements
+
+### Fixed
+
+- A rolled-back transaction left its pooled connection with autocommit off (caqti-driver-mariadb), so later
+  statements on it ran in a transaction that was never committed; veins restores autocommit
+
 ## [0.5.0](https://github.com/uzh/guardian/tree/0.4.0) - 2026-07-14
 
 ### Added

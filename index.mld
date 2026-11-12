@@ -2,33 +2,38 @@
 
 Generic framework for roles and permissions to be used in our projects
 
-{1 Limitations and Notes}
+{1 Packages}
 
-- {b Supported Database}: Implementation with MariaDb
-- {b Context (`ctx`)}: Allows to have multiple database pools {!section:mysection} (See {{: test} next section})
+- [guardian]: roles, permissions and validation ({!Guardian}), plus the database-independent backend
+  ({!Guardian_backend}) running on veins connection pools
+- [guardian-mariadb]: the MariaDB / MySQL backend ([Guardian_mariadb.Make])
+- [guardian-postgresql]: the PostgreSQL backend ([Guardian_postgresql.Make], PostgreSQL 15+)
 
-{1:mysection Setup with MariaDB backend (MultiPools)}
+{1 Setup}
+
+Guardian runs its statements on your veins pool and on the context you pass as [?ctx]: a label, a held connection
+or an open transaction, so guardian writes commit or roll back with yours.
 
 {[
-  let open Guardian_backend.Pools in
-  let module MariaConfig = struct
-    include DefaultConfig
-
+  module Db = Veins_mariadb.Pools.Make (struct
     let database =
-      MultiPools
-        [ "pool-one", "mariadb://root@database:3306/dev"
-        ; "pool-two", "mariadb://root@database:3306/test"
-        ]
-    ;;
-  end
-  in
-  let module MariaDb = Guardian_backend.MariaDb.Make (Roles) (Make (MariaConfig))
-  let%lwt () = Lwt_list.iter (fun pool -> MariaDb.migrate ~ctx:["pool", pool] ()) ["pool-one"; "pool-two"]
-  (** NOTE: To integrate migrations into your applications migration state see
-      e.g. function 'MariaDB.find_migrations *)
+      Veins.Database.create (Veins.Label.create "app")
+        (Veins.Database.Main (Veins.Url.create "mariadb://root@database:3306/dev"))
+  end)
+
+  module Guard =
+    Guardian_mariadb.Make (Roles.Actor) (Roles.Role) (Roles.Target)
+      (Guardian_backend.Database.Make
+         (Guardian_backend.Database.Of_veins (Db) (struct let default_role = None end)))
+
+  let () = Db.Pool.initialize ()
+  let%lwt () = Guard.migrate ~ctx:(Db.label_ctx (Veins.Label.create "app")) ()
 ]}
 
-## Usage
+Every statement declares the capabilities it needs ({!Guardian_backend.Capabilities}). On a veins database with
+one URL per role, the role guardian runs as must have them; a single-URL database has all of them.
+
+{1 Usage}
 
 The [test] directory shows an example implementation of how guardian can be used.
 
