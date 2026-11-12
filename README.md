@@ -2,31 +2,39 @@
 
 Generic framework for roles and permissions to be used in our projects
 
-## Limitations and Notes
+## Packages
 
-- Supported Database: Implementation with MariaDb
-- Context (`ctx`): Allows to have multiple database pools (See [next section](#setup-with-mariadb-backend-multipools))
+- `guardian`: roles, permissions and validation (`Guardian`), plus the database-independent backend
+  (`Guardian_backend`) running on [veins](https://github.com/uzh/veins) connection pools
+- `guardian-mariadb`: the MariaDB / MySQL backend (`Guardian_mariadb.Make`)
+- `guardian-postgresql`: the PostgreSQL backend (`Guardian_postgresql.Make`, PostgreSQL 15+)
 
-## Setup with MariaDB backend (MultiPools)
+## Setup
+
+Guardian runs its statements on your veins pool and on the context you pass as `?ctx`: a label, a held connection
+or an open transaction, so guardian writes commit or roll back with yours.
 
 ```ocaml
-  let open Guardian_backend.Pools in
-  let module MariaConfig = struct
-    include DefaultConfig
+module Db = Veins_mariadb.Pools.Make (struct
+  let database =
+    Veins.Database.create (Veins.Label.create "app")
+      (Veins.Database.Main (Veins.Url.create "mariadb://root@database:3306/dev"))
+end)
 
-    let database =
-      MultiPools
-        [ "pool-one", "mariadb://root@database:3306/dev"
-        ; "pool-two", "mariadb://root@database:3306/test"
-        ]
-    ;;
-  end
-  in
-  let module MariaDb = Guardian_backend.MariaDb.Make (Roles) (Make (MariaConfig))
-  let%lwt () = Lwt_list.iter (fun pool -> MariaDb.migrate ~ctx:["pool", pool] ()) ["pool-one"; "pool-two"]
-  (** NOTE: To integrate migrations into your applications migration state see
-      e.g. function 'MariaDB.find_migrations *)
+module Guard =
+  Guardian_mariadb.Make (Roles.Actor) (Roles.Role) (Roles.Target)
+    (Guardian_backend.Database.Make
+       (Guardian_backend.Database.Of_veins (Db) (struct let default_role = None end)))
+
+let () = Db.Pool.initialize ()
+let%lwt () = Guard.migrate ~ctx:(Db.label_ctx (Veins.Label.create "app")) ()
+(* To integrate the migrations into your application's migration state, see
+   [Guard.find_migrations]. *)
 ```
+
+Every statement declares the capabilities it needs (`Guardian_backend.Capabilities`: `read`, `write`, `schema`). On a
+veins database with one URL per role, the role guardian runs as must have them; a single-URL database has all of
+them. To run guardian on a database layer other than veins, implement `Guardian_backend.Database.Core`.
 
 ## Usage
 
@@ -95,7 +103,7 @@ Most used commands can be found in the following list. For the full list of comm
 
 - `make build` - to build the project
 - `make build-watch` - to build and watch the project
-- `make test` - to run all tests. This requires a running MariaDB instance.
+- `make test` - to run all tests. This requires a running MariaDB (`MARIADB_URL`) and PostgreSQL (`POSTGRES_URL`) instance; the tests drop guardian's tables, use throwaway databases.
 
 ## 🚀 Release new version
 
