@@ -4,7 +4,6 @@
  (libraries
   caqti
   caqti.classic
-  caqti-driver-mariadb
   caqti-lwt
   caqti-lwt.unix
   containers
@@ -13,7 +12,8 @@
   logs
   lru
   lwt
-  uri)
+  uri
+  veins)
  (preprocess
   (pps
    lwt_ppx

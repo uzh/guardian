@@ -35,11 +35,13 @@
     (>= 1.9.1)))
   (alcotest-lwt :with-test)
   (caqti
-   (>= 2.3.0))
+   (>= 3.0.0))
   (caqti-driver-mariadb
-   (>= 2.3.0))
+   (and
+    :with-test
+    (>= 3.0.0)))
   (caqti-lwt
-   (>= 2.3.0))
+   (>= 3.0.0))
   (containers
    (>= 3.6))
   (containers-data
@@ -57,10 +59,8 @@
    (>= 5.6.1))
   (lwt_ppx
    (>= 2.1.0))
-  (mariadb
-   (>= 1.2.0))
   (ocaml
-   (>= 4.12.0))
+   (>= 5.0.0))
   (ocaml-lsp-server :with-dev-setup)
   (ocamlformat :with-dev-setup)
   (odoc :with-doc)
@@ -78,7 +78,41 @@
    (>= 4.2.0))
   (uuidm
    (>= 0.9.9))
+  (veins
+   (>= 0.2.0))
+  (veins-mariadb
+   (and
+    :with-test
+    (>= 0.2.0)))
   (yojson
    (>= 2.0.2))))
 
 (implicit_transitive_deps false)
+
+(package
+ (name guardian-mariadb)
+ (synopsis "MariaDB backend for guardian")
+ (description
+  "Guardian's persistence on MariaDB / MySQL, running on veins connection pools.")
+ (depends
+  (guardian
+   (= :version))
+  (caqti-driver-mariadb
+   (>= 3.0.0))
+  (veins-mariadb
+   (>= 0.2.0))
+  ppx_string))
+
+(package
+ (name guardian-postgresql)
+ (synopsis "PostgreSQL backend for guardian")
+ (description
+  "Guardian's persistence on PostgreSQL, running on veins connection pools.")
+ (depends
+  (guardian
+   (= :version))
+  (caqti-driver-postgresql
+   (>= 3.0.0))
+  (veins-postgresql
+   (>= 0.2.0))
+  ppx_string))

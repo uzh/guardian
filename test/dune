@@ -1,18 +1,21 @@
-(test
- (name main)
+; Test cases shared by the per-database test runners (mariadb/, postgresql/).
+
+(library
+ (name guardian_test_suite)
+ (wrapped false)
  (libraries
   alcotest
   alcotest-lwt
   containers
   guardian
   guardian.backend
+  veins
   fmt
   logs
+  lwt
   result
   sexplib0
   uri)
- (ocamlopt_flags
-  (:standard -O3))
  (flags
   (:standard -w -32))
  (preprocess
@@ -23,16 +26,4 @@
    ppx_deriving.make
    ppx_deriving.ord
    ppx_deriving.show
-   ppx_sexp_conv))
- (deps
-  article.ml
-  guard.ml
-  hacker.ml
-  main.ml
-  notes.ml
-  post.ml
-  role.ml
-  user.ml)
- (action
-  (progn
-   (run %{test} -e))))
+   ppx_sexp_conv)))
