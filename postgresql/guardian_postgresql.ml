@@ -6,8 +6,12 @@ module Migrations = Migrations
 
 module Dialect : Guardian_backend.Dialect.Sig = struct
   let name = "postgresql"
-  let uuid_select field = Veins_postgresql.Dialect.uuid_select_fragment ~field
-  let uuid_value = Veins_postgresql.Dialect.uuid_value_fragment
+
+  let uuid_select field =
+    Veins.Dialect.uuid_select_fragment Veins.Dialect.Postgresql ~field
+  ;;
+
+  let uuid_value = Veins.Dialect.uuid_value_fragment Veins.Dialect.Postgresql
 
   let restore_on_conflict columns =
     [%string

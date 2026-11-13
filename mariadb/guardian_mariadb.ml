@@ -5,8 +5,12 @@ module Migrations = Migrations
 
 module Dialect : Guardian_backend.Dialect.Sig = struct
   let name = "mariadb"
-  let uuid_select field = Veins_mariadb.Dialect.uuid_select_fragment ~field
-  let uuid_value = Veins_mariadb.Dialect.uuid_value_fragment
+
+  let uuid_select field =
+    Veins.Dialect.uuid_select_fragment Veins.Dialect.Mariadb ~field
+  ;;
+
+  let uuid_value = Veins.Dialect.uuid_value_fragment Veins.Dialect.Mariadb
 
   let restore_on_conflict (_ : string) =
     {sql|ON DUPLICATE KEY UPDATE mark_as_deleted = NULL, updated_at = NOW()|sql}
