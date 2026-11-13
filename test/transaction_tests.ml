@@ -4,14 +4,23 @@ module Guard = Guardian.Make (Role.Actor) (Role.Role) (Role.Target)
 
 module Make
     (Database : Veins.Pools_sig.Sig)
-    (Backend : Guard.PersistenceSig with type 'a context = 'a Veins.Ctx.t) =
+    (Backend :
+       Guard.PersistenceSig with type ('a, 'g) context = ('a, 'g) Veins.Ctx.t) =
 struct
   open Guard
 
   exception Rollback
 
+  (* Every right guardian's statements need: the tests run as the owner. *)
+  type all =
+    [ `Read
+    | `Write
+    | `Schema
+    ]
+
+  let owner : all Veins.Role.t = Veins.Role.owner
   let label = Veins.Database.label Database.Config.database
-  let ctx = Database.label_ctx label
+  let ctx = Database.label_ctx ~role:owner label
 
   let get_ok = function
     | Ok x -> x
@@ -21,7 +30,7 @@ struct
   (* Runs [fcn] in a transaction that is always rolled back. *)
   let rolled_back fcn =
     try%lwt
-      Database.transaction_ctx label (fun ctx ->
+      Database.transaction_ctx ~role:owner label (fun ctx ->
         let%lwt () = fcn ctx in
         Lwt.fail Rollback)
     with
@@ -78,7 +87,7 @@ struct
   let test_commit_invalidates_concurrent_reads _ () =
     let%lwt actor, target = setup () in
     let%lwt () =
-      Database.transaction_ctx label (fun tctx ->
+      Database.transaction_ctx ~role:owner label (fun tctx ->
         let%lwt () = Backend.ActorRole.upsert ~ctx:tctx (admin_of actor) in
         let%lwt outside = can_update ~ctx actor target in
         Alcotest.(check bool) "not visible to other connections" false outside;
@@ -117,7 +126,7 @@ struct
     in
     Alcotest.(check bool) "hook not run" false !ran;
     let%lwt () =
-      Database.transaction_ctx label (fun tctx ->
+      Database.transaction_ctx ~role:owner label (fun tctx ->
         Veins.Ctx.after_commit tctx (fun () -> ran := true);
         Alcotest.(check bool) "hook deferred until commit" false !ran;
         Lwt.return_unit)

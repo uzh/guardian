@@ -7,9 +7,9 @@ let combine_lwt m =
   k
 ;;
 
-let read request = Veins.Request.create ~needs:[ Capabilities.read ] request
-let write request = Veins.Request.create ~needs:[ Capabilities.write ] request
-let schema request = Veins.Request.create ~needs:[ Capabilities.schema ] request
+let read request = Veins.Request.create ~needs:Needs.read request
+let write request = Veins.Request.create ~needs:Needs.write request
+let schema request = Veins.Request.create ~needs:Needs.schema request
 
 module Make
     (Dialect : Dialect.Sig)
@@ -438,7 +438,7 @@ struct
   ;;
 
   include Guard.MakePersistence (struct
-      type 'a context = 'a Database.ctx
+      type ('a, 'g) context = ('a, 'g) Database.ctx
       type actor = Guard.Actor.t
       type actor_model = ActorModel.t
       type actor_permission = Guard.ActorPermission.t
@@ -1133,7 +1133,7 @@ struct
 
           let insert ?ctx =
             Database.populate
-              ~needs:[ Capabilities.write ]
+              ~needs:Needs.write
               ?ctx
               table_name
               sql_insert_columns
@@ -1180,7 +1180,7 @@ struct
               Connection.exec (Veins.Request.caqti request) input
             in
             Database.transaction_iter
-              ~needs:[ Capabilities.write ]
+              ~needs:Needs.write
               ?ctx
               [ with_connection delete_add_history_request (role, comment)
               ; with_connection delete_remove_request role
@@ -1504,7 +1504,7 @@ struct
           | None -> Lwt_result.return ()
         in
         Database.query
-          ~needs:[ Capabilities.schema ]
+          ~needs:Needs.schema
           ?ctx
           (fun ((module Connection : Caqti_lwt.CONNECTION) as connection) ->
              let open Lwt_result.Syntax in

@@ -14,17 +14,18 @@ Björnsson's database refactoring of the pool tool (uzh/z-pool-tool#647).
 - `guardian-mariadb` (`Guardian_mariadb.Make`) and `guardian-postgresql` (`Guardian_postgresql.Make`, PostgreSQL 15+)
   packages; `Guardian_backend.Backend.Make` is the shared backend over `Guardian_backend.Dialect.Sig`
 - `Guardian_backend.Database.Make`: runs guardian on your own database layer from a small `Core` (`default_ctx`,
-  `label`, `is_transaction`, `after_commit`, `query`, `transaction_iter`) over your own `_ ctx` type; guardian
+  `label`, `is_transaction`, `after_commit`, `query`, `transaction_iter`) over your own `(_, _) ctx` type; guardian
   writes commit or roll back with the caller's transaction. `Database.Of_veins` is that core for a veins pool
-- `Guardian_backend.Capabilities` (`read`, `write`, `schema`): every statement declares what it needs, so guardian
-  runs on role-based veins databases
+- `Guardian_backend.Needs` (`` `Read ``, `` `Write ``, `` `Schema ``, veins' typed needs): every statement declares
+  what it needs, and every function taking `?ctx` states it in its type, e.g.
+  `validate : ?ctx:(_, [> `Read ]) context -> ...`, so a context whose veins role lacks a right doesn't compile
 
 ### Changed
 
-- **Breaking:** the context type is no longer `(string * string) list`. It's `_ context` in `Persistence.Backend`,
-  set by the database module, so a caller's own context (e.g. `Veins.Ctx.t`) is passed as-is.
-  `ActorSig`/`TargetSig` declare `type _ context`
-- **Breaking:** `MakePersistence` returns `PersistenceSig with type 'a context = 'a Backend.context`; `find_clean`
+- **Breaking:** the context type is no longer `(string * string) list`. It's `(_, _) context` in
+  `Persistence.Backend` (transaction marker and role type), set by the database module, so a caller's own context
+  (e.g. `Veins.Ctx.t`) is passed as-is. `ActorSig`/`TargetSig` declare `type (_, _) context`
+- **Breaking:** `MakePersistence` returns `PersistenceSig with type ('a, 'g) context = ('a, 'g) Backend.context`; `find_clean`
   returns `(string * string) list`
 - **Breaking:** the bundled `Pools` and `MariaDb` modules are gone: use veins and `Guardian_mariadb.Make`. Requires
   OCaml 5 and caqti 3
