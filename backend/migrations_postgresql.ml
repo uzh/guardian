@@ -2,7 +2,7 @@
    enum type: guardian binds it as a string parameter.
 
    Guardian's schema on PostgreSQL. It starts at the current MariaDB schema
-   (see guardian-mariadb's migrations) instead of replaying its history. *)
+   (see migrations_mariadb.ml) instead of replaying its history. *)
 
 let set_updated_at_function =
   {sql|

@@ -4,10 +4,10 @@ Generic framework for roles and permissions to be used in our projects
 
 ## Packages
 
-- `guardian`: roles, permissions and validation (`Guardian`), plus the database-independent backend
-  (`Guardian_backend`) running on [veins](https://github.com/uzh/veins) connection pools
-- `guardian-mariadb`: the MariaDB / MySQL backend (`Guardian_mariadb.Make`)
-- `guardian-postgresql`: the PostgreSQL backend (`Guardian_postgresql.Make`, PostgreSQL 15+)
+- `guardian`: roles, permissions and validation (`Guardian`), plus the backend (`Guardian_backend.Make`) running
+  on [veins](https://github.com/uzh/veins) connection pools, on MariaDB / MySQL and PostgreSQL 15+. Its SQL follows
+  the dialect of each connection, so there is one package for both; add `veins-mariadb` or `veins-postgresql` for
+  the driver.
 
 ## Setup
 
@@ -22,14 +22,15 @@ module Db = Veins_mariadb.Pools.Make (struct
 end)
 
 module Guard =
-  Guardian_mariadb.Make (Roles.Actor) (Roles.Role) (Roles.Target)
+  Guardian_backend.Make (Roles.Actor) (Roles.Role) (Roles.Target)
     (Guardian_backend.Database.Make
        (Guardian_backend.Database.Of_veins (Db) (struct let default_role = Veins.Role.owner end)))
 
 let () = Db.Pool.initialize ()
 let%lwt () = Guard.migrate ~ctx:(Db.label_ctx ~role:Veins.Role.owner (Veins.Label.create "app")) ()
-(* To integrate the migrations into your application's migration state, see
-   [Guard.find_migrations]. *)
+(* [migrate] runs the migrations of the connection's dialect. To integrate them
+   into your application's migration state instead, see
+   [Guard.find_migrations Veins.Dialect.Mariadb]. *)
 ```
 
 Every statement declares what it needs (`Guardian_backend.Needs`: `` `Read ``, `` `Write ``, `` `Schema ``), and

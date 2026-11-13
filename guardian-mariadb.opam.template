@@ -1,6 +1,0 @@
-# veins isn't on opam yet; move to a release tag once uzh/veins 0.2.0 is tagged
-pin-depends: [
-  ["veins.0.2.0" "git+https://github.com/uzh/veins.git#main"]
-  ["veins-mariadb.0.2.0" "git+https://github.com/uzh/veins.git#main"]
-  ["veins-postgresql.0.2.0" "git+https://github.com/uzh/veins.git#main"]
-]

@@ -4,10 +4,9 @@ Generic framework for roles and permissions to be used in our projects
 
 {1 Packages}
 
-- [guardian]: roles, permissions and validation ({!Guardian}), plus the database-independent backend
-  ({!Guardian_backend}) running on veins connection pools
-- [guardian-mariadb]: the MariaDB / MySQL backend ([Guardian_mariadb.Make])
-- [guardian-postgresql]: the PostgreSQL backend ([Guardian_postgresql.Make], PostgreSQL 15+)
+- [guardian]: roles, permissions and validation ({!Guardian}), plus the backend ({!Guardian_backend.Make}) running
+  on veins connection pools, on MariaDB / MySQL and PostgreSQL 15+. Its SQL follows the dialect of each
+  connection, so there is one package for both; add [veins-mariadb] or [veins-postgresql] for the driver.
 
 {1 Setup}
 
@@ -22,7 +21,7 @@ or an open transaction, so guardian writes commit or roll back with yours.
   end)
 
   module Guard =
-    Guardian_mariadb.Make (Roles.Actor) (Roles.Role) (Roles.Target)
+    Guardian_backend.Make (Roles.Actor) (Roles.Role) (Roles.Target)
       (Guardian_backend.Database.Make
          (Guardian_backend.Database.Of_veins (Db) (struct let default_role = Veins.Role.owner end)))
 

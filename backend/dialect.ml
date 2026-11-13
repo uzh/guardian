@@ -1,37 +1,44 @@
-(** The SQL differences between the databases guardian supports. The backend
-    ({!Backend.Make}) is written against this; [guardian-mariadb] and
-    [guardian-postgresql] provide the implementations. *)
+(* The SQL that differs between the databases guardian supports. *)
 
-module type Sig = sig
-  (** Short name, used for log sources, e.g. ["mariadb"]. *)
-  val name : string
+type kind = Veins.Dialect.kind =
+  | Mariadb
+  | Postgresql
 
-  (** [uuid_select field] selects the UUID stored in [field] as a lowercase
-      dashed string. *)
-  val uuid_select : string -> string
+let uuid_select kind field = Veins.Dialect.uuid_select_fragment kind ~field
 
-  (** [uuid_value placeholder] turns a dashed UUID parameter into the stored
-      representation. *)
-  val uuid_value : string -> string
+let uuid_value kind placeholder =
+  Veins.Dialect.uuid_value_fragment kind placeholder
+;;
 
-  (** [restore_on_conflict columns] ends an [INSERT … VALUES (…)] so that a row
-      conflicting on the unique [columns] (comma separated) is restored:
-      [mark_as_deleted = NULL], [updated_at = NOW()]. *)
-  val restore_on_conflict : string -> string
+let restore_on_conflict kind columns =
+  match kind with
+  | Mariadb ->
+    {sql|ON DUPLICATE KEY UPDATE mark_as_deleted = NULL, updated_at = NOW()|sql}
+  | Postgresql ->
+    [%string
+      {sql|ON CONFLICT (%{columns}) DO UPDATE SET mark_as_deleted = NULL, updated_at = NOW()|sql}]
+;;
 
-  (** [(key, date, sql)] of every schema migration, oldest first. *)
-  val migrations : (string * string * string) list
+let migrations = function
+  | Mariadb -> Migrations_mariadb.all
+  | Postgresql -> Migrations_postgresql.all
+;;
 
-  (** All of guardian's tables. *)
-  val tables : string list
+let tables = function
+  | Mariadb -> Migrations_mariadb.all_tables
+  | Postgresql -> Migrations_postgresql.all_tables
+;;
 
-  (** Statement emptying a table. *)
-  val truncate : string -> string
+let truncate kind table =
+  match kind with
+  | Mariadb -> [%string "TRUNCATE TABLE %{table}"]
+  | Postgresql -> [%string "TRUNCATE TABLE %{table} CASCADE"]
+;;
 
-  (** Statement dropping a table. *)
-  val drop : string -> string
+let drop kind table =
+  match kind with
+  | Mariadb -> [%string "DROP TABLE IF EXISTS %{table}"]
+  | Postgresql -> [%string "DROP TABLE IF EXISTS %{table} CASCADE"]
+;;
 
-  (** Statement turning foreign key checks of the session on or off, [None]
-      where {!truncate} and {!drop} don't need it. *)
-  val set_fk_checks : bool -> string option
-end
+let set_fk_checks kind enabled = Veins.Dialect.set_fk_checks kind enabled
