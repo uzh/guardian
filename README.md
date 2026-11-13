@@ -18,23 +18,26 @@ or an open transaction, so guardian writes commit or roll back with yours.
 module Db = Veins_mariadb.Pools.Make (struct
   let database =
     Veins.Database.create (Veins.Label.create "app")
-      (Veins.Database.Main (Veins.Url.create "mariadb://root@database:3306/dev"))
+      (Veins.Url.create "mariadb://root@database:3306/dev")
 end)
 
 module Guard =
   Guardian_mariadb.Make (Roles.Actor) (Roles.Role) (Roles.Target)
     (Guardian_backend.Database.Make
-       (Guardian_backend.Database.Of_veins (Db) (struct let default_role = None end)))
+       (Guardian_backend.Database.Of_veins (Db) (struct let default_role = Veins.Role.owner end)))
 
 let () = Db.Pool.initialize ()
-let%lwt () = Guard.migrate ~ctx:(Db.label_ctx (Veins.Label.create "app")) ()
+let%lwt () = Guard.migrate ~ctx:(Db.label_ctx ~role:Veins.Role.owner (Veins.Label.create "app")) ()
 (* To integrate the migrations into your application's migration state, see
    [Guard.find_migrations]. *)
 ```
 
-Every statement declares the capabilities it needs (`Guardian_backend.Capabilities`: `read`, `write`, `schema`). On a
-veins database with one URL per role, the role guardian runs as must have them; a single-URL database has all of
-them. To run guardian on a database layer other than veins, implement `Guardian_backend.Database.Core`.
+Every statement declares what it needs (`Guardian_backend.Needs`: `` `Read ``, `` `Write ``, `` `Schema ``), and
+guardian's functions state it in their types: `validate` takes a context whose veins role grants `` `Read ``,
+`ActorRole.upsert` one granting `` `Write ``, `migrate` one granting `` `Schema ``. Passing a context whose role lacks
+them doesn't compile. Without `?ctx`, guardian runs as the `default_role` given to `Database.Of_veins`, which must
+grant everything (e.g. `Veins.Role.owner`). To run guardian on a database layer other than veins, implement
+`Guardian_backend.Database.Core`.
 
 ## Usage
 

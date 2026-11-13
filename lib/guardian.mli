@@ -104,9 +104,12 @@ module Make : functor
 
   module type ActorSig = sig
     type t
-    type _ context
+    type (_, _) context
 
-    val to_authorizable : ?ctx:_ context -> t -> (Actor.t, string) Lwt_result.t
+    val to_authorizable
+      :  ?ctx:(_, [> `Read | `Write ]) context
+      -> t
+      -> (Actor.t, string) Lwt_result.t
   end
 
   module Target : sig
@@ -127,9 +130,12 @@ module Make : functor
 
   module type TargetSig = sig
     type t
-    type _ context
+    type (_, _) context
 
-    val to_authorizable : ?ctx:_ context -> t -> (Target.t, string) Lwt_result.t
+    val to_authorizable
+      :  ?ctx:(_, [> `Read | `Write ]) context
+      -> t
+      -> (Target.t, string) Lwt_result.t
   end
 
   module RolePermission : sig
@@ -271,5 +277,5 @@ module Make : functor
                   and type target_entity = TargetEntity.t
                   and type target_model = TargetModel.t
                   and type validation_set = ValidationSet.t)
-      -> PersistenceSig with type 'a context = 'a Backend.context
+      -> PersistenceSig with type ('a, 'g) context = ('a, 'g) Backend.context
 end [@warning "-67"]

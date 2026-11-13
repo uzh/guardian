@@ -1,5 +1,5 @@
 module Make (Backend : Guard.PersistenceSig) = struct
-  type 'a context = 'a Backend.context
+  type ('a, 'g) context = ('a, 'g) Backend.context
 
   open Guard
 

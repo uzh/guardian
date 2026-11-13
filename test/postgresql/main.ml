@@ -7,11 +7,10 @@ let () =
       let database =
         Veins.Database.create
           test_database
-          (Veins.Database.Main
-             (Sys.getenv_opt "POSTGRES_URL"
-              |> CCOption.get_or
-                   ~default:"postgresql://root:root@database-postgres/test"
-              |> Veins.Url.create))
+          (Sys.getenv_opt "POSTGRES_URL"
+           |> CCOption.get_or
+                ~default:"postgresql://root:root@database-postgres/test"
+           |> Veins.Url.create)
       ;;
     end)
   in
@@ -21,10 +20,10 @@ let () =
          (Guardian_backend.Database.Of_veins
             (Database)
             (struct
-              let default_role = None
+              let default_role = Veins.Role.owner
             end)))
   in
-  let ctx = Database.label_ctx test_database in
+  let ctx = Database.label_ctx ~role:Veins.Role.owner test_database in
   Lwt_main.run
   @@
   let () = Database.Pool.initialize () in

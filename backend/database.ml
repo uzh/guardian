@@ -6,97 +6,103 @@
     layer, implement {!Core} and apply {!Make}. Connection pools are not part of
     this; they belong to whoever owns them.
 
-    Every statement declares the capabilities it needs ({!Capabilities}), so
-    guardian runs on a role-based veins database as long as the context's role
-    has them.
+    Every statement declares the rights it needs ({!Needs}) in its type, so
+    guardian's functions only accept contexts whose role grants them.
 
     The callbacks guardian passes to [query] only use the raw connection and
     never call back into the database layer, so a [query] that serialises a
     held connection with a mutex can't deadlock. *)
 
 module type Core = sig
-  (** The caller's context. The parameter is the caller's, e.g. a phantom type
-      telling transactions apart. *)
-  type _ ctx
+  (** The caller's context. The first parameter is the caller's, e.g. a
+      phantom type telling transactions apart; the second is the type of the
+      rights the context's role grants (see {!Veins.Ctx.t}). *)
+  type (_, _) ctx
 
-  (** The parameter of {!default_ctx}'s type. *)
+  (** The first parameter of {!default_ctx}'s type. *)
   type default
 
-  (** The context used when a guardian function is called without [?ctx]. *)
-  val default_ctx : unit -> default ctx
+  (** The context used when a guardian function is called without [?ctx]. It
+      grants every need: it runs as a role trusted with everything, e.g. the
+      database owner. *)
+  val default_ctx : unit -> (default, _) ctx
 
   (** [label ctx] identifies the database [ctx] points at. Used to key the
       caches and to tag log messages. *)
-  val label : _ ctx -> string
+  val label : (_, _) ctx -> string
 
   (** [is_transaction ctx] is [true] when [ctx] is inside an open
       transaction. Guardian bypasses its shared caches then, as reads may see
       uncommitted (and possibly rolled back) rows. *)
-  val is_transaction : _ ctx -> bool
+  val is_transaction : (_, _) ctx -> bool
 
   (** [after_commit ctx f] runs [f] right away when [ctx] is not a
       transaction, otherwise once that transaction has committed. [f] is
       dropped if the transaction rolls back. Guardian uses it to invalidate its
       caches when written rows become visible to other connections. *)
-  val after_commit : _ ctx -> (unit -> unit) -> unit
+  val after_commit : (_, _) ctx -> (unit -> unit) -> unit
 
   (** [query ~needs ctx f] runs [f] on a connection of [ctx] and raises on
-      error. [needs] are the capabilities of the statements [f] runs. *)
+      error. [needs] are the needs of the statements [f] runs. *)
   val query
-    :  needs:Veins.Capability.t list
-    -> _ ctx
-    -> (Caqti_lwt.connection -> ('a, Caqti_error.t) Lwt_result.t)
+    :  needs:'g Veins.Need.t
+    -> (_, 'g) ctx
+    -> (Caqti_lwt.connection -> ('a, Caqti.Error.t) Lwt_result.t)
     -> 'a Lwt.t
 
   (** [transaction_iter ~needs ctx fs] runs [fs] in order inside a
       transaction; joins [ctx] when it is one already, so the statements commit
       or roll back with it. *)
   val transaction_iter
-    :  needs:Veins.Capability.t list
-    -> _ ctx
-    -> (Caqti_lwt.connection -> (unit, Caqti_error.t) Lwt_result.t) list
+    :  needs:'g Veins.Need.t
+    -> (_, 'g) ctx
+    -> (Caqti_lwt.connection -> (unit, Caqti.Error.t) Lwt_result.t) list
     -> unit Lwt.t
 end
 
 module type Sig = sig
-  type _ ctx
+  type (_, _) ctx
 
-  val label : ?ctx:_ ctx -> unit -> string
-  val is_transaction : ?ctx:_ ctx -> unit -> bool
-  val after_commit : ?ctx:_ ctx -> (unit -> unit) -> unit
+  val label : ?ctx:(_, _) ctx -> unit -> string
+  val is_transaction : ?ctx:(_, _) ctx -> unit -> bool
+  val after_commit : ?ctx:(_, _) ctx -> (unit -> unit) -> unit
 
   val query
-    :  needs:Veins.Capability.t list
-    -> ?ctx:_ ctx
-    -> (Caqti_lwt.connection -> ('a, Caqti_error.t) Lwt_result.t)
+    :  needs:'g Veins.Need.t
+    -> ?ctx:(_, 'g) ctx
+    -> (Caqti_lwt.connection -> ('a, Caqti.Error.t) Lwt_result.t)
     -> 'a Lwt.t
 
-  val find : ?ctx:_ ctx -> ('a, 'b, [< `One ]) Veins.Request.t -> 'a -> 'b Lwt.t
+  val find
+    :  ?ctx:(_, 'g) ctx
+    -> ('a, 'b, [< `One ], 'g) Veins.Request.t
+    -> 'a
+    -> 'b Lwt.t
 
   val find_opt
-    :  ?ctx:_ ctx
-    -> ('a, 'b, [< `One | `Zero ]) Veins.Request.t
+    :  ?ctx:(_, 'g) ctx
+    -> ('a, 'b, [< `One | `Zero ], 'g) Veins.Request.t
     -> 'a
     -> 'b option Lwt.t
 
   val collect
-    :  ?ctx:_ ctx
-    -> ('a, 'b, [< `Many | `One | `Zero ]) Veins.Request.t
+    :  ?ctx:(_, 'g) ctx
+    -> ('a, 'b, [< `Many | `One | `Zero ], 'g) Veins.Request.t
     -> 'a
     -> 'b list Lwt.t
 
   val exec
-    :  ?ctx:_ ctx
-    -> ('a, unit, [< `Zero ]) Veins.Request.t
+    :  ?ctx:(_, 'g) ctx
+    -> ('a, unit, [< `Zero ], 'g) Veins.Request.t
     -> 'a
     -> unit Lwt.t
 
   val populate
-    :  needs:Veins.Capability.t list
-    -> ?ctx:_ ctx
+    :  needs:'g Veins.Need.t
+    -> ?ctx:(_, 'g) ctx
     -> string
     -> string list
-    -> 'a Caqti_type.t
+    -> 'a Caqti.Template.Row_type.t
     -> 'a list
     -> unit Lwt.t
 
@@ -104,14 +110,15 @@ module type Sig = sig
       transaction. When [ctx] already is a transaction it is reused (no nested
       [START TRANSACTION]), so the statements commit or roll back with it. *)
   val transaction_iter
-    :  needs:Veins.Capability.t list
-    -> ?ctx:_ ctx
-    -> (Caqti_lwt.connection -> (unit, Caqti_error.t) Lwt_result.t) list
+    :  needs:'g Veins.Need.t
+    -> ?ctx:(_, 'g) ctx
+    -> (Caqti_lwt.connection -> (unit, Caqti.Error.t) Lwt_result.t) list
     -> unit Lwt.t
 end
 
-module Make (Core : Core) : Sig with type 'a ctx = 'a Core.ctx = struct
-  type 'a ctx = 'a Core.ctx
+module Make (Core : Core) : Sig with type ('a, 'g) ctx = ('a, 'g) Core.ctx =
+struct
+  type ('a, 'g) ctx = ('a, 'g) Core.ctx
 
   (* [?ctx] and the default have different types, so each function matches on
      the option rather than going through a common [resolve]. *)
@@ -140,8 +147,7 @@ module Make (Core : Core) : Sig with type 'a ctx = 'a Core.ctx = struct
   ;;
 
   let request ?ctx request f =
-    let needs = Veins.Request.needs request |> Veins.Capability.Set.elements in
-    query ~needs ?ctx (fun connection ->
+    query ~needs:(Veins.Request.needs request) ?ctx (fun connection ->
       f connection (Veins.Request.caqti request))
   ;;
 
@@ -172,7 +178,7 @@ module Make (Core : Core) : Sig with type 'a ctx = 'a Core.ctx = struct
         ~columns
         request
         (Caqti_lwt.Stream.of_list input)
-      |> Lwt.map Caqti_error.uncongested)
+      |> Lwt.map Caqti.Error.uncongested)
   ;;
 
   let transaction_iter ~needs ?ctx fns =
@@ -184,21 +190,23 @@ end
 
 (** The {!Core} of a veins pool: guardian runs on [Db]'s contexts and pools.
     Without [?ctx], guardian uses a label context on [Db]'s primary database,
-    as [default_role] (required when that database has one URL per role). *)
+    as [default_role]. That role must grant every need ([Veins.Role.owner],
+    or a role declared with a polymorphic type), as guardian's functions
+    without [?ctx] may read, write and change the schema. *)
 module Of_veins
     (Db : Veins.Pools_sig.Sig)
     (Default : sig
-       val default_role : Veins.Role.t option
+       val default_role : _ Veins.Role.t
      end) :
   Core
-  with type 'a ctx = 'a Veins.Ctx.t
+  with type ('a, 'g) ctx = ('a, 'g) Veins.Ctx.t
    and type default = Veins.Ctx.no_transaction = struct
-  type 'a ctx = 'a Veins.Ctx.t
+  type ('a, 'g) ctx = ('a, 'g) Veins.Ctx.t
   type default = Veins.Ctx.no_transaction
 
   let default_ctx () =
     Db.label_ctx
-      ?role:Default.default_role
+      ~role:Default.default_role
       (Veins.Database.label Db.Config.database)
   ;;
 

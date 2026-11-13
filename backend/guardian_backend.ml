@@ -1,4 +1,4 @@
 module Backend = Backend
-module Capabilities = Capabilities
+module Needs = Needs
 module Database = Database
 module Dialect = Dialect
