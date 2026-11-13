@@ -27,7 +27,7 @@
  (name guardian)
  (synopsis "Role-based access control for OCaml")
  (description
-  "Defined actors can access targets according to specified rules (allowed actions: CRUD).")
+  "Defined actors can access targets according to specified rules (allowed actions: CRUD). Persistence on MariaDB / MySQL and PostgreSQL 15+, running on veins connection pools.")
  (depends
   (alcotest
    (and
@@ -37,6 +37,10 @@
   (caqti
    (>= 3.0.0))
   (caqti-driver-mariadb
+   (and
+    :with-test
+    (>= 3.0.0)))
+  (caqti-driver-postgresql
    (and
     :with-test
     (>= 3.0.0)))
@@ -84,35 +88,11 @@
    (and
     :with-test
     (>= 0.2.0)))
+  (veins-postgresql
+   (and
+    :with-test
+    (>= 0.2.0)))
   (yojson
    (>= 2.0.2))))
 
 (implicit_transitive_deps false)
-
-(package
- (name guardian-mariadb)
- (synopsis "MariaDB backend for guardian")
- (description
-  "Guardian's persistence on MariaDB / MySQL, running on veins connection pools.")
- (depends
-  (guardian
-   (= :version))
-  (caqti-driver-mariadb
-   (>= 3.0.0))
-  (veins-mariadb
-   (>= 0.2.0))
-  ppx_string))
-
-(package
- (name guardian-postgresql)
- (synopsis "PostgreSQL backend for guardian")
- (description
-  "Guardian's persistence on PostgreSQL, running on veins connection pools.")
- (depends
-  (guardian
-   (= :version))
-  (caqti-driver-postgresql
-   (>= 3.0.0))
-  (veins-postgresql
-   (>= 0.2.0))
-  ppx_string))

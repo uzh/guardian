@@ -1,6 +1,6 @@
 open CCFun.Infix
 open Lwt.Infix
-open Caqti_request.Infix
+open Caqti.Template.Request_type.Infix
 
 let combine_lwt m =
   let%lwt k = m in
@@ -11,14 +11,27 @@ let read request = Veins.Request.create ~needs:Needs.read request
 let write request = Veins.Request.create ~needs:Needs.write request
 let schema request = Veins.Request.create ~needs:Needs.schema request
 
+(* [request rt sql] renders [sql kind] for the dialect of the connection the
+   request runs on; [constant rt sql] is the same SQL everywhere. Requests
+   built per call use [~policy:Dynamic], so the driver releases them. *)
+let request ?(policy = Caqti.Template.Request.Static) request_type sql =
+  Veins.Dialect.request policy request_type sql
+;;
+
+let constant ?(policy = Caqti.Template.Request.Static) request_type sql =
+  Caqti.Template.Request.create
+    policy
+    request_type
+    (fun (_ : Caqti.Template.Dialect.t) -> Caqti.Template.Query.parse sql)
+;;
+
 module Make
-    (Dialect : Dialect.Sig)
     (ActorModel : Guardian.RoleSig)
     (Role : Guardian.RoleSig)
     (TargetModel : Guardian.RoleSig)
     (Database : Database.Sig) =
 struct
-  let src = Logs.Src.create ("guardian.backend." ^ Dialect.name)
+  let src = Logs.Src.create "guardian.backend"
 
   module Guard = Guardian.Make (ActorModel) (Role) (TargetModel)
 
@@ -439,6 +452,7 @@ struct
 
   include Guard.MakePersistence (struct
       type ('a, 'g) context = ('a, 'g) Database.ctx
+      type dialect = Veins.Dialect.kind
       type actor = Guard.Actor.t
       type actor_model = ActorModel.t
       type actor_permission = Guard.ActorPermission.t
@@ -484,29 +498,31 @@ struct
 
         module ActorRole = struct
           let upsert_uuid_request =
-            let open Entity.Uuid in
-            [%string
-              {sql|
+            (fun kind ->
+              let open Entity.Uuid in
+              [%string
+                {sql|
                 INSERT INTO guardian_actor_role_targets (actor_uuid, role, target_uuid)
                 VALUES (
-                  %{sql_value_fragment "?"},
+                  %{sql_value_fragment kind "?"},
                   ?,
-                  %{sql_value_fragment "?"}
+                  %{sql_value_fragment kind "?"}
                 )
-                %{Dialect.restore_on_conflict "actor_uuid, role, target_uuid"}
-              |sql}]
-            |> Entity.ActorRole.targets ->. Caqti_type.unit
+                %{Dialect.restore_on_conflict kind "actor_uuid, role, target_uuid"}
+              |sql}])
+            |> request Entity.(Entity.ActorRole.targets -->. Caqti_type.unit)
             |> write
           ;;
 
           let upsert_model_request =
-            [%string
-              {sql|
+            (fun kind ->
+              [%string
+                {sql|
                 INSERT INTO guardian_actor_roles (actor_uuid, role)
-                VALUES (%{Entity.Uuid.sql_value_fragment "?"}, ?)
-                %{Dialect.restore_on_conflict "actor_uuid, role"}
-              |sql}]
-            |> Entity.ActorRole.role ->. Caqti_type.unit
+                VALUES (%{Entity.Uuid.sql_value_fragment kind "?"}, ?)
+                %{Dialect.restore_on_conflict kind "actor_uuid, role"}
+              |sql}])
+            |> request Entity.(Entity.ActorRole.role -->. Caqti_type.unit)
             |> write
           ;;
 
@@ -522,47 +538,51 @@ struct
           ;;
 
           let find_by_actor_request =
-            let open Entity.Uuid in
-            [%string
-              {sql|
+            (fun kind ->
+              let open Entity.Uuid in
+              [%string
+                {sql|
                 SELECT
-                  %{sql_select_fragment "role_targets.actor_uuid"},
+                  %{sql_select_fragment kind "role_targets.actor_uuid"},
                   role_targets.role,
-                  %{sql_select_fragment "role_targets.target_uuid"}
+                  %{sql_select_fragment kind "role_targets.target_uuid"}
                 FROM guardian_actor_role_targets AS role_targets
-                WHERE role_targets.actor_uuid = %{sql_value_fragment "$1"}
+                WHERE role_targets.actor_uuid = %{sql_value_fragment kind "$1"}
                   AND role_targets.mark_as_deleted IS NULL
                 UNION ALL
-                SELECT %{sql_select_fragment "roles.actor_uuid"}, roles.role, NULL
+                SELECT %{sql_select_fragment kind "roles.actor_uuid"}, roles.role, NULL
                 FROM guardian_actor_roles AS roles
-                WHERE roles.actor_uuid = %{sql_value_fragment "$1"}
+                WHERE roles.actor_uuid = %{sql_value_fragment kind "$1"}
                   AND roles.mark_as_deleted IS NULL
-              |sql}]
-            |> Entity.(Uuid.Actor.t ->* ActorRole.t)
+              |sql}])
+            |> request Entity.(Entity.(Uuid.Actor.t -->* ActorRole.t))
             |> read
           ;;
 
           let find_by_actor ?ctx = Database.collect ?ctx find_by_actor_request
 
           let find_by_target_request =
-            let open Entity.Uuid in
-            [%string
-              {sql|
+            (fun kind ->
+              let open Entity.Uuid in
+              [%string
+                {sql|
                 SELECT
-                  %{sql_select_fragment "role_targets.actor_uuid"},
+                  %{sql_select_fragment kind "role_targets.actor_uuid"},
                   role_targets.role,
-                  %{sql_select_fragment "role_targets.target_uuid"}
+                  %{sql_select_fragment kind "role_targets.target_uuid"}
                 FROM guardian_actor_role_targets AS role_targets
                 WHERE role_targets.role = $1
-                  AND role_targets.target_uuid = %{Entity.Uuid.sql_value_fragment "$2"}
+                  AND role_targets.target_uuid = %{Entity.Uuid.sql_value_fragment kind "$2"}
                   AND role_targets.mark_as_deleted IS NULL
                 UNION ALL
-                SELECT %{sql_select_fragment "roles.actor_uuid"}, roles.role, NULL
+                SELECT %{sql_select_fragment kind "roles.actor_uuid"}, roles.role, NULL
                 FROM guardian_actor_roles AS roles
                 WHERE roles.role = $1
                   AND roles.mark_as_deleted IS NULL
-              |sql}]
-            |> Entity.(Caqti_type.t2 Role.t Uuid.Target.t ->* ActorRole.t)
+              |sql}])
+            |> request
+                 Entity.(
+                   Entity.(Caqti_type.t2 Role.t Uuid.Target.t -->* ActorRole.t))
             |> read
           ;;
 
@@ -576,23 +596,26 @@ struct
             =
             let open Guardian.Utils.Dynparam in
             if CCList.is_empty exclude
-            then dynparam, ""
+            then dynparam, Fun.const ""
             else (
               let arguments, params =
                 CCList.fold_left
                   (fun (args, dyn) (role, target_uuid) ->
                      match target_uuid with
                      | None when with_uuid ->
-                       ( "(exclude.role = ? AND exclude.target_uuid IS NULL)"
+                       ( Fun.const
+                           "(exclude.role = ? AND exclude.target_uuid IS NULL)"
                          :: args
                        , dyn |> add Model.role role )
                      | None ->
-                       ( "exclude.role = ? AND exclude.target_uuid IS NULL"
+                       ( Fun.const
+                           "exclude.role = ? AND exclude.target_uuid IS NULL"
                          :: args
                        , dyn |> add Model.role role )
                      | Some uuid ->
-                       ( [%string
-                           {sql|(exclude.role = ? AND exclude.target_uuid = %{Entity.Uuid.sql_value_fragment "?"})|sql}]
+                       ( (fun kind ->
+                           [%string
+                             {sql|(exclude.role = ? AND exclude.target_uuid = %{Entity.Uuid.sql_value_fragment kind "?"})|sql}])
                          :: args
                        , dyn
                          |> add Model.role role
@@ -601,8 +624,9 @@ struct
                   exclude
               in
               ( params
-              , Format.asprintf
-                  {sql|AND %s NOT IN (
+              , fun kind ->
+                  Format.asprintf
+                    {sql|AND %s NOT IN (
                     SELECT actor_uuid
                     FROM (
                       SELECT actor_uuid, role, target_uuid FROM guardian_actor_role_targets
@@ -613,34 +637,39 @@ struct
                       ) AS exclude
                     WHERE %s)
                   |sql}
-                  field
-                  (CCString.concat "\nAND " arguments) ))
+                    field
+                    (arguments
+                     |> CCList.map (fun argument -> argument kind)
+                     |> CCString.concat "\nAND ") ))
           ;;
 
-          let find_actors_by_role_request ?(exclude_sql = "") params =
-            [%string
-              {sql|
-                SELECT %{Entity.Uuid.sql_select_fragment "roles.actor_uuid"}
+          let find_actors_by_role_request ?(exclude_sql = Fun.const "") params =
+            (fun kind ->
+              [%string
+                {sql|
+                SELECT %{Entity.Uuid.sql_select_fragment kind "roles.actor_uuid"}
                 FROM guardian_actor_roles AS roles
                 WHERE roles.role = ?
                   AND roles.mark_as_deleted IS NULL
-                  %{exclude_sql}
-              |sql}]
-            |> params ->* Entity.Uuid.Actor.t
+                  %{exclude_sql kind}
+              |sql}])
+            |> request ~policy:Dynamic Entity.(params -->* Entity.Uuid.Actor.t)
             |> read
           ;;
 
-          let find_actors_by_target_request ?(exclude_sql = "") params =
-            [%string
-              {sql|
-                SELECT %{Entity.Uuid.sql_select_fragment "role_targets.actor_uuid"}
+          let find_actors_by_target_request ?(exclude_sql = Fun.const "") params
+            =
+            (fun kind ->
+              [%string
+                {sql|
+                SELECT %{Entity.Uuid.sql_select_fragment kind "role_targets.actor_uuid"}
                 FROM guardian_actor_role_targets AS role_targets
-                WHERE role_targets.target_uuid = %{Entity.Uuid.sql_value_fragment "?"}
+                WHERE role_targets.target_uuid = %{Entity.Uuid.sql_value_fragment kind "?"}
                   AND role_targets.mark_as_deleted IS NULL
                   AND role_targets.role = ?
-                  %{exclude_sql}
-              |sql}]
-            |> params ->* Entity.Uuid.Actor.t
+                  %{exclude_sql kind}
+              |sql}])
+            |> request ~policy:Dynamic Entity.(params -->* Entity.Uuid.Actor.t)
             |> read
           ;;
 
@@ -672,13 +701,14 @@ struct
           ;;
 
           let permissions_of_actor_request =
-            let open Entity in
-            [%string
-              {sql|
+            (fun kind ->
+              let open Entity in
+              [%string
+                {sql|
                 SELECT
                   role_permissions.permission,
                   role_permissions.target_model,
-                  %{Uuid.sql_select_fragment "roles.target_uuid"}
+                  %{Uuid.sql_select_fragment kind "roles.target_uuid"}
                 FROM
                   guardian_actor_role_targets AS roles
                 JOIN guardian_role_permissions AS role_permissions
@@ -686,7 +716,7 @@ struct
                   AND role_permissions.mark_as_deleted IS NULL
                 WHERE
                   roles.mark_as_deleted IS NULL
-                  AND roles.actor_uuid = %{Uuid.sql_value_fragment "$1"}
+                  AND roles.actor_uuid = %{Uuid.sql_value_fragment kind "$1"}
                 UNION
                 SELECT
                   role_permissions.permission,
@@ -699,22 +729,22 @@ struct
                   AND role_permissions.mark_as_deleted IS NULL
                 WHERE
                   roles.mark_as_deleted IS NULL
-                  AND roles.actor_uuid = %{Uuid.sql_value_fragment "$1"}
+                  AND roles.actor_uuid = %{Uuid.sql_value_fragment kind "$1"}
                 UNION
                 SELECT
                   actor_permissions.permission,
                   COALESCE (actor_permissions.target_model, targets.model),
-                  %{Uuid.sql_select_fragment "actor_permissions.target_uuid"}
+                  %{Uuid.sql_select_fragment kind "actor_permissions.target_uuid"}
                 FROM
                   guardian_actor_permissions AS actor_permissions
                 LEFT JOIN guardian_targets AS targets
                   ON targets.uuid = actor_permissions.target_uuid
                   AND targets.mark_as_deleted IS NULL
                 WHERE
-                  actor_permissions.actor_uuid = %{Uuid.sql_value_fragment "$1"}
+                  actor_permissions.actor_uuid = %{Uuid.sql_value_fragment kind "$1"}
                   AND actor_permissions.mark_as_deleted IS NULL
-              |sql}]
-            |> Uuid.Actor.t ->* PermissionOnTarget.t
+              |sql}])
+            |> request Entity.(Uuid.Actor.t -->* PermissionOnTarget.t)
             |> read
           ;;
 
@@ -727,28 +757,31 @@ struct
           ;;
 
           let delete_role_uuid_request =
-            [%string
-              {sql|
+            (fun kind ->
+              [%string
+                {sql|
                 UPDATE guardian_actor_role_targets
                 SET mark_as_deleted = NOW()
-                WHERE actor_uuid = %{Entity.Uuid.sql_value_fragment "$1"}
+                WHERE actor_uuid = %{Entity.Uuid.sql_value_fragment kind "$1"}
                   AND role = $2
-                  AND target_uuid = %{Entity.Uuid.sql_value_fragment "$3"}
-              |sql}]
-            |> Entity.ActorRole.targets ->. Caqti_type.unit
+                  AND target_uuid = %{Entity.Uuid.sql_value_fragment kind "$3"}
+              |sql}])
+            |> request Entity.(Entity.ActorRole.targets -->. Caqti_type.unit)
             |> write
           ;;
 
           let delete_role_model_request =
-            let open Entity in
-            [%string
-              {sql|
+            (fun kind ->
+              let open Entity in
+              [%string
+                {sql|
                 UPDATE guardian_actor_roles
                 SET mark_as_deleted = NOW()
-                WHERE actor_uuid = %{Uuid.sql_value_fragment "$1"}
+                WHERE actor_uuid = %{Uuid.sql_value_fragment kind "$1"}
                   AND role = $2
-              |sql}]
-            |> Caqti_type.(t2 Uuid.Actor.t Model.role ->. unit)
+              |sql}])
+            |> request
+                 Entity.(Caqti_type.(t2 Uuid.Actor.t Model.role -->. unit))
             |> write
           ;;
 
@@ -787,7 +820,7 @@ struct
 
           let find_all_request =
             combine_sql select_sql
-            |> Caqti_type.unit ->* Entity.RolePermission.t
+            |> constant Entity.(Caqti_type.unit -->* Entity.RolePermission.t)
             |> read
           ;;
 
@@ -798,7 +831,7 @@ struct
               {sql|role_permissions.target_model = $1|sql}
             in
             combine_sql ~where_additions select_sql
-            |> Entity.(TargetModel.t ->* RolePermission.t)
+            |> constant Entity.(Entity.(TargetModel.t -->* RolePermission.t))
             |> read
           ;;
 
@@ -807,15 +840,14 @@ struct
           ;;
 
           let insert_request =
-            let open Entity in
-            {sql|
-              INSERT INTO guardian_role_permissions (role, permission, target_model)
-              VALUES (?, ?, ?) ON
-              DUPLICATE KEY UPDATE
-                mark_as_deleted = NULL,
-                updated_at = NOW()
-            |sql}
-            |> RolePermission.t ->. Caqti_type.unit
+            (fun kind ->
+              [%string
+                {sql|
+                  INSERT INTO guardian_role_permissions (role, permission, target_model)
+                  VALUES (?, ?, ?)
+                  %{Dialect.restore_on_conflict kind "role, permission, target_model"}
+                |sql}])
+            |> request Entity.(RolePermission.t -->. Caqti_type.unit)
             |> write
           ;;
 
@@ -837,7 +869,7 @@ struct
                 AND permission = ?
                 AND target_model = ?
             |sql}
-            |> RolePermission.t ->. Caqti_type.unit
+            |> constant Entity.(RolePermission.t -->. Caqti_type.unit)
             |> write
           ;;
 
@@ -858,12 +890,12 @@ struct
             {sql| actor_permissions.mark_as_deleted IS NULL |sql}
           ;;
 
-          let select_sql =
+          let select_sql kind =
             Entity.Uuid.
-              [ sql_select_fragment "actor_permissions.actor_uuid"
+              [ sql_select_fragment kind "actor_permissions.actor_uuid"
               ; "actor_permissions.permission"
               ; "actor_permissions.target_model"
-              ; sql_select_fragment "actor_permissions.target_uuid"
+              ; sql_select_fragment kind "actor_permissions.target_uuid"
               ]
             |> CCString.concat ",\n"
           ;;
@@ -871,39 +903,41 @@ struct
           let combine_sql = combine_sql from_sql std_filter_sql
 
           let find_all_request =
-            combine_sql select_sql
-            |> Caqti_type.unit ->* Entity.ActorPermission.t
+            (fun kind -> combine_sql (select_sql kind))
+            |> request Entity.(Caqti_type.unit -->* Entity.ActorPermission.t)
             |> read
           ;;
 
           let find_all ?ctx = Database.collect ?ctx find_all_request
 
           let find_all_of_uuid_request =
-            let joins =
-              {sql|JOIN guardian_targets AS targets ON targets.uuid = actor_permissions.target_uuid|sql}
-            in
-            let where_additions =
-              [%string
-                {sql|actor_permissions.target_uuid = %{Entity.Uuid.sql_value_fragment "$1"}
-                  OR actor_permissions.target_model = (SELECT targets.model FROM guardian_targets AS targets WHERE targets.uuid = %{Entity.Uuid.sql_value_fragment "$1"})
+            (fun kind ->
+              let joins =
+                {sql|JOIN guardian_targets AS targets ON targets.uuid = actor_permissions.target_uuid|sql}
+              in
+              let where_additions =
+                [%string
+                  {sql|actor_permissions.target_uuid = %{Entity.Uuid.sql_value_fragment kind "$1"}
+                  OR actor_permissions.target_model = (SELECT targets.model FROM guardian_targets AS targets WHERE targets.uuid = %{Entity.Uuid.sql_value_fragment kind "$1"})
                 |sql}]
-            in
-            combine_sql ~joins ~where_additions select_sql
-            |> Entity.(Uuid.Target.t ->* ActorPermission.t)
+              in
+              combine_sql ~joins ~where_additions (select_sql kind))
+            |> request Entity.(Entity.(Uuid.Target.t -->* ActorPermission.t))
             |> read
           ;;
 
           let find_all_of_model_request =
-            let joins =
-              {sql|JOIN guardian_targets AS targets ON targets.uuid = actor_permissions.target_uuid|sql}
-            in
-            let where_additions =
-              {sql|actor_permissions.target_model = $1
+            (fun kind ->
+              let joins =
+                {sql|JOIN guardian_targets AS targets ON targets.uuid = actor_permissions.target_uuid|sql}
+              in
+              let where_additions =
+                {sql|actor_permissions.target_model = $1
                 OR (actor_permissions.target_model IS NULL AND targets.model = $1)
               |sql}
-            in
-            combine_sql ~joins ~where_additions select_sql
-            |> Entity.(TargetModel.t ->* ActorPermission.t)
+              in
+              combine_sql ~joins ~where_additions (select_sql kind))
+            |> request Entity.(Entity.(TargetModel.t -->* ActorPermission.t))
             |> read
           ;;
 
@@ -916,13 +950,14 @@ struct
           ;;
 
           let insert_request =
-            [%string
-              {sql|
+            (fun kind ->
+              [%string
+                {sql|
                 INSERT INTO guardian_actor_permissions (actor_uuid, permission, target_model, target_uuid)
-                VALUES (%{Entity.Uuid.sql_value_fragment "?"}, ?, ?, %{Entity.Uuid.sql_value_fragment "?"})
-                %{Dialect.restore_on_conflict "actor_uuid, permission, target_model, target_uuid"}
-              |sql}]
-            |> Entity.ActorPermission.t ->. Caqti_type.unit
+                VALUES (%{Entity.Uuid.sql_value_fragment kind "?"}, ?, ?, %{Entity.Uuid.sql_value_fragment kind "?"})
+                %{Dialect.restore_on_conflict kind "actor_uuid, permission, target_model, target_uuid"}
+              |sql}])
+            |> request Entity.(Entity.ActorPermission.t -->. Caqti_type.unit)
             |> write
           ;;
 
@@ -933,17 +968,18 @@ struct
           ;;
 
           let delete_request =
-            let open Entity.Uuid in
-            [%string
-              {sql|
+            (fun kind ->
+              let open Entity.Uuid in
+              [%string
+                {sql|
                 UPDATE guardian_actor_permissions
                 SET mark_as_deleted = NOW()
-                WHERE actor_uuid = %{sql_value_fragment "$1"}
+                WHERE actor_uuid = %{sql_value_fragment kind "$1"}
                   AND permission = $2
                   AND (($3 IS NULL AND target_model IS NULL) OR target_model = $3)
-                  AND (($4 IS NULL AND target_uuid IS NULL) OR target_uuid = %{sql_value_fragment "$4"})
-              |sql}]
-            |> Entity.ActorPermission.t ->. Caqti_type.unit
+                  AND (($4 IS NULL AND target_uuid IS NULL) OR target_uuid = %{sql_value_fragment kind "$4"})
+              |sql}])
+            |> request Entity.(Entity.ActorPermission.t -->. Caqti_type.unit)
             |> write
           ;;
 
@@ -966,33 +1002,37 @@ struct
           let from_sql = {sql| guardian_actors AS actors |sql}
           let std_filter_sql = {sql| actors.mark_as_deleted IS NULL |sql}
 
-          let select_sql =
-            [ Entity.Uuid.sql_select_fragment "actors.uuid"; "actors.model" ]
+          let select_sql kind =
+            [ Entity.Uuid.sql_select_fragment kind "actors.uuid"
+            ; "actors.model"
+            ]
             |> CCString.concat ",\n"
           ;;
 
           let combine_sql = combine_sql from_sql std_filter_sql
 
           let insert_request =
-            [%string
-              {sql|
+            (fun kind ->
+              [%string
+                {sql|
                 INSERT INTO guardian_actors (uuid, model)
-                VALUES (%{Entity.Uuid.sql_value_fragment "?"}, ?)
-                %{Dialect.restore_on_conflict "uuid"}
-              |sql}]
-            |> Entity.Actor.t ->. Caqti_type.unit
+                VALUES (%{Entity.Uuid.sql_value_fragment kind "?"}, ?)
+                %{Dialect.restore_on_conflict kind "uuid"}
+              |sql}])
+            |> request Entity.(Entity.Actor.t -->. Caqti_type.unit)
             |> write
           ;;
 
           let insert ?ctx = Database.exec ?ctx insert_request %> Lwt_result.ok
 
           let memorize_request =
-            combine_sql
-              ~where_additions:
-                [%string
-                  {sql|actors.uuid = %{Entity.Uuid.sql_value_fragment "?"}|sql}]
-              {sql|TRUE|sql}
-            |> Entity.Uuid.Actor.t ->? Caqti_type.bool
+            (fun kind ->
+              combine_sql
+                ~where_additions:
+                  [%string
+                    {sql|actors.uuid = %{Entity.Uuid.sql_value_fragment kind "?"}|sql}]
+                {sql|TRUE|sql})
+            |> request Entity.(Entity.Uuid.Actor.t -->? Caqti_type.bool)
             |> read
           ;;
 
@@ -1003,12 +1043,13 @@ struct
           ;;
 
           let find_request =
-            combine_sql
-              ~where_additions:
-                [%string
-                  {sql|actors.uuid = %{Entity.Uuid.sql_value_fragment "?"}|sql}]
-              select_sql
-            |> Entity.(Uuid.Actor.t ->? Actor.t)
+            (fun kind ->
+              combine_sql
+                ~where_additions:
+                  [%string
+                    {sql|actors.uuid = %{Entity.Uuid.sql_value_fragment kind "?"}|sql}]
+                (select_sql kind))
+            |> request Entity.(Entity.(Uuid.Actor.t -->? Actor.t))
             |> read
           ;;
 
@@ -1027,33 +1068,37 @@ struct
           let from_sql = {sql| guardian_targets AS targets |sql}
           let std_filter_sql = {sql| targets.mark_as_deleted IS NULL |sql}
 
-          let select_sql =
-            [ Entity.Uuid.sql_select_fragment "targets.uuid"; "targets.model" ]
+          let select_sql kind =
+            [ Entity.Uuid.sql_select_fragment kind "targets.uuid"
+            ; "targets.model"
+            ]
             |> CCString.concat ",\n"
           ;;
 
           let combine_sql = combine_sql from_sql std_filter_sql
 
           let insert_request =
-            [%string
-              {sql|
+            (fun kind ->
+              [%string
+                {sql|
                 INSERT INTO guardian_targets (uuid, model)
-                VALUES (%{Entity.Uuid.sql_value_fragment "?"}, ?)
-                %{Dialect.restore_on_conflict "uuid"}
-              |sql}]
-            |> Caqti_type.(Entity.Target.t ->. unit)
+                VALUES (%{Entity.Uuid.sql_value_fragment kind "?"}, ?)
+                %{Dialect.restore_on_conflict kind "uuid"}
+              |sql}])
+            |> request Entity.(Caqti_type.(Entity.Target.t -->. unit))
             |> write
           ;;
 
           let insert ?ctx = Database.exec ?ctx insert_request %> Lwt_result.ok
 
           let memorize_request =
-            combine_sql
-              ~where_additions:
-                [%string
-                  {sql|targets.uuid = %{Entity.Uuid.sql_value_fragment "?"}|sql}]
-              {sql|TRUE|sql}
-            |> Entity.Uuid.Target.t ->? Caqti_type.bool
+            (fun kind ->
+              combine_sql
+                ~where_additions:
+                  [%string
+                    {sql|targets.uuid = %{Entity.Uuid.sql_value_fragment kind "?"}|sql}]
+                {sql|TRUE|sql})
+            |> request Entity.(Entity.Uuid.Target.t -->? Caqti_type.bool)
             |> read
           ;;
 
@@ -1064,12 +1109,13 @@ struct
           ;;
 
           let find_request =
-            combine_sql
-              ~where_additions:
-                [%string
-                  {sql|targets.uuid = %{Entity.Uuid.sql_value_fragment "?"}|sql}]
-              select_sql
-            |> Entity.(Uuid.Target.t ->? Target.t)
+            (fun kind ->
+              combine_sql
+                ~where_additions:
+                  [%string
+                    {sql|targets.uuid = %{Entity.Uuid.sql_value_fragment kind "?"}|sql}]
+                (select_sql kind))
+            |> request Entity.(Entity.(Uuid.Target.t -->? Target.t))
             |> read
           ;;
 
@@ -1080,12 +1126,13 @@ struct
           ;;
 
           let find_model_request =
-            combine_sql
-              ~where_additions:
-                [%string
-                  {sql|targets.uuid = %{Entity.Uuid.sql_value_fragment "?"}|sql}]
-              {sql|targets.model|sql}
-            |> Entity.(Uuid.Target.t ->? TargetModel.t)
+            (fun kind ->
+              combine_sql
+                ~where_additions:
+                  [%string
+                    {sql|targets.uuid = %{Entity.Uuid.sql_value_fragment kind "?"}|sql}]
+                {sql|targets.model|sql})
+            |> request Entity.(Entity.(Uuid.Target.t -->? TargetModel.t))
             |> read
           ;;
 
@@ -1096,14 +1143,16 @@ struct
           ;;
 
           let promote_request =
-            let open Entity in
-            [%string
-              {sql|
+            (fun kind ->
+              let open Entity in
+              [%string
+                {sql|
                 UPDATE guardian_targets
                 SET model = $2, mark_as_deleted = NULL
-                WHERE uuid = %{Uuid.sql_value_fragment "$1"}
-              |sql}]
-            |> Caqti_type.(t2 Uuid.Target.t TargetModel.t ->. unit)
+                WHERE uuid = %{Uuid.sql_value_fragment kind "$1"}
+              |sql}])
+            |> request
+                 Entity.(Caqti_type.(t2 Uuid.Target.t TargetModel.t -->. unit))
             |> write
           ;;
 
@@ -1142,7 +1191,7 @@ struct
 
           let find_all_request =
             find_request_sql ""
-            |> Caqti_type.(unit ->* Model.role_assignment)
+            |> constant Entity.(Caqti_type.(unit -->* Model.role_assignment))
             |> read
           ;;
 
@@ -1150,7 +1199,7 @@ struct
 
           let find_all_by_role_request =
             find_request_sql {sql|WHERE role = ?|sql}
-            |> Model.(role ->* role_assignment)
+            |> constant Entity.(Model.(role -->* role_assignment))
             |> read
           ;;
 
@@ -1162,7 +1211,10 @@ struct
             {sql|
               INSERT INTO guardian_assign_roles_history (role, target_role, comment) VALUES (?,?,?)
             |sql}
-            |> Caqti_type.(t2 Model.role_assignment (option string) ->. unit)
+            |> constant
+                 Entity.(
+                   Caqti_type.(
+                     t2 Model.role_assignment (option string) -->. unit))
             |> write
           ;;
 
@@ -1170,7 +1222,7 @@ struct
             {sql|
                 DELETE FROM guardian_assign_roles WHERE role = ? AND target_role = ?
             |sql}
-            |> Model.role_assignment ->. Caqti_type.unit
+            |> constant Entity.(Model.role_assignment -->. Caqti_type.unit)
             |> write
           ;;
 
@@ -1191,9 +1243,10 @@ struct
         let validate_model ?ctx permission model actor_uuid =
           let open Lwt.Infix in
           let validate_request =
-            let open Entity in
-            [%string
-              {sql|
+            (fun kind ->
+              let open Entity in
+              [%string
+                {sql|
                 SELECT (
                   SELECT TRUE
                   FROM guardian_actor_roles AS roles
@@ -1201,7 +1254,7 @@ struct
                     ON roles.role = role_permissions.role
                     AND role_permissions.mark_as_deleted IS NULL
                   WHERE roles.mark_as_deleted IS NULL
-                    AND roles.actor_uuid = %{Uuid.sql_value_fragment "$1"}
+                    AND roles.actor_uuid = %{Uuid.sql_value_fragment kind "$1"}
                     AND role_permissions.target_model = $3
                     AND (role_permissions.permission = $2 OR role_permissions.permission = 'manage')
                   LIMIT 1
@@ -1209,14 +1262,17 @@ struct
                   SELECT TRUE
                   FROM guardian_actor_permissions AS actor_permissions
                   WHERE actor_permissions.mark_as_deleted IS NULL
-                    AND actor_permissions.actor_uuid = %{Uuid.sql_value_fragment "$1"}
+                    AND actor_permissions.actor_uuid = %{Uuid.sql_value_fragment kind "$1"}
                     AND actor_permissions.target_model = $3
                     AND (actor_permissions.permission = $2 OR actor_permissions.permission = 'manage')
                   LIMIT 1
                 )
-              |sql}]
-            |> Caqti_type.(
-                 t3 Uuid.Actor.t Permission.t TargetModel.t ->? option bool)
+              |sql}])
+            |> request
+                 ~policy:Dynamic
+                 Entity.(
+                   Caqti_type.(
+                     t3 Uuid.Actor.t Permission.t TargetModel.t -->? option bool))
             |> read
           in
           Database.find_opt ?ctx validate_request (actor_uuid, permission, model)
@@ -1241,9 +1297,10 @@ struct
                  Lwt.return_ok
           in
           let validate_request =
-            let open Entity in
-            [%string
-              {sql|
+            (fun kind ->
+              let open Entity in
+              [%string
+                {sql|
                 SELECT (
                   SELECT TRUE
                   FROM guardian_actor_roles AS roles
@@ -1251,7 +1308,7 @@ struct
                       ON roles.role = role_permissions.role
                       AND role_permissions.mark_as_deleted IS NULL
                     WHERE roles.mark_as_deleted IS NULL
-                      AND roles.actor_uuid = %{Uuid.sql_value_fragment "$1"}
+                      AND roles.actor_uuid = %{Uuid.sql_value_fragment kind "$1"}
                       AND role_permissions.target_model = $3
                       AND (role_permissions.permission = $2 OR role_permissions.permission = 'manage')
                     LIMIT 1
@@ -1262,8 +1319,8 @@ struct
                       ON role_targets.role = role_permissions.role
                       AND role_permissions.mark_as_deleted IS NULL
                     WHERE role_targets.mark_as_deleted IS NULL
-                      AND role_targets.actor_uuid = %{Uuid.sql_value_fragment "$1"}
-                      AND role_targets.target_uuid = %{Uuid.sql_value_fragment "$4"}
+                      AND role_targets.actor_uuid = %{Uuid.sql_value_fragment kind "$1"}
+                      AND role_targets.target_uuid = %{Uuid.sql_value_fragment kind "$4"}
                       AND role_permissions.target_model = $3
                       AND (role_permissions.permission = $2 OR role_permissions.permission = 'manage')
                       LIMIT 1
@@ -1271,21 +1328,24 @@ struct
                   SELECT TRUE
                   FROM guardian_actor_permissions AS actor_permissions
                     WHERE actor_permissions.mark_as_deleted IS NULL
-                      AND actor_permissions.actor_uuid = %{Uuid.sql_value_fragment "$1"}
+                      AND actor_permissions.actor_uuid = %{Uuid.sql_value_fragment kind "$1"}
                       AND (
                         (actor_permissions.target_model = $3 AND actor_permissions.target_uuid IS NULL)
                         OR
-                        (actor_permissions.target_model IS NULL AND actor_permissions.target_uuid = %{Uuid.sql_value_fragment "$4"})
+                        (actor_permissions.target_model IS NULL AND actor_permissions.target_uuid = %{Uuid.sql_value_fragment kind "$4"})
                       )
                       AND (actor_permissions.permission = $2 OR actor_permissions.permission = 'manage')
                       LIMIT 1
                 )
-              |sql}]
-            |> Caqti_type.(
-                 t2
-                   Uuid.Actor.t
-                   (t2 Permission.t (t2 TargetModel.t Uuid.Target.t))
-                 ->? option bool)
+              |sql}])
+            |> request
+                 ~policy:Dynamic
+                 Entity.(
+                   Caqti_type.(
+                     t2
+                       Uuid.Actor.t
+                       (t2 Permission.t (t2 TargetModel.t Uuid.Target.t))
+                     -->? option bool))
             |> read
           in
           Database.find_opt
@@ -1306,9 +1366,10 @@ struct
         let validate_any_of_model ?ctx permission model actor_uuid =
           let open Lwt.Infix in
           let validate_request =
-            let open Entity in
-            [%string
-              {sql|
+            (fun kind ->
+              let open Entity in
+              [%string
+                {sql|
                 SELECT (
                   SELECT TRUE
                   FROM guardian_actor_roles AS roles
@@ -1316,7 +1377,7 @@ struct
                     ON roles.role = role_permissions.role
                     AND role_permissions.mark_as_deleted IS NULL
                   WHERE roles.mark_as_deleted IS NULL
-                    AND roles.actor_uuid = %{Uuid.sql_value_fragment "$1"}
+                    AND roles.actor_uuid = %{Uuid.sql_value_fragment kind "$1"}
                     AND role_permissions.target_model = $3
                     AND (role_permissions.permission = $2 OR role_permissions.permission = 'manage')
                   LIMIT 1
@@ -1327,7 +1388,7 @@ struct
                     ON role_targets.role = role_permissions.role
                     AND role_permissions.mark_as_deleted IS NULL
                   WHERE role_targets.mark_as_deleted IS NULL
-                    AND role_targets.actor_uuid = %{Uuid.sql_value_fragment "$1"}
+                    AND role_targets.actor_uuid = %{Uuid.sql_value_fragment kind "$1"}
                     AND role_permissions.target_model = $3
                     AND (role_permissions.permission = $2 OR role_permissions.permission = 'manage')
                   LIMIT 1
@@ -1338,14 +1399,17 @@ struct
                     ON actor_permissions.target_uuid = targets.uuid
                     AND targets.mark_as_deleted IS NULL
                   WHERE actor_permissions.mark_as_deleted IS NULL
-                    AND actor_permissions.actor_uuid = %{Uuid.sql_value_fragment "$1"}
+                    AND actor_permissions.actor_uuid = %{Uuid.sql_value_fragment kind "$1"}
                     AND (actor_permissions.permission = $2 OR actor_permissions.permission = 'manage')
                     AND (targets.model = $3 OR actor_permissions.target_model = $3)
                   LIMIT 1
                 )
-              |sql}]
-            |> Caqti_type.(
-                 t3 Uuid.Actor.t Permission.t TargetModel.t ->? option bool)
+              |sql}])
+            |> request
+                 ~policy:Dynamic
+                 Entity.(
+                   Caqti_type.(
+                     t3 Uuid.Actor.t Permission.t TargetModel.t -->? option bool))
             |> read
           in
           Database.find_opt ?ctx validate_request (actor_uuid, permission, model)
@@ -1473,51 +1537,56 @@ struct
         ;;
       end
 
-      (** [find_migrations ()] returns a list of all migrations as a tuple with
-          key, datetime and sql query **)
-      let find_migrations () = Dialect.migrations
+      let find_migrations = Dialect.migrations
 
-      (** [find_clean ()] returns a list of all migrations as a tuple with key and
-          sql query **)
-      let find_clean () =
-        Dialect.tables |> CCList.map (fun m -> m, Dialect.truncate m)
+      let find_clean kind =
+        Dialect.tables kind |> CCList.map (fun m -> m, Dialect.truncate kind m)
       ;;
 
-      (** [migrate ?ctx ()] runs all migration on a specified context [?ctx] **)
+      (* The dialect of the connection [ctx] (or the default context) runs on. *)
+      let dialect_kind ?ctx () =
+        Database.query
+          ~needs:Veins.Need.none
+          ?ctx
+          (fun (module Connection : Caqti_lwt.CONNECTION) ->
+             Lwt_result.return (Veins.Dialect.kind Connection.dialect))
+      ;;
+
+      let ddl sql = Caqti.Templater.direct Caqti_type.(unit -->. unit) sql
+
+      (** [migrate ?ctx ()] runs the migrations of the dialect [ctx] runs on. *)
       let migrate ?ctx () =
-        ()
-        |> find_migrations
+        let%lwt kind = dialect_kind ?ctx () in
+        find_migrations kind
         |> Lwt_list.iter_s (fun (key, date, sql) ->
           Logs.debug ~src (fun m -> m "Migration: Run '%s' from '%s'" key date);
-          Database.exec ?ctx (sql |> Caqti_type.(unit ->. unit) |> schema) ())
+          Database.exec ?ctx (ddl sql |> schema) ())
       ;;
 
       (* Turning off foreign key checks is session state, so the statements and
          both toggles must run on the same connection. *)
-      let run_without_fk_checks ?ctx label stmts =
-        let set_fk_checks enabled =
-          Dialect.set_fk_checks enabled
-          |> CCOption.map (fun sql -> sql |> Caqti_type.(unit ->. unit))
-        in
-        let exec_opt (module Connection : Caqti_lwt.CONNECTION) = function
-          | Some request -> Connection.exec request ()
-          | None -> Lwt_result.return ()
-        in
+      let run_without_fk_checks ?ctx label statements =
         Database.query
           ~needs:Needs.schema
           ?ctx
-          (fun ((module Connection : Caqti_lwt.CONNECTION) as connection) ->
+          (fun (module Connection : Caqti_lwt.CONNECTION) ->
              let open Lwt_result.Syntax in
-             let* () = exec_opt connection (set_fk_checks false) in
+             let kind = Veins.Dialect.kind Connection.dialect in
+             let set_fk_checks enabled =
+               match Dialect.set_fk_checks kind enabled with
+               | Some sql -> Connection.exec (ddl sql) ()
+               | None -> Lwt_result.return ()
+             in
+             let* () = set_fk_checks false in
              (CCList.fold_left
                 (fun acc (key, sql) ->
                    let* () = acc in
                    Logs.debug ~src (fun m -> m "%s: Run '%s'" label key);
-                   Connection.exec (sql |> Caqti_type.(unit ->. unit)) ())
+                   Connection.exec (ddl sql) ())
                 (Lwt_result.return ())
-                stmts)
+                (statements kind))
                [%lwt.finally
-                 exec_opt connection (set_fk_checks true)
+                 set_fk_checks true
                  |> Lwt.map (function
                    | Ok () -> ()
                    | Error err ->
@@ -1525,21 +1594,21 @@ struct
                        m
                          "%s: Failed to re-enable foreign key checks: %a"
                          label
-                         Caqti_error.pp
+                         Caqti.Error.pp
                          err))])
       ;;
 
-      (** [clean ?ctx ()] runs clean on a specified context [?ctx] **)
+      (** [clean ?ctx ()] empties guardian's tables. *)
       let clean ?ctx () =
         let () = Repo.clear_cache () in
-        find_clean () |> run_without_fk_checks ?ctx "Clean"
+        run_without_fk_checks ?ctx "Clean" find_clean
       ;;
 
+      (** [delete ?ctx ()] drops guardian's tables. *)
       let delete ?ctx () =
         let () = Repo.clear_cache () in
-        Dialect.tables
-        |> CCList.map (fun m -> m, Dialect.drop m)
-        |> run_without_fk_checks ?ctx "Delete"
+        run_without_fk_checks ?ctx "Delete" (fun kind ->
+          Dialect.tables kind |> CCList.map (fun m -> m, Dialect.drop kind m))
       ;;
     end)
 end

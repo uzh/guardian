@@ -11,8 +11,9 @@ Björnsson's database refactoring of the pool tool (uzh/z-pool-tool#647).
 
 ### Added
 
-- `guardian-mariadb` (`Guardian_mariadb.Make`) and `guardian-postgresql` (`Guardian_postgresql.Make`, PostgreSQL 15+)
-  packages; `Guardian_backend.Backend.Make` is the shared backend over `Guardian_backend.Dialect.Sig`
+- PostgreSQL 15+ next to MariaDB / MySQL: `Guardian_backend.Make` renders its SQL for the dialect of each connection
+  (veins' `Dialect.request`), so one package serves both. `migrate` runs the migrations of the connection's dialect;
+  `find_migrations` / `find_clean` take the dialect (`Veins.Dialect.kind`)
 - `Guardian_backend.Database.Make`: runs guardian on your own database layer from a small `Core` (`default_ctx`,
   `label`, `is_transaction`, `after_commit`, `query`, `transaction_iter`) over your own `(_, _) ctx` type; guardian
   writes commit or roll back with the caller's transaction. `Database.Of_veins` is that core for a veins pool
@@ -27,11 +28,12 @@ Björnsson's database refactoring of the pool tool (uzh/z-pool-tool#647).
   (e.g. `Veins.Ctx.t`) is passed as-is. `ActorSig`/`TargetSig` declare `type (_, _) context`
 - **Breaking:** `MakePersistence` returns `PersistenceSig with type ('a, 'g) context = ('a, 'g) Backend.context`; `find_clean`
   returns `(string * string) list`
-- **Breaking:** the bundled `Pools` and `MariaDb` modules are gone: use veins and `Guardian_mariadb.Make`. Requires
+- **Breaking:** the bundled `Pools` and `MariaDb` modules are gone: use veins and `Guardian_backend.Make`. Requires
   OCaml 5 and caqti 3
 - Cache entries are invalidated before a write and again once it's committed, so a concurrent reader can't re-cache
   the old state. Validations inside a transaction bypass the caches
 - `clean`/`delete` disable foreign key checks on the same connection that runs the statements
+- Restoring a deleted role permission works on PostgreSQL (it used MariaDB's `ON DUPLICATE KEY UPDATE`)
 
 ### Fixed
 

@@ -1,6 +1,6 @@
 (test
  (name main)
- (package guardian-postgresql)
+ (package guardian)
  (libraries
   alcotest-lwt
   containers
@@ -11,7 +11,6 @@
   sexplib0
   yojson
   guardian.backend
-  guardian-postgresql
   lwt
   veins
   veins-postgresql)

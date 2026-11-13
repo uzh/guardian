@@ -277,5 +277,8 @@ module Make : functor
                   and type target_entity = TargetEntity.t
                   and type target_model = TargetModel.t
                   and type validation_set = ValidationSet.t)
-      -> PersistenceSig with type ('a, 'g) context = ('a, 'g) Backend.context
+      ->
+    PersistenceSig
+    with type ('a, 'g) context = ('a, 'g) Backend.context
+     and type dialect = Backend.dialect
 end [@warning "-67"]

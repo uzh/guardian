@@ -4,6 +4,10 @@ module type Backend = sig
       module the backend is built on. *)
   type (_, _) context
 
+  (** The database systems the backend has SQL for, e.g.
+      [Veins.Dialect.kind]. *)
+  type dialect
+
   type actor
   type actor_model
   type actor_permission
@@ -178,8 +182,14 @@ module type Backend = sig
     val clear_cache : unit -> unit
   end
 
-  val find_migrations : unit -> (string * string * string) list
-  val find_clean : unit -> (string * string) list
+  (** The schema migrations for [dialect], as (key, date, SQL), oldest
+      first, for applications running them with their own migration
+      engine. *)
+  val find_migrations : dialect -> (string * string * string) list
+
+  (** (table, SQL) truncating each of guardian's tables in [dialect]. *)
+  val find_clean : dialect -> (string * string) list
+
   val migrate : ?ctx:(_, [> `Schema ]) context -> unit -> unit Lwt.t
   val clean : ?ctx:(_, [> `Schema ]) context -> unit -> unit Lwt.t
   val delete : ?ctx:(_, [> `Schema ]) context -> unit -> unit Lwt.t

@@ -281,8 +281,9 @@ struct
           and type target_entity = TargetEntity.t
           and type target_model = TargetModel.t
           and type validation_set = ValidationSet.t) :
-    PersistenceSig with type ('a, 'g) context = ('a, 'g) Backend.context =
-  struct
+    PersistenceSig
+    with type ('a, 'g) context = ('a, 'g) Backend.context
+     and type dialect = Backend.dialect = struct
     include Backend
 
     let clear_cache () = Repo.clear_cache ()

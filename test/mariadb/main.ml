@@ -14,7 +14,7 @@ let () =
     end)
   in
   let module Backend =
-    Guardian_mariadb.Make (Role.Actor) (Role.Role) (Role.Target)
+    Guardian_backend.Make (Role.Actor) (Role.Role) (Role.Target)
       (Guardian_backend.Database.Make
          (Guardian_backend.Database.Of_veins
             (Database)
