@@ -242,9 +242,9 @@ struct
       include Guard.RoleAssignment
 
       let t =
-        let open Caqti_encoders in
+        let open Veins.Caqti_encoders in
         let decode (role, (target_role, ())) = Ok { role; target_role } in
-        let encode m : ('a Caqti_encoders.Data.t, string) result =
+        let encode m : ('a Veins.Caqti_encoders.Data.t, string) result =
           Ok Data.[ m.role; m.target_role ]
         in
         custom ~encode ~decode Schema.[ Role.t; Role.t ]
