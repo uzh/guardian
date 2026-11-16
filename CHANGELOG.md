@@ -35,7 +35,8 @@ Björnsson's database refactoring of the pool tool (uzh/z-pool-tool#647).
 - **Breaking:** `Guardian_backend.Dialect.truncate`, `drop` and `set_fk_checks` are gone: use `Veins.Dialect`'s
 - **Breaking:** `Guardian.Utils.Dynparam` is gone: use `Veins.Dynparam`
 - The backend uses veins' `Caqti_encoders` instead of its own copy
-- `clean`/`delete` disable foreign key checks on the same connection that runs the statements
+- `clean`/`delete` disable foreign key checks on the same connection that runs the statements (veins'
+  `Connection.without_fk_checks`)
 - Restoring a deleted role permission works on PostgreSQL (it used MariaDB's `ON DUPLICATE KEY UPDATE`)
 
 ### Fixed

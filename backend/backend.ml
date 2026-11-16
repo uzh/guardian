@@ -1570,33 +1570,17 @@ struct
         Database.query
           ~needs:Needs.schema
           ?ctx
-          (fun (module Connection : Caqti_lwt.CONNECTION) ->
+          (fun ((module Connection : Caqti_lwt.CONNECTION) as connection) ->
              let open Lwt_result.Syntax in
              let kind = Veins.Dialect.kind Connection.dialect in
-             let set_fk_checks enabled =
-               match Veins.Dialect.set_fk_checks kind enabled with
-               | Some sql -> Connection.exec (ddl sql) ()
-               | None -> Lwt_result.return ()
-             in
-             let* () = set_fk_checks false in
-             (CCList.fold_left
-                (fun acc (key, sql) ->
-                   let* () = acc in
-                   Logs.debug ~src (fun m -> m "%s: Run '%s'" label key);
-                   Connection.exec (ddl sql) ())
-                (Lwt_result.return ())
-                (statements kind))
-               [%lwt.finally
-                 set_fk_checks true
-                 |> Lwt.map (function
-                   | Ok () -> ()
-                   | Error err ->
-                     Logs.err ~src (fun m ->
-                       m
-                         "%s: Failed to re-enable foreign key checks: %a"
-                         label
-                         Caqti.Error.pp
-                         err))])
+             Veins.Connection.without_fk_checks connection (fun () ->
+               CCList.fold_left
+                 (fun acc (key, sql) ->
+                    let* () = acc in
+                    Logs.debug ~src (fun m -> m "%s: Run '%s'" label key);
+                    Connection.exec (ddl sql) ())
+                 (Lwt_result.return ())
+                 (statements kind)))
       ;;
 
       (** [clean ?ctx ()] empties guardian's tables. *)
