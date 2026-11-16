@@ -28,17 +28,3 @@ let tables = function
   | Mariadb -> Migrations_mariadb.all_tables
   | Postgresql -> Migrations_postgresql.all_tables
 ;;
-
-let truncate kind table =
-  match kind with
-  | Mariadb -> [%string "TRUNCATE TABLE %{table}"]
-  | Postgresql -> [%string "TRUNCATE TABLE %{table} CASCADE"]
-;;
-
-let drop kind table =
-  match kind with
-  | Mariadb -> [%string "DROP TABLE IF EXISTS %{table}"]
-  | Postgresql -> [%string "DROP TABLE IF EXISTS %{table} CASCADE"]
-;;
-
-let set_fk_checks kind enabled = Veins.Dialect.set_fk_checks kind enabled

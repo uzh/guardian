@@ -25,13 +25,3 @@ val migrations : kind -> (string * string * string) list
 
 (** All of guardian's tables. *)
 val tables : kind -> string list
-
-(** Statement emptying a table. *)
-val truncate : kind -> string -> string
-
-(** Statement dropping a table. *)
-val drop : kind -> string -> string
-
-(** Statement turning foreign key checks of the session on or off, [None]
-    where {!truncate} and {!drop} don't need it. *)
-val set_fk_checks : kind -> bool -> string option
