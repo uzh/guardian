@@ -36,13 +36,6 @@ let invalid_role ?(msg_prefix = "Invalid role") =
 
 let failwith_invalid_role ?msg_prefix = invalid_role ?msg_prefix %> failwith
 
-module Dynparam = struct
-  type t = Pack : 'a Caqti_type.t * 'a -> t
-
-  let empty = Pack (Caqti_type.unit, ())
-  let add t x (Pack (t', x')) = Pack (Caqti_type.t2 t' t, (x', x))
-end
-
 let deny_message_uuid actor_uuid permission target_uuid =
   Format.asprintf
     "Actor '%s': Permission ('%s') denied for the target '%s'"

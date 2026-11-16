@@ -16,13 +16,6 @@ module Utils : sig
   val failwith_invalid_role : ?msg_prefix:string -> string * string list -> 'a
   val invalid_role : ?msg_prefix:string -> string * string list -> string
 
-  module Dynparam : sig
-    type t = Pack : 'a Caqti_type.t * 'a -> t
-
-    val empty : t
-    val add : 'a Caqti_type.t -> 'a -> t -> t
-  end
-
   val deny_message_uuid
     :  Uuid.Actor.t
     -> Permission.t
