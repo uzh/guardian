@@ -17,6 +17,8 @@ Björnsson's database refactoring of the pool tool (uzh/z-pool-tool#647).
 - `Guardian_backend.Database.Make`: runs guardian on your own database layer from a small `Core` (`default_ctx`,
   `label`, `is_transaction`, `after_commit`, `query`, `transaction_iter`) over your own `(_, _) ctx` type; guardian
   writes commit or roll back with the caller's transaction. `Database.Of_veins` is that core for a veins pool
+- `Guardian_backend.Database.Of_veins_explicit`: a veins core without default context; guardian functions called
+  without `?ctx` raise the given exception
 - `Guardian_backend.Needs` (`` `Read ``, `` `Write ``, `` `Schema ``, veins' typed needs): every statement declares
   what it needs, and every function taking `?ctx` states it in its type, e.g.
   `validate : ?ctx:(_, [> `Read ]) context -> ...`, so a context whose veins role lacks a right doesn't compile
