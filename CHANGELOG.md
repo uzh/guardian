@@ -32,6 +32,7 @@ Björnsson's database refactoring of the pool tool (uzh/z-pool-tool#647).
   OCaml 5 and caqti 3
 - Cache entries are invalidated before a write and again once it's committed, so a concurrent reader can't re-cache
   the old state. Validations inside a transaction bypass the caches
+- The backend uses veins' `Caqti_encoders` instead of its own copy
 - `clean`/`delete` disable foreign key checks on the same connection that runs the statements
 - Restoring a deleted role permission works on PostgreSQL (it used MariaDB's `ON DUPLICATE KEY UPDATE`)
 
