@@ -2,9 +2,10 @@
 
     Guardian runs its statements on the caller's own context: a pool label (a
     fresh connection per statement), a checked-out connection, or an open
-    transaction. With veins, apply {!Of_veins} to your pool; to plug in another
-    layer, implement {!Core} and apply {!Make}. Connection pools are not part of
-    this; they belong to whoever owns them.
+    transaction. With veins, apply {!Of_veins} to your pool, or
+    {!Of_veins_explicit} when every call passes [?ctx] (e.g. one database per
+    tenant); to plug in another layer, implement {!Core} and apply {!Make}.
+    Connection pools are not part of this; they belong to whoever owns them.
 
     Every statement declares the rights it needs ({!Needs}) in its type, so
     guardian's functions only accept contexts whose role grants them.
@@ -188,6 +189,23 @@ struct
   ;;
 end
 
+(**/**)
+
+(* Everything {!Of_veins} and {!Of_veins_explicit} share: all of {!Core} but
+   the default context. *)
+module Veins_core (Db : Veins.Pools_sig.Sig) = struct
+  type ('a, 'g) ctx = ('a, 'g) Veins.Ctx.t
+  type default = Veins.Ctx.no_transaction
+
+  let label ctx = Veins.Ctx.label ctx |> Veins.Label.value
+  let is_transaction = Veins.Ctx.is_transaction
+  let after_commit = Veins.Ctx.after_commit
+  let query = Db.query
+  let transaction_iter = Db.transaction_iter
+end
+
+(**/**)
+
 (** The {!Core} of a veins pool: guardian runs on [Db]'s contexts and pools.
     Without [?ctx], guardian uses a label context on [Db]'s primary database,
     as [default_role]. That role must grant every need ([Veins.Role.owner],
@@ -201,18 +219,30 @@ module Of_veins
   Core
   with type ('a, 'g) ctx = ('a, 'g) Veins.Ctx.t
    and type default = Veins.Ctx.no_transaction = struct
-  type ('a, 'g) ctx = ('a, 'g) Veins.Ctx.t
-  type default = Veins.Ctx.no_transaction
+  include Veins_core (Db)
 
   let default_ctx () =
     Db.label_ctx
       ~role:Default.default_role
       (Veins.Database.label Db.Config.database)
   ;;
+end
 
-  let label ctx = Veins.Ctx.label ctx |> Veins.Label.value
-  let is_transaction = Veins.Ctx.is_transaction
-  let after_commit = Veins.Ctx.after_commit
-  let query = Db.query
-  let transaction_iter = Db.transaction_iter
+(** {!Of_veins} for applications that pass [?ctx] to every guardian function:
+    there is no default context, a call without [?ctx] raises
+    [Missing.missing_ctx] instead of running on [Db]'s primary database as
+    some default role. Use it when the database is chosen per call (e.g. one
+    per tenant), so a forgotten [?ctx] can't silently hit the wrong one. *)
+module Of_veins_explicit
+    (Db : Veins.Pools_sig.Sig)
+    (Missing : sig
+       (** Raised by guardian functions called without [?ctx]. *)
+       val missing_ctx : exn
+     end) :
+  Core
+  with type ('a, 'g) ctx = ('a, 'g) Veins.Ctx.t
+   and type default = Veins.Ctx.no_transaction = struct
+  include Veins_core (Db)
+
+  let default_ctx () = raise Missing.missing_ctx
 end

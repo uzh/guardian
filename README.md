@@ -37,7 +37,9 @@ Every statement declares what it needs (`Guardian_backend.Needs`: `` `Read ``, `
 guardian's functions state it in their types: `validate` takes a context whose veins role grants `` `Read ``,
 `ActorRole.upsert` one granting `` `Write ``, `migrate` one granting `` `Schema ``. Passing a context whose role lacks
 them doesn't compile. Without `?ctx`, guardian runs as the `default_role` given to `Database.Of_veins`, which must
-grant everything (e.g. `Veins.Role.owner`). To run guardian on a database layer other than veins, implement
+grant everything (e.g. `Veins.Role.owner`). If your application passes `?ctx` to every call (e.g. one database per
+tenant), use `Database.Of_veins_explicit (Db) (struct let missing_ctx = My_error end)` instead: there is no default,
+and a call without `?ctx` raises `My_error`. To run guardian on a database layer other than veins, implement
 `Guardian_backend.Database.Core`.
 
 ## Usage

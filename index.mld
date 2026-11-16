@@ -32,7 +32,8 @@ or an open transaction, so guardian writes commit or roll back with yours.
 Every statement declares what it needs ({!Guardian_backend.Needs}: [`Read], [`Write], [`Schema]), and guardian's
 functions state it in their types, so a context whose veins role lacks a right doesn't compile. Without [?ctx],
 guardian runs as the [default_role] given to [Database.Of_veins], which must grant everything (e.g.
-[Veins.Role.owner]).
+[Veins.Role.owner]). With {!Guardian_backend.Database.Of_veins_explicit} there is no default: a call without [?ctx]
+raises the exception you give it, for applications that pass [?ctx] to every call (e.g. one database per tenant).
 
 {1 Usage}
 

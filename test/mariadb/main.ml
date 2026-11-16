@@ -31,8 +31,10 @@ let () =
   let%lwt () = Backend.clean ~ctx () in
   let module Transactions = Transaction_tests.Make (Database) (Backend) in
   let module Cases = Suite.Test_cases (Backend) in
+  let module Explicit_ctx = Explicit_ctx_tests.Make (Database) (Backend) in
   Suite.role_model_tests
   @ Cases.make ~ctx "MariaDB Backend"
   @ Transactions.cases
+  @ Explicit_ctx.cases
   |> Alcotest_lwt.run "Authorization"
 ;;
