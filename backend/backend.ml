@@ -1540,7 +1540,8 @@ struct
       let find_migrations = Dialect.migrations
 
       let find_clean kind =
-        Dialect.tables kind |> CCList.map (fun m -> m, Dialect.truncate kind m)
+        Dialect.tables kind
+        |> CCList.map (fun m -> m, Veins.Dialect.truncate kind ~table:m)
       ;;
 
       (* The dialect of the connection [ctx] (or the default context) runs on. *)
@@ -1573,7 +1574,7 @@ struct
              let open Lwt_result.Syntax in
              let kind = Veins.Dialect.kind Connection.dialect in
              let set_fk_checks enabled =
-               match Dialect.set_fk_checks kind enabled with
+               match Veins.Dialect.set_fk_checks kind enabled with
                | Some sql -> Connection.exec (ddl sql) ()
                | None -> Lwt_result.return ()
              in
@@ -1608,7 +1609,8 @@ struct
       let delete ?ctx () =
         let () = Repo.clear_cache () in
         run_without_fk_checks ?ctx "Delete" (fun kind ->
-          Dialect.tables kind |> CCList.map (fun m -> m, Dialect.drop kind m))
+          Dialect.tables kind
+          |> CCList.map (fun m -> m, Veins.Dialect.drop kind ~table:m))
       ;;
     end)
 end
