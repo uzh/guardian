@@ -590,11 +590,11 @@ struct
 
           let create_exclude
                 ?(field = "roles.actor_uuid")
-                ?(dynparam = Guardian.Utils.Dynparam.empty)
+                ?(dynparam = Veins.Dynparam.empty)
                 ?(with_uuid = false)
                 exclude
             =
-            let open Guardian.Utils.Dynparam in
+            let open Veins.Dynparam in
             if CCList.is_empty exclude
             then dynparam, Fun.const ""
             else (
@@ -674,7 +674,7 @@ struct
           ;;
 
           let find_actors_by_role ?ctx ?(exclude = []) (role, target_uuid) =
-            let open Guardian.Utils.Dynparam in
+            let open Veins.Dynparam in
             match target_uuid with
             | Some uuid ->
               let field = "role_targets.actor_uuid" in
