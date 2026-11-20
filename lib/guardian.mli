@@ -1,5 +1,3 @@
-type context = (string * string) list
-
 module type RoleSig = Role.Sig
 
 module Utils : sig
@@ -17,13 +15,6 @@ module Utils : sig
 
   val failwith_invalid_role : ?msg_prefix:string -> string * string list -> 'a
   val invalid_role : ?msg_prefix:string -> string * string list -> string
-
-  module Dynparam : sig
-    type t = Pack : 'a Caqti_type.t * 'a -> t
-
-    val empty : t
-    val add : 'a Caqti_type.t -> 'a -> t -> t
-  end
 
   val deny_message_uuid
     :  Uuid.Actor.t
@@ -106,8 +97,12 @@ module Make : functor
 
   module type ActorSig = sig
     type t
+    type (_, _) context
 
-    val to_authorizable : ?ctx:context -> t -> (Actor.t, string) Lwt_result.t
+    val to_authorizable
+      :  ?ctx:(_, [> `Read | `Write ]) context
+      -> t
+      -> (Actor.t, string) Lwt_result.t
   end
 
   module Target : sig
@@ -128,8 +123,12 @@ module Make : functor
 
   module type TargetSig = sig
     type t
+    type (_, _) context
 
-    val to_authorizable : ?ctx:context -> t -> (Target.t, string) Lwt_result.t
+    val to_authorizable
+      :  ?ctx:(_, [> `Read | `Write ]) context
+      -> t
+      -> (Target.t, string) Lwt_result.t
   end
 
   module RolePermission : sig
@@ -271,5 +270,8 @@ module Make : functor
                   and type target_entity = TargetEntity.t
                   and type target_model = TargetModel.t
                   and type validation_set = ValidationSet.t)
-      -> PersistenceSig
+      ->
+    PersistenceSig
+    with type ('a, 'g) context = ('a, 'g) Backend.context
+     and type dialect = Backend.dialect
 end [@warning "-67"]

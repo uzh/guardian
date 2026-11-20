@@ -80,7 +80,7 @@ module Tests (Backend : Guard.PersistenceSig) = struct
   let ( >|= ) = Lwt.Infix.( >|= )
 
   let test_invalid_permission_string
-        ?(ctx : Guardian__Persistence.context option)
+        ?(ctx : _ Backend.context option)
         (_ : 'a)
         ()
     : unit Lwt.t
@@ -1239,8 +1239,8 @@ let role_model_tests =
   ]
 ;;
 
-let () =
-  let make_test_cases ?ctx (module Backend : Guard.PersistenceSig) name =
+module Test_cases (Backend : Guard.PersistenceSig) = struct
+  let make ?ctx name =
     let module T = Tests (Backend) in
     let open Alcotest_lwt in
     T.
@@ -1406,31 +1406,5 @@ let () =
               (test_permission_duplicate_sources ?ctx)
           ] )
       ]
-  in
-  let open Guardian_backend.Pools in
-  let test_database = "test" in
-  let ctx = [ "pool", test_database ] in
-  let module MariaConfig = struct
-    include DefaultConfig
-
-    let database =
-      ( test_database
-      , Sys.getenv_opt "DATABASE_URL"
-        |> CCOption.get_or ~default:"mariadb://root@database:3306/test" )
-    ;;
-  end
-  in
-  let module Database = Make (MariaConfig) in
-  let module Maria =
-    Guardian_backend.MariaDb.Make (Role.Actor) (Role.Role) (Role.Target)
-      (Database)
-  in
-  Lwt_main.run
-  @@
-  let () = Database.initialize () in
-  let%lwt () = Maria.delete ~ctx () in
-  let%lwt () = Maria.migrate ~ctx () in
-  let%lwt () = Maria.clean ~ctx () in
-  role_model_tests @ make_test_cases ~ctx (module Maria) "MariadDB Backend"
-  |> Alcotest_lwt.run "Authorization"
-;;
+  ;;
+end

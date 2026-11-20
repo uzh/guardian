@@ -21,11 +21,20 @@ jobs:
           MYSQL_ROOT_PASSWORD: ${{ env.MYSQL_ROOT_PASSWORD }}
         ports: ['3306:3306']
         options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+      postgres:
+        # NULLS NOT DISTINCT needs PostgreSQL 15+
+        image: postgres:17
+        env:
+          POSTGRES_DB: ${{ env.MYSQL_DATABASE }}
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: ${{ env.MYSQL_ROOT_PASSWORD }}
+        ports: ['5432:5432']
+        options: --health-cmd=pg_isready --health-interval=10s --health-timeout=5s --health-retries=5
     strategy:
       fail-fast: false
       matrix:
+        # veins needs OCaml 5
         ocaml-compiler:
-          - "4.14.3"
           - "5.2.1"
           - "5.3.0"
 
@@ -40,7 +49,7 @@ jobs:
           dune-cache: true
 
       - name: Install system dependencies
-        run: sudo apt-get update -y && sudo apt-get install -y libmariadb-dev
+        run: sudo apt-get update -y && sudo apt-get install -y libmariadb-dev libpq-dev
 
       - name: Install dependencies
         run: opam install --deps-only --with-test --with-doc -y .
@@ -50,14 +59,15 @@ jobs:
 
       - name: Run tests
         env:
-          DATABASE_URL: mariadb://root:${{ env.MYSQL_ROOT_PASSWORD }}@127.0.0.1:3306/${{ env.MYSQL_DATABASE }}
+          MARIADB_URL: mariadb://root:${{ env.MYSQL_ROOT_PASSWORD }}@127.0.0.1:3306/${{ env.MYSQL_DATABASE }}
+          POSTGRES_URL: postgresql://root:${{ env.MYSQL_ROOT_PASSWORD }}@127.0.0.1:5432/${{ env.MYSQL_DATABASE }}
         run: make test
 
       - uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: tests-${{ matrix.ocaml-compiler }}
-          path: _build/default/test/_build/_tests/
+          path: _build/default/test/*/_build/_tests/
 
       - name: Notify about failure
         if: failure()
@@ -71,7 +81,7 @@ jobs:
       - name: Checkout tree
         uses: actions/checkout@v6
       - name: Install system dependencies
-        run: sudo apt-get update -y && sudo apt-get install -y libmariadb-dev
+        run: sudo apt-get update -y && sudo apt-get install -y libmariadb-dev libpq-dev
       - name: Set-up OCaml
         uses: ocaml/setup-ocaml@v3
         with:

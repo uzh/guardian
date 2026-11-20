@@ -1,7 +1,5 @@
 open CCFun.Infix
 
-type context = Persistence.context
-
 module type RoleSig = Role.Sig
 
 module Make (ActorModel : RoleSig) (Role : RoleSig) (TargetModel : RoleSig) =
@@ -41,11 +39,15 @@ struct
 
   module type ActorSig = sig
     type t
+    type (_, _) context
 
     (** [to_authorizable x] converts [x] to a uniquely identifiable object,
         complete * with roles. The [authorizable] can't be converted back into
         type [t]. **)
-    val to_authorizable : ?ctx:context -> t -> (Actor.t, string) Lwt_result.t
+    val to_authorizable
+      :  ?ctx:(_, [> `Read | `Write ]) context
+      -> t
+      -> (Actor.t, string) Lwt_result.t
   end
 
   module ActorRole = struct
@@ -80,11 +82,15 @@ struct
 
   module type TargetSig = sig
     type t
+    type (_, _) context
 
     (** [to_authorizable x] converts [x] to a uniquely identifiable object,
         complete * with roles. The [authorizable] may not, however, be converted
         back into type [t]. **)
-    val to_authorizable : ?ctx:context -> t -> (Target.t, string) Lwt_result.t
+    val to_authorizable
+      :  ?ctx:(_, [> `Read | `Write ]) context
+      -> t
+      -> (Target.t, string) Lwt_result.t
   end
 
   module RolePermission = struct
@@ -274,7 +280,10 @@ struct
           and type target = Target.t
           and type target_entity = TargetEntity.t
           and type target_model = TargetModel.t
-          and type validation_set = ValidationSet.t) : PersistenceSig = struct
+          and type validation_set = ValidationSet.t) :
+    PersistenceSig
+    with type ('a, 'g) context = ('a, 'g) Backend.context
+     and type dialect = Backend.dialect = struct
     include Backend
 
     let clear_cache () = Repo.clear_cache ()

@@ -4,6 +4,50 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [unreleased](https://github.com/uzh/guardian/tree/HEAD)
 
+### 💥 Breaking: veins, and one package per database
+
+Guardian runs on [veins](https://github.com/uzh/veins) connection pools and contexts, whose design comes from Reynir
+Björnsson's database refactoring of the pool tool (uzh/z-pool-tool#647).
+
+### Added
+
+- PostgreSQL 15+ next to MariaDB / MySQL: `Guardian_backend.Make` renders its SQL for the dialect of each connection
+  (veins' `Dialect.request`), so one package serves both. `migrate` runs the migrations of the connection's dialect;
+  `find_migrations` / `find_clean` take the dialect (`Veins.Dialect.kind`)
+- `Guardian_backend.Database.Make`: runs guardian on your own database layer from a small `Core` (`default_ctx`,
+  `label`, `is_transaction`, `after_commit`, `query`, `transaction_iter`) over your own `(_, _) ctx` type; guardian
+  writes commit or roll back with the caller's transaction. `Database.Of_veins` is that core for a veins pool
+- `Guardian_backend.Database.Of_veins_explicit`: a veins core without default context; guardian functions called
+  without `?ctx` raise the given exception
+- `Guardian_backend.Needs` (`` `Read ``, `` `Write ``, `` `Schema ``, veins' typed needs): every statement declares
+  what it needs, and every function taking `?ctx` states it in its type, e.g.
+  `validate : ?ctx:(_, [> `Read ]) context -> ...`, so a context whose veins role lacks a right doesn't compile
+
+### Changed
+
+- **Breaking:** the context type is no longer `(string * string) list`. It's `(_, _) context` in
+  `Persistence.Backend` (transaction marker and role type), set by the database module, so a caller's own context
+  (e.g. `Veins.Ctx.t`) is passed as-is. `ActorSig`/`TargetSig` declare `type (_, _) context`
+- **Breaking:** `MakePersistence` returns `PersistenceSig with type ('a, 'g) context = ('a, 'g) Backend.context`; `find_clean`
+  returns `(string * string) list`
+- **Breaking:** the bundled `Pools` and `MariaDb` modules are gone: use veins and `Guardian_backend.Make`. Requires
+  OCaml 5 and caqti 3
+- Requires veins 0.3.0: the driver is veins' library `veins.mariadb` or `veins.postgresql` (plus its Caqti driver),
+  and a pool's `Config.database` is a function
+- Cache entries are invalidated before a write and again once it's committed, so a concurrent reader can't re-cache
+  the old state. Validations inside a transaction bypass the caches
+- **Breaking:** `Guardian_backend.Dialect.truncate`, `drop` and `set_fk_checks` are gone: use `Veins.Dialect`'s
+- **Breaking:** `Guardian.Utils.Dynparam` is gone: use `Veins.Dynparam`
+- The backend uses veins' `Caqti_encoders` instead of its own copy
+- `clean`/`delete` disable foreign key checks on the same connection that runs the statements (veins'
+  `Connection.without_fk_checks`)
+- Restoring a deleted role permission works on PostgreSQL (it used MariaDB's `ON DUPLICATE KEY UPDATE`)
+
+### Fixed
+
+- A rolled-back transaction left its pooled connection with autocommit off (caqti-driver-mariadb), so later
+  statements on it ran in a transaction that was never committed; veins restores autocommit
+
 ## [0.5.0](https://github.com/uzh/guardian/tree/0.4.0) - 2026-07-14
 
 ### Added

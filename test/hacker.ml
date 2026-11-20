@@ -1,4 +1,6 @@
 module Make (Backend : Guard.PersistenceSig) = struct
+  type ('a, 'g) context = ('a, 'g) Backend.context
+
   open Guard
 
   type t = string * Uuid.Actor.t
