@@ -32,6 +32,8 @@ Björnsson's database refactoring of the pool tool (uzh/z-pool-tool#647).
   returns `(string * string) list`
 - **Breaking:** the bundled `Pools` and `MariaDb` modules are gone: use veins and `Guardian_backend.Make`. Requires
   OCaml 5 and caqti 3
+- Requires veins 0.3.0: the driver is veins' library `veins.mariadb` or `veins.postgresql` (plus its Caqti driver),
+  and a pool's `Config.database` is a function
 - Cache entries are invalidated before a write and again once it's committed, so a concurrent reader can't re-cache
   the old state. Validations inside a transaction bypass the caches
 - **Breaking:** `Guardian_backend.Dialect.truncate`, `drop` and `set_fk_checks` are gone: use `Veins.Dialect`'s

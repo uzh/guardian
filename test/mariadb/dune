@@ -13,7 +13,7 @@
   guardian.backend
   lwt
   veins
-  veins-mariadb)
+  veins.mariadb)
  (ocamlopt_flags
   (:standard -O3))
  (preprocess

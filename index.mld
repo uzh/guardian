@@ -6,7 +6,8 @@ Generic framework for roles and permissions to be used in our projects
 
 - [guardian]: roles, permissions and validation ({!Guardian}), plus the backend ({!Guardian_backend.Make}) running
   on veins connection pools, on MariaDB / MySQL and PostgreSQL 15+. Its SQL follows the dialect of each
-  connection, so there is one package for both; add [veins-mariadb] or [veins-postgresql] for the driver.
+  connection, so there is one package for both; for the driver, use veins' library [veins.mariadb] or
+  [veins.postgresql] and depend on its Caqti driver ([caqti-driver-mariadb], [caqti-driver-postgresql]).
 
 {1 Setup}
 

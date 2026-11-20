@@ -13,7 +13,7 @@
   guardian.backend
   lwt
   veins
-  veins-postgresql)
+  veins.postgresql)
  (ocamlopt_flags
   (:standard -O3))
  (preprocess

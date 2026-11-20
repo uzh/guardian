@@ -6,8 +6,8 @@ Generic framework for roles and permissions to be used in our projects
 
 - `guardian`: roles, permissions and validation (`Guardian`), plus the backend (`Guardian_backend.Make`) running
   on [veins](https://github.com/uzh/veins) connection pools, on MariaDB / MySQL and PostgreSQL 15+. Its SQL follows
-  the dialect of each connection, so there is one package for both; add `veins-mariadb` or `veins-postgresql` for
-  the driver.
+  the dialect of each connection, so there is one package for both; for the driver, use veins' library `veins.mariadb` or
+  `veins.postgresql` and depend on its Caqti driver (`caqti-driver-mariadb`, `caqti-driver-postgresql`).
 
 ## Setup
 
@@ -110,6 +110,7 @@ Most used commands can be found in the following list. For the full list of comm
 - `make build` - to build the project
 - `make build-watch` - to build and watch the project
 - `make test` - to run all tests. This requires a running MariaDB (`MARIADB_URL`) and PostgreSQL (`POSTGRES_URL`) instance; the tests drop guardian's tables, use throwaway databases.
+  In the devcontainer, the `make` alias (`.devcontainer/Makefile`) points both at the containers' `test` databases.
 
 ## 🚀 Release new version
 

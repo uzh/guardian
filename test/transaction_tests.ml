@@ -19,7 +19,7 @@ struct
     ]
 
   let owner : all Veins.Role.t = Veins.Role.owner
-  let label = Veins.Database.label Database.Config.database
+  let label = Veins.Database.label (Database.Config.database ())
   let ctx = Database.label_ctx ~role:owner label
 
   let get_ok = function

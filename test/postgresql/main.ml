@@ -4,7 +4,7 @@
 let () =
   let test_database = Veins.Label.create "test" in
   let module Database = Veins_postgresql.Pools.Make (struct
-      let database =
+      let database () =
         Veins.Database.create
           test_database
           (Sys.getenv_opt "POSTGRES_URL"

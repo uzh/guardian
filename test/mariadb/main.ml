@@ -4,11 +4,12 @@
 let () =
   let test_database = Veins.Label.create "test" in
   let module Database = Veins_mariadb.Pools.Make (struct
-      let database =
+      let database () =
         Veins.Database.create
           test_database
           (Sys.getenv_opt "MARIADB_URL"
-           |> CCOption.get_or ~default:"mariadb://root@database:3306/test"
+           |> CCOption.get_or
+                ~default:"mariadb://admin:password@database-mariadb/test"
            |> Veins.Url.create)
       ;;
     end)
