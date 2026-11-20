@@ -83,15 +83,7 @@
   (uuidm
    (>= 0.9.9))
   (veins
-   (>= 0.2.0))
-  (veins-mariadb
-   (and
-    :with-test
-    (>= 0.2.0)))
-  (veins-postgresql
-   (and
-    :with-test
-    (>= 0.2.0)))
+   (>= 0.3.0))
   (yojson
    (>= 2.0.2))))
 

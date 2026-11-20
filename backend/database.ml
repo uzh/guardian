@@ -224,7 +224,7 @@ module Of_veins
   let default_ctx () =
     Db.label_ctx
       ~role:Default.default_role
-      (Veins.Database.label Db.Config.database)
+      (Veins.Database.label (Db.Config.database ()))
   ;;
 end
 

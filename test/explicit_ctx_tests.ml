@@ -32,7 +32,7 @@ struct
   let ctx =
     Database.label_ctx
       ~role:owner
-      (Veins.Database.label Database.Config.database)
+      (Veins.Database.label (Database.Config.database ()))
   ;;
 
   let get_ok = function
