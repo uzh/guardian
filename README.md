@@ -86,7 +86,8 @@ There is an `Adminer` container added to the development package. To be able to 
 1. Use `Remote-Containers: Rebuild Container` that it will also create and startup the `Adminer` container
 1. Open your web browser and open `localhost:8080`
 1. Use the _development_ credentials defined for the development database in your `.env` file
-    (default: `user: root`, `password: <empty/none>`, `host: database`, `database: development` )
+    (MariaDB: `server: database-mariadb`, `user: admin`, `password: password`; PostgreSQL: `server: database-postgres`,
+    `user: root`, `password: root`; databases `development` and `test`)
 
 ### Commands
 

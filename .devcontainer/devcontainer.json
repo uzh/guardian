@@ -10,7 +10,7 @@
   "service": "dev",
   "runServices": [
     "dev",
-    "database",
+    "database-mariadb",
     "database-postgres"
   ],
   "workspaceFolder": "/workspace",
@@ -31,7 +31,7 @@
       "upgradePackages": false
     }
   },
-  "postCreateCommand": "/bin/bash .devcontainer/wait-for-database.sh -d db-mariadb/test -d db-postgres/18/docker/base .devcontainer/postCreate.sh",
+  "postCreateCommand": "/bin/sh .devcontainer/postCreate.sh",
   // Use 'settings' to set *default* container specific settings.json values on container create.
   // You can edit these settings after create using File > Preferences > Settings > Remote.
   "customizations": {

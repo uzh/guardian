@@ -8,6 +8,11 @@ if [ -d ~/.oh-my-zsh ]; then
   sed -i "/^plugins=/c\plugins=(git dotenv)" ~/.zshrc
 fi
 
+# run make with the devcontainer database URLs by default
+if ! grep -q "alias make=" ~/.zshrc 2>/dev/null; then
+  echo 'alias make="make -f /workspace/.devcontainer/Makefile"' >> ~/.zshrc
+fi
+
 # configure git identity from .devcontainer/.env (committer and tools read the config)
 if [ -n "${GIT_AUTHOR_NAME:-}" ]; then
   git config --global user.name "$GIT_AUTHOR_NAME"
