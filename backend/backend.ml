@@ -13,7 +13,7 @@ let schema request = Veins.Request.create ~needs:Needs.schema request
 
 (* [request rt sql] renders [sql kind] for the dialect of the connection the
    request runs on; [constant rt sql] is the same SQL everywhere. Requests
-   built per call use [~policy:Dynamic], so the driver releases them. *)
+   built per call use [~policy:Caqti.Template.Request.Dynamic], so the driver releases them. *)
 let request ?(policy = Caqti.Template.Request.Static) request_type sql =
   Veins.Dialect.request policy request_type sql
 ;;
@@ -510,7 +510,7 @@ struct
                 )
                 %{Dialect.restore_on_conflict kind "actor_uuid, role, target_uuid"}
               |sql}])
-            |> request Entity.(Entity.ActorRole.targets -->. Caqti_type.unit)
+            |> request (Entity.ActorRole.targets -->. Caqti_type.unit)
             |> write
           ;;
 
@@ -522,7 +522,7 @@ struct
                 VALUES (%{Entity.Uuid.sql_value_fragment kind "?"}, ?)
                 %{Dialect.restore_on_conflict kind "actor_uuid, role"}
               |sql}])
-            |> request Entity.(Entity.ActorRole.role -->. Caqti_type.unit)
+            |> request (Entity.ActorRole.role -->. Caqti_type.unit)
             |> write
           ;;
 
@@ -555,7 +555,7 @@ struct
                 WHERE roles.actor_uuid = %{sql_value_fragment kind "$1"}
                   AND roles.mark_as_deleted IS NULL
               |sql}])
-            |> request Entity.(Entity.(Uuid.Actor.t -->* ActorRole.t))
+            |> request Entity.(Uuid.Actor.t -->* ActorRole.t)
             |> read
           ;;
 
@@ -581,8 +581,7 @@ struct
                   AND roles.mark_as_deleted IS NULL
               |sql}])
             |> request
-                 Entity.(
-                   Entity.(Caqti_type.t2 Role.t Uuid.Target.t -->* ActorRole.t))
+                 Entity.(Caqti_type.t2 Role.t Uuid.Target.t -->* ActorRole.t)
             |> read
           ;;
 
@@ -653,7 +652,9 @@ struct
                   AND roles.mark_as_deleted IS NULL
                   %{exclude_sql kind}
               |sql}])
-            |> request ~policy:Dynamic Entity.(params -->* Entity.Uuid.Actor.t)
+            |> request
+                 ~policy:Caqti.Template.Request.Dynamic
+                 (params -->* Entity.Uuid.Actor.t)
             |> read
           ;;
 
@@ -669,7 +670,9 @@ struct
                   AND role_targets.role = ?
                   %{exclude_sql kind}
               |sql}])
-            |> request ~policy:Dynamic Entity.(params -->* Entity.Uuid.Actor.t)
+            |> request
+                 ~policy:Caqti.Template.Request.Dynamic
+                 (params -->* Entity.Uuid.Actor.t)
             |> read
           ;;
 
@@ -766,7 +769,7 @@ struct
                   AND role = $2
                   AND target_uuid = %{Entity.Uuid.sql_value_fragment kind "$3"}
               |sql}])
-            |> request Entity.(Entity.ActorRole.targets -->. Caqti_type.unit)
+            |> request (Entity.ActorRole.targets -->. Caqti_type.unit)
             |> write
           ;;
 
@@ -820,7 +823,7 @@ struct
 
           let find_all_request =
             combine_sql select_sql
-            |> constant Entity.(Caqti_type.unit -->* Entity.RolePermission.t)
+            |> constant (Caqti_type.unit -->* Entity.RolePermission.t)
             |> read
           ;;
 
@@ -831,7 +834,7 @@ struct
               {sql|role_permissions.target_model = $1|sql}
             in
             combine_sql ~where_additions select_sql
-            |> constant Entity.(Entity.(TargetModel.t -->* RolePermission.t))
+            |> constant Entity.(TargetModel.t -->* RolePermission.t)
             |> read
           ;;
 
@@ -861,7 +864,6 @@ struct
           ;;
 
           let delete_request =
-            let open Entity in
             {sql|
               UPDATE guardian_role_permissions
               SET mark_as_deleted = NOW()
@@ -904,7 +906,7 @@ struct
 
           let find_all_request =
             (fun kind -> combine_sql (select_sql kind))
-            |> request Entity.(Caqti_type.unit -->* Entity.ActorPermission.t)
+            |> request (Caqti_type.unit -->* Entity.ActorPermission.t)
             |> read
           ;;
 
@@ -922,7 +924,7 @@ struct
                 |sql}]
               in
               combine_sql ~joins ~where_additions (select_sql kind))
-            |> request Entity.(Entity.(Uuid.Target.t -->* ActorPermission.t))
+            |> request Entity.(Uuid.Target.t -->* ActorPermission.t)
             |> read
           ;;
 
@@ -937,7 +939,7 @@ struct
               |sql}
               in
               combine_sql ~joins ~where_additions (select_sql kind))
-            |> request Entity.(Entity.(TargetModel.t -->* ActorPermission.t))
+            |> request Entity.(TargetModel.t -->* ActorPermission.t)
             |> read
           ;;
 
@@ -957,7 +959,7 @@ struct
                 VALUES (%{Entity.Uuid.sql_value_fragment kind "?"}, ?, ?, %{Entity.Uuid.sql_value_fragment kind "?"})
                 %{Dialect.restore_on_conflict kind "actor_uuid, permission, target_model, target_uuid"}
               |sql}])
-            |> request Entity.(Entity.ActorPermission.t -->. Caqti_type.unit)
+            |> request (Entity.ActorPermission.t -->. Caqti_type.unit)
             |> write
           ;;
 
@@ -979,7 +981,7 @@ struct
                   AND (($3 IS NULL AND target_model IS NULL) OR target_model = $3)
                   AND (($4 IS NULL AND target_uuid IS NULL) OR target_uuid = %{sql_value_fragment kind "$4"})
               |sql}])
-            |> request Entity.(Entity.ActorPermission.t -->. Caqti_type.unit)
+            |> request (Entity.ActorPermission.t -->. Caqti_type.unit)
             |> write
           ;;
 
@@ -1019,7 +1021,7 @@ struct
                 VALUES (%{Entity.Uuid.sql_value_fragment kind "?"}, ?)
                 %{Dialect.restore_on_conflict kind "uuid"}
               |sql}])
-            |> request Entity.(Entity.Actor.t -->. Caqti_type.unit)
+            |> request (Entity.Actor.t -->. Caqti_type.unit)
             |> write
           ;;
 
@@ -1032,7 +1034,7 @@ struct
                   [%string
                     {sql|actors.uuid = %{Entity.Uuid.sql_value_fragment kind "?"}|sql}]
                 {sql|TRUE|sql})
-            |> request Entity.(Entity.Uuid.Actor.t -->? Caqti_type.bool)
+            |> request (Entity.Uuid.Actor.t -->? Caqti_type.bool)
             |> read
           ;;
 
@@ -1049,7 +1051,7 @@ struct
                   [%string
                     {sql|actors.uuid = %{Entity.Uuid.sql_value_fragment kind "?"}|sql}]
                 (select_sql kind))
-            |> request Entity.(Entity.(Uuid.Actor.t -->? Actor.t))
+            |> request Entity.(Uuid.Actor.t -->? Actor.t)
             |> read
           ;;
 
@@ -1085,7 +1087,7 @@ struct
                 VALUES (%{Entity.Uuid.sql_value_fragment kind "?"}, ?)
                 %{Dialect.restore_on_conflict kind "uuid"}
               |sql}])
-            |> request Entity.(Caqti_type.(Entity.Target.t -->. unit))
+            |> request Caqti_type.(Entity.Target.t -->. unit)
             |> write
           ;;
 
@@ -1098,7 +1100,7 @@ struct
                   [%string
                     {sql|targets.uuid = %{Entity.Uuid.sql_value_fragment kind "?"}|sql}]
                 {sql|TRUE|sql})
-            |> request Entity.(Entity.Uuid.Target.t -->? Caqti_type.bool)
+            |> request (Entity.Uuid.Target.t -->? Caqti_type.bool)
             |> read
           ;;
 
@@ -1115,7 +1117,7 @@ struct
                   [%string
                     {sql|targets.uuid = %{Entity.Uuid.sql_value_fragment kind "?"}|sql}]
                 (select_sql kind))
-            |> request Entity.(Entity.(Uuid.Target.t -->? Target.t))
+            |> request Entity.(Uuid.Target.t -->? Target.t)
             |> read
           ;;
 
@@ -1132,7 +1134,7 @@ struct
                   [%string
                     {sql|targets.uuid = %{Entity.Uuid.sql_value_fragment kind "?"}|sql}]
                 {sql|targets.model|sql})
-            |> request Entity.(Entity.(Uuid.Target.t -->? TargetModel.t))
+            |> request Entity.(Uuid.Target.t -->? TargetModel.t)
             |> read
           ;;
 
@@ -1191,7 +1193,7 @@ struct
 
           let find_all_request =
             find_request_sql ""
-            |> constant Entity.(Caqti_type.(unit -->* Model.role_assignment))
+            |> constant Caqti_type.(unit -->* Model.role_assignment)
             |> read
           ;;
 
@@ -1199,7 +1201,7 @@ struct
 
           let find_all_by_role_request =
             find_request_sql {sql|WHERE role = ?|sql}
-            |> constant Entity.(Model.(role -->* role_assignment))
+            |> constant Model.(role -->* role_assignment)
             |> read
           ;;
 
@@ -1212,9 +1214,7 @@ struct
               INSERT INTO guardian_assign_roles_history (role, target_role, comment) VALUES (?,?,?)
             |sql}
             |> constant
-                 Entity.(
-                   Caqti_type.(
-                     t2 Model.role_assignment (option string) -->. unit))
+                 Caqti_type.(t2 Model.role_assignment (option string) -->. unit)
             |> write
           ;;
 
@@ -1222,7 +1222,7 @@ struct
             {sql|
                 DELETE FROM guardian_assign_roles WHERE role = ? AND target_role = ?
             |sql}
-            |> constant Entity.(Model.role_assignment -->. Caqti_type.unit)
+            |> constant (Model.role_assignment -->. Caqti_type.unit)
             |> write
           ;;
 
@@ -1269,7 +1269,7 @@ struct
                 )
               |sql}])
             |> request
-                 ~policy:Dynamic
+                 ~policy:Caqti.Template.Request.Dynamic
                  Entity.(
                    Caqti_type.(
                      t3 Uuid.Actor.t Permission.t TargetModel.t -->? option bool))
@@ -1339,7 +1339,7 @@ struct
                 )
               |sql}])
             |> request
-                 ~policy:Dynamic
+                 ~policy:Caqti.Template.Request.Dynamic
                  Entity.(
                    Caqti_type.(
                      t2
@@ -1406,7 +1406,7 @@ struct
                 )
               |sql}])
             |> request
-                 ~policy:Dynamic
+                 ~policy:Caqti.Template.Request.Dynamic
                  Entity.(
                    Caqti_type.(
                      t3 Uuid.Actor.t Permission.t TargetModel.t -->? option bool))
