@@ -43,3 +43,16 @@ format: ## Format the codebase with ocamlformat
 .PHONY: doc
 doc: ## Build the documentation
 	opam exec -- dune build --root . @doc
+
+.PHONY: version version-patch version-minor version-major
+version: ## Release: make version-{patch|minor|major}, or make version V=X.Y.Z (on main)
+	@if [ -n "$(V)" ]; then ./scripts/bump-version.sh "$(V)"; else echo "Usage: make version-{patch|minor|major} or make version V=X.Y.Z"; fi
+
+version-patch:
+	./scripts/bump-version.sh --patch
+
+version-minor:
+	./scripts/bump-version.sh --minor
+
+version-major:
+	./scripts/bump-version.sh --major
