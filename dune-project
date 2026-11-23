@@ -27,7 +27,7 @@
  (name guardian)
  (synopsis "Role-based access control for OCaml")
  (description
-  "Defined actors can access targets according to specified rules (allowed actions: CRUD).")
+  "Defined actors can access targets according to specified rules (allowed actions: CRUD). Persistence on MariaDB / MySQL and PostgreSQL 15+, running on veins connection pools.")
  (depends
   (alcotest
    (and
@@ -35,11 +35,17 @@
     (>= 1.9.1)))
   (alcotest-lwt :with-test)
   (caqti
-   (>= 2.3.0))
+   (>= 3.0.0))
   (caqti-driver-mariadb
-   (>= 2.3.0))
+   (and
+    :with-test
+    (>= 3.0.0)))
+  (caqti-driver-postgresql
+   (and
+    :with-test
+    (>= 3.0.0)))
   (caqti-lwt
-   (>= 2.3.0))
+   (>= 3.0.0))
   (containers
    (>= 3.6))
   (containers-data
@@ -57,10 +63,8 @@
    (>= 5.6.1))
   (lwt_ppx
    (>= 2.1.0))
-  (mariadb
-   (>= 1.2.0))
   (ocaml
-   (>= 4.12.0))
+   (>= 5.0.0))
   (ocaml-lsp-server :with-dev-setup)
   (ocamlformat :with-dev-setup)
   (odoc :with-doc)
@@ -78,6 +82,8 @@
    (>= 4.2.0))
   (uuidm
    (>= 0.9.9))
+  (veins
+   (>= 0.3.0))
   (yojson
    (>= 2.0.2))))
 

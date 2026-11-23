@@ -2,31 +2,45 @@
 
 Generic framework for roles and permissions to be used in our projects
 
-## Limitations and Notes
+## Packages
 
-- Supported Database: Implementation with MariaDb
-- Context (`ctx`): Allows to have multiple database pools (See [next section](#setup-with-mariadb-backend-multipools))
+- `guardian`: roles, permissions and validation (`Guardian`), plus the backend (`Guardian_backend.Make`) running
+  on [veins](https://github.com/uzh/veins) connection pools, on MariaDB / MySQL and PostgreSQL 15+. Its SQL follows
+  the dialect of each connection, so there is one package for both; for the driver, use veins' library `veins.mariadb` or
+  `veins.postgresql` and depend on its Caqti driver (`caqti-driver-mariadb`, `caqti-driver-postgresql`).
 
-## Setup with MariaDB backend (MultiPools)
+## Setup
+
+Guardian runs its statements on your veins pool and on the context you pass as `?ctx`: a label, a held connection
+or an open transaction, so guardian writes commit or roll back with yours.
 
 ```ocaml
-  let open Guardian_backend.Pools in
-  let module MariaConfig = struct
-    include DefaultConfig
+module Db = Veins_mariadb.Pools.Make (struct
+  let database =
+    Veins.Database.create (Veins.Label.create "app")
+      (Veins.Url.create "mariadb://root@database:3306/dev")
+end)
 
-    let database =
-      MultiPools
-        [ "pool-one", "mariadb://root@database:3306/dev"
-        ; "pool-two", "mariadb://root@database:3306/test"
-        ]
-    ;;
-  end
-  in
-  let module MariaDb = Guardian_backend.MariaDb.Make (Roles) (Make (MariaConfig))
-  let%lwt () = Lwt_list.iter (fun pool -> MariaDb.migrate ~ctx:["pool", pool] ()) ["pool-one"; "pool-two"]
-  (** NOTE: To integrate migrations into your applications migration state see
-      e.g. function 'MariaDB.find_migrations *)
+module Guard =
+  Guardian_backend.Make (Roles.Actor) (Roles.Role) (Roles.Target)
+    (Guardian_backend.Database.Make
+       (Guardian_backend.Database.Of_veins (Db) (struct let default_role = Veins.Role.owner end)))
+
+let () = Db.Pool.initialize ()
+let%lwt () = Guard.migrate ~ctx:(Db.label_ctx ~role:Veins.Role.owner (Veins.Label.create "app")) ()
+(* [migrate] runs the migrations of the connection's dialect. To integrate them
+   into your application's migration state instead, see
+   [Guard.find_migrations Veins.Dialect.Mariadb]. *)
 ```
+
+Every statement declares what it needs (`Guardian_backend.Needs`: `` `Read ``, `` `Write ``, `` `Schema ``), and
+guardian's functions state it in their types: `validate` takes a context whose veins role grants `` `Read ``,
+`ActorRole.upsert` one granting `` `Write ``, `migrate` one granting `` `Schema ``. Passing a context whose role lacks
+them doesn't compile. Without `?ctx`, guardian runs as the `default_role` given to `Database.Of_veins`, which must
+grant everything (e.g. `Veins.Role.owner`). If your application passes `?ctx` to every call (e.g. one database per
+tenant), use `Database.Of_veins_explicit (Db) (struct let missing_ctx = My_error end)` instead: there is no default,
+and a call without `?ctx` raises `My_error`. To run guardian on a database layer other than veins, implement
+`Guardian_backend.Database.Core`.
 
 ## Usage
 
@@ -95,7 +109,8 @@ Most used commands can be found in the following list. For the full list of comm
 
 - `make build` - to build the project
 - `make build-watch` - to build and watch the project
-- `make test` - to run all tests. This requires a running MariaDB instance.
+- `make test` - to run all tests. This requires a running MariaDB (`MARIADB_URL`) and PostgreSQL (`POSTGRES_URL`) instance; the tests drop guardian's tables, use throwaway databases.
+  In the devcontainer, the `make` alias (`.devcontainer/Makefile`) points both at the containers' `test` databases.
 
 ## 🚀 Release new version
 

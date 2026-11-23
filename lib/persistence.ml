@@ -1,6 +1,13 @@
-type context = (string * string) list
-
 module type Backend = sig
+  (** Database context the backend runs its statements on: a pool label, a
+      held connection or an open transaction. Supplied by the database
+      module the backend is built on. *)
+  type (_, _) context
+
+  (** The database systems the backend has SQL for, e.g.
+      [Veins.Dialect.kind]. *)
+  type dialect
+
   type actor
   type actor_model
   type actor_permission
@@ -21,85 +28,117 @@ module type Backend = sig
     end
 
     module ActorRole : sig
-      val upsert : ?ctx:(string * string) list -> actor_role -> unit Lwt.t
+      val upsert : ?ctx:(_, [> `Write ]) context -> actor_role -> unit Lwt.t
 
       val find_by_actor
-        :  ?ctx:(string * string) list
+        :  ?ctx:(_, [> `Read ]) context
         -> Uuid.Actor.t
         -> actor_role list Lwt.t
 
       val find_by_target
-        :  ?ctx:(string * string) list
+        :  ?ctx:(_, [> `Read ]) context
         -> role * Uuid.Target.t
         -> actor_role list Lwt.t
 
       val find_actors_by_role
-        :  ?ctx:(string * string) list
+        :  ?ctx:(_, [> `Read ]) context
         -> ?exclude:(role * Uuid.Target.t option) list
         -> role * Uuid.Target.t option
         -> Uuid.Actor.t list Lwt.t
 
-      val delete : ?ctx:(string * string) list -> actor_role -> unit Lwt.t
+      val delete : ?ctx:(_, [> `Write ]) context -> actor_role -> unit Lwt.t
 
       val permissions_of_actor
-        :  ?ctx:context
+        :  ?ctx:(_, [> `Read ]) context
         -> Uuid.Actor.t
         -> permission_on_target list Lwt.t
     end
 
     module Actor : sig
-      val insert : ?ctx:context -> actor -> (unit, string) Lwt_result.t
-      val mem : ?ctx:context -> Uuid.Actor.t -> (bool, string) Lwt_result.t
-      val find : ?ctx:context -> Uuid.Actor.t -> (actor, string) Lwt_result.t
+      val insert
+        :  ?ctx:(_, [> `Write ]) context
+        -> actor
+        -> (unit, string) Lwt_result.t
+
+      val mem
+        :  ?ctx:(_, [> `Read ]) context
+        -> Uuid.Actor.t
+        -> (bool, string) Lwt_result.t
+
+      val find
+        :  ?ctx:(_, [> `Read ]) context
+        -> Uuid.Actor.t
+        -> (actor, string) Lwt_result.t
     end
 
     module Target : sig
-      val insert : ?ctx:context -> target -> (unit, string) Lwt_result.t
-      val mem : ?ctx:context -> Uuid.Target.t -> (bool, string) Lwt_result.t
-      val find : ?ctx:context -> Uuid.Target.t -> (target, string) Lwt_result.t
+      val insert
+        :  ?ctx:(_, [> `Write ]) context
+        -> target
+        -> (unit, string) Lwt_result.t
+
+      val mem
+        :  ?ctx:(_, [> `Read ]) context
+        -> Uuid.Target.t
+        -> (bool, string) Lwt_result.t
+
+      val find
+        :  ?ctx:(_, [> `Read ]) context
+        -> Uuid.Target.t
+        -> (target, string) Lwt_result.t
 
       val find_model
-        :  ?ctx:context
+        :  ?ctx:(_, [> `Read ]) context
         -> Uuid.Target.t
         -> (target_model, string) Lwt_result.t
 
-      val promote : ?ctx:context -> Uuid.Target.t -> target_model -> unit Lwt.t
+      val promote
+        :  ?ctx:(_, [> `Write ]) context
+        -> Uuid.Target.t
+        -> target_model
+        -> unit Lwt.t
     end
 
     module RolePermission : sig
       val insert
-        :  ?ctx:context
+        :  ?ctx:(_, [> `Write ]) context
         -> role_permission
         -> (unit, string) Lwt_result.t
 
       val delete
-        :  ?ctx:context
+        :  ?ctx:(_, [> `Write ]) context
         -> role_permission
         -> (unit, string) Lwt_result.t
 
-      val find_all : ?ctx:context -> unit -> role_permission list Lwt.t
+      val find_all
+        :  ?ctx:(_, [> `Read ]) context
+        -> unit
+        -> role_permission list Lwt.t
 
       val find_all_of_model
-        :  ?ctx:context
+        :  ?ctx:(_, [> `Read ]) context
         -> target_model
         -> role_permission list Lwt.t
     end
 
     module ActorPermission : sig
       val insert
-        :  ?ctx:context
+        :  ?ctx:(_, [> `Write ]) context
         -> actor_permission
         -> (unit, string) Lwt_result.t
 
       val delete
-        :  ?ctx:context
+        :  ?ctx:(_, [> `Write ]) context
         -> actor_permission
         -> (unit, string) Lwt_result.t
 
-      val find_all : ?ctx:context -> unit -> actor_permission list Lwt.t
+      val find_all
+        :  ?ctx:(_, [> `Read ]) context
+        -> unit
+        -> actor_permission list Lwt.t
 
       val find_all_of_entity
-        :  ?ctx:context
+        :  ?ctx:(_, [> `Read ]) context
         -> target_entity
         -> actor_permission list Lwt.t
     end
@@ -110,29 +149,29 @@ module type Backend = sig
       val find_request_sql : ?count:bool -> string -> string
 
       val find_all
-        :  ?ctx:(string * string) list
+        :  ?ctx:(_, [> `Read ]) context
         -> unit
         -> role_assignment list Lwt.t
 
       val find_all_by_role
-        :  ?ctx:(string * string) list
+        :  ?ctx:(_, [> `Read ]) context
         -> role
         -> role_assignment list Lwt.t
 
       val insert
-        :  ?ctx:(string * string) list
+        :  ?ctx:(_, [> `Write ]) context
         -> role_assignment list
         -> unit Lwt.t
 
       val delete
-        :  ?ctx:(string * string) list
+        :  ?ctx:(_, [> `Write ]) context
         -> ?comment:string
         -> role_assignment
         -> unit Lwt.t
     end
 
     val validate
-      :  ?ctx:context
+      :  ?ctx:(_, [> `Read ]) context
       -> ?any_id:bool
       -> ?target_uuid:Uuid.Target.t
       -> ?model:target_model
@@ -143,15 +182,50 @@ module type Backend = sig
     val clear_cache : unit -> unit
   end
 
-  val find_migrations : unit -> (string * string * string) list
-  val find_clean : unit -> context
-  val migrate : ?ctx:context -> unit -> unit Lwt.t
-  val clean : ?ctx:context -> unit -> unit Lwt.t
-  val delete : ?ctx:(string * string) list -> unit -> unit Lwt.t
+  (** The schema migrations for [dialect], as (key, date, SQL), oldest
+      first, for applications running them with their own migration
+      engine. *)
+  val find_migrations : dialect -> (string * string * string) list
+
+  (** (table, SQL) truncating each of guardian's tables in [dialect]. *)
+  val find_clean : dialect -> (string * string) list
+
+  val migrate : ?ctx:(_, [> `Schema ]) context -> unit -> unit Lwt.t
+  val clean : ?ctx:(_, [> `Schema ]) context -> unit -> unit Lwt.t
+  val delete : ?ctx:(_, [> `Schema ]) context -> unit -> unit Lwt.t
+end
+
+(** A value of type [t] that converts to a guardian [authorizable] through a
+    context of type [context]. *)
+module type Authorizable = sig
+  type t
+  type (_, _) context
+  type authorizable
+
+  val to_authorizable
+    :  ?ctx:(_, [> `Read | `Write ]) context
+    -> t
+    -> (authorizable, string) Lwt_result.t
 end
 
 module type Contract = sig
   include Backend
+
+  (** [to_authorizable x] converts [x] to a uniquely identifiable actor,
+      complete with roles, through this backend's context. The actor can't be
+      converted back into type [t]. *)
+  module type ActorSig =
+    Authorizable
+    with type ('a, 'g) context := ('a, 'g) context
+     and type authorizable := actor
+
+  (** [to_authorizable x] converts [x] to a uniquely identifiable target,
+      through this backend's context. The target can't be converted back into
+      type [t]. *)
+  module type TargetSig =
+    Authorizable
+    with type ('a, 'g) context := ('a, 'g) context
+     and type authorizable := target
 
   val clear_cache : unit -> unit
 
@@ -159,7 +233,7 @@ module type Contract = sig
     include module type of Repo.Actor
 
     val decorate
-      :  ?ctx:context
+      :  ?ctx:(_, [> `Read | `Write ]) context
       -> ('a -> actor)
       -> 'a
       -> (actor, string) Lwt_result.t
@@ -171,7 +245,7 @@ module type Contract = sig
     include module type of Repo.Target
 
     val decorate
-      :  ?ctx:context
+      :  ?ctx:(_, [> `Read | `Write ]) context
       -> ('a -> target)
       -> 'a
       -> (target, string) Lwt_result.t
@@ -181,7 +255,7 @@ module type Contract = sig
     include module type of Repo.RolePermission
 
     val insert_all
-      :  ?ctx:context
+      :  ?ctx:(_, [> `Write ]) context
       -> role_permission list
       -> (role_permission list, role_permission list) Lwt_result.t
   end
@@ -190,7 +264,7 @@ module type Contract = sig
     include module type of Repo.ActorPermission
 
     val insert_all
-      :  ?ctx:context
+      :  ?ctx:(_, [> `Write ]) context
       -> actor_permission list
       -> (actor_permission list, actor_permission list) Lwt_result.t
   end
@@ -209,20 +283,20 @@ module type Contract = sig
     include module type of Repo.RoleAssignment
 
     val can_assign_roles
-      :  ?ctx:(string * string) list
+      :  ?ctx:(_, [> `Read ]) context
       -> role
       -> role list Lwt.t
   end
 
   val wrap_function
-    :  ?ctx:context
+    :  ?ctx:(_, [> `Read ]) context
     -> (string -> 'etyp)
     -> validation_set
     -> ('param -> ('rval, 'etyp) Lwt_result.t)
     -> (actor -> 'param -> ('rval, 'etyp) Lwt_result.t, string) Lwt_result.t
 
   val validate
-    :  ?ctx:context
+    :  ?ctx:(_, [> `Read ]) context
     -> ?any_id:bool
     -> (string -> 'etyp)
     -> validation_set

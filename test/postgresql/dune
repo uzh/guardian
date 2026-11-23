@@ -1,0 +1,22 @@
+(test
+ (name main)
+ (package guardian)
+ (libraries
+  alcotest-lwt
+  containers
+  guardian
+  guardian_test_suite
+  ppx_deriving.runtime
+  ppx_deriving_yojson.runtime
+  sexplib0
+  yojson
+  guardian.backend
+  lwt
+  veins
+  veins.postgresql)
+ (ocamlopt_flags
+  (:standard -O3))
+ (preprocess
+  (pps lwt_ppx))
+ (action
+  (run %{test} -e)))
