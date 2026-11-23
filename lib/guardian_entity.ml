@@ -37,19 +37,6 @@ struct
     let create model uuid = { uuid; model }
   end
 
-  module type ActorSig = sig
-    type t
-    type (_, _) context
-
-    (** [to_authorizable x] converts [x] to a uniquely identifiable object,
-        complete * with roles. The [authorizable] can't be converted back into
-        type [t]. **)
-    val to_authorizable
-      :  ?ctx:(_, [> `Read | `Write ]) context
-      -> t
-      -> (Actor.t, string) Lwt_result.t
-  end
-
   module ActorRole = struct
     type t =
       { actor_uuid : Uuid.Actor.t
@@ -78,19 +65,6 @@ struct
     [@@deriving eq, show, ord, yojson, sexp_of]
 
     let create model uuid = { uuid; model }
-  end
-
-  module type TargetSig = sig
-    type t
-    type (_, _) context
-
-    (** [to_authorizable x] converts [x] to a uniquely identifiable object,
-        complete * with roles. The [authorizable] may not, however, be converted
-        back into type [t]. **)
-    val to_authorizable
-      :  ?ctx:(_, [> `Read | `Write ]) context
-      -> t
-      -> (Target.t, string) Lwt_result.t
   end
 
   module RolePermission = struct
@@ -285,6 +259,16 @@ struct
     with type ('a, 'g) context = ('a, 'g) Backend.context
      and type dialect = Backend.dialect = struct
     include Backend
+
+    module type ActorSig =
+      Persistence.Authorizable
+      with type ('a, 'g) context := ('a, 'g) context
+       and type authorizable := actor
+
+    module type TargetSig =
+      Persistence.Authorizable
+      with type ('a, 'g) context := ('a, 'g) context
+       and type authorizable := target
 
     let clear_cache () = Repo.clear_cache ()
 

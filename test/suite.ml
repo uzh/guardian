@@ -36,11 +36,11 @@ module Tests (Backend : Guard.PersistenceSig) = struct
 
   let testable_role_assignment = RoleAssignment.(Alcotest.testable pp equal)
 
-  (* ensure that the `User` module conforms to the `ActorSig` and `UserTarget`
-     conforms to `TargetSig` module type. *)
-  let _ = (module Article : TargetSig)
-  let _ = (module User : ActorSig)
-  let _ = (module UserTarget : TargetSig)
+  (* ensure that `User` conforms to the backend's `ActorSig`, and `Article` and
+     `UserTarget` to its `TargetSig`. *)
+  let _ = (module Article : Backend.TargetSig)
+  let _ = (module User : Backend.ActorSig)
+  let _ = (module UserTarget : Backend.TargetSig)
   let chris = "Chris", Guard.Uuid.Actor.create ()
   let aron = "Aron", Guard.Uuid.Actor.create ()
   let ben : Hacker.t = "Ben Hackerman", Guard.Uuid.Actor.create ()

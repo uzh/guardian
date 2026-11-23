@@ -27,7 +27,10 @@ Björnsson's database refactoring of the pool tool (uzh/z-pool-tool#647).
 
 - **Breaking:** the context type is no longer `(string * string) list`. It's `(_, _) context` in
   `Persistence.Backend` (transaction marker and role type), set by the database module, so a caller's own context
-  (e.g. `Veins.Ctx.t`) is passed as-is. `ActorSig`/`TargetSig` declare `type (_, _) context`
+  (e.g. `Veins.Ctx.t`) is passed as-is
+- **Breaking:** `Guard.ActorSig` / `Guard.TargetSig` moved into the persistence signature: check against
+  `Backend.ActorSig` / `Backend.TargetSig`, typed with that backend's `context`, so conforming modules no longer
+  define `type context` themselves
 - **Breaking:** `MakePersistence` returns `PersistenceSig with type ('a, 'g) context = ('a, 'g) Backend.context`; `find_clean`
   returns `(string * string) list`
 - **Breaking:** the bundled `Pools` and `MariaDb` modules are gone: use veins and `Guardian_backend.Make`. Requires

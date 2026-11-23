@@ -4,8 +4,7 @@
 {
   "name": "Guardian",
   "dockerComposeFile": [
-    "./docker-compose.yml",
-    "./docker-compose.override.yml"
+    "./docker-compose.yml"
   ],
   "service": "dev",
   "runServices": [

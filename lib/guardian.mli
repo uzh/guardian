@@ -95,16 +95,6 @@ module Make : functor
     val role_to_human : t -> string
   end
 
-  module type ActorSig = sig
-    type t
-    type (_, _) context
-
-    val to_authorizable
-      :  ?ctx:(_, [> `Read | `Write ]) context
-      -> t
-      -> (Actor.t, string) Lwt_result.t
-  end
-
   module Target : sig
     type t =
       { uuid : Uuid.Target.t
@@ -119,16 +109,6 @@ module Make : functor
     val show : t -> string
     val pp : Format.formatter -> t -> unit
     val create : TargetModel.t -> Uuid.Target.t -> t
-  end
-
-  module type TargetSig = sig
-    type t
-    type (_, _) context
-
-    val to_authorizable
-      :  ?ctx:(_, [> `Read | `Write ]) context
-      -> t
-      -> (Target.t, string) Lwt_result.t
   end
 
   module RolePermission : sig

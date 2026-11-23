@@ -195,8 +195,37 @@ module type Backend = sig
   val delete : ?ctx:(_, [> `Schema ]) context -> unit -> unit Lwt.t
 end
 
+(** A value of type [t] that converts to a guardian [authorizable] through a
+    context of type [context]. *)
+module type Authorizable = sig
+  type t
+  type (_, _) context
+  type authorizable
+
+  val to_authorizable
+    :  ?ctx:(_, [> `Read | `Write ]) context
+    -> t
+    -> (authorizable, string) Lwt_result.t
+end
+
 module type Contract = sig
   include Backend
+
+  (** [to_authorizable x] converts [x] to a uniquely identifiable actor,
+      complete with roles, through this backend's context. The actor can't be
+      converted back into type [t]. *)
+  module type ActorSig =
+    Authorizable
+    with type ('a, 'g) context := ('a, 'g) context
+     and type authorizable := actor
+
+  (** [to_authorizable x] converts [x] to a uniquely identifiable target,
+      through this backend's context. The target can't be converted back into
+      type [t]. *)
+  module type TargetSig =
+    Authorizable
+    with type ('a, 'g) context := ('a, 'g) context
+     and type authorizable := target
 
   val clear_cache : unit -> unit
 
