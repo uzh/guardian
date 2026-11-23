@@ -1,41 +1,72 @@
 services:
   dev:
     container_name: guardian_dev
-    image: ocaml/opam:debian-12-ocaml-5.3
+    build:
+      context: .
+      dockerfile: Dockerfile
     env_file: [.env]
     volumes:
       # default user is "opam"
       - ..:/workspace:cached
-      - opam:/home/opam/.opam:cached
       - build:/workspace/_build:cached
-      - db:/databases/dev/:ro
+      - opam-5.5.2-2.6:/home/opam/.opam:cached
       - ${HOME}/.claude:/home/opam/.claude
-    depends_on: [database]
-    ports: [3020:3000]
+    depends_on:
+      database-mariadb:
+        condition: service_healthy
+      database-postgres:
+        condition: service_healthy
+    ports: [ 3020:3000 ]
     command: sleep infinity
 
-  database:
-    container_name: guardian_database
-    image: mariadb:10.6.3
+  database-mariadb:
+    container_name: guardian_database_mariadb
+    image: mariadb:10.6
+    restart: unless-stopped
     command: --max_allowed_packet=629145600
-    ports: [3320:3306]
+    ports: [ 3320:3306 ]
     environment:
-      - TZ=Europe/Zurich
-      - MYSQL_ALLOW_EMPTY_PASSWORD='yes'
-      - MYSQL_ROOT_HOST=%
-      - MYSQL_DATABASE=development
-      - MYSQL_USER=root
+      TZ: Europe/Zurich
+      MYSQL_USER: admin
+      MYSQL_PASSWORD: password
+      MYSQL_DATABASE: development
+      MYSQL_ROOT_PASSWORD: password
     volumes:
-      - db:/var/lib/mysql
-      - ./init:/docker-entrypoint-initdb.d/:ro
+      - db-mariadb:/var/lib/mysql
+      - ./init-mariadb:/docker-entrypoint-initdb.d/:ro
+    healthcheck:
+      test: [ "CMD", "mariadb-admin", "ping", "-h", "127.0.0.1", "-uadmin", "-ppassword" ]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  database-postgres:
+    container_name: guardian_database_postgres
+    image: postgres:18
+    restart: unless-stopped
+    ports: [ 3321:5432 ]
+    environment:
+      TZ: Europe/Zurich
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: development
+    volumes:
+      - db-postgres:/var/lib/postgresql
+      - ./init-postgres:/docker-entrypoint-initdb.d/:ro
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-h", "127.0.0.1", "-U", "root", "-d", "development" ]
+      interval: 2s
+      timeout: 5s
+      retries: 60
 
   adminer:
     image: adminer:standalone
-    restart: always
-    ports: [8080:8080]
-    depends_on: [database]
+    restart: unless-stopped
+    ports: [ 8080:8080 ]
+    depends_on: [ database-mariadb, database-postgres ]
 
 volumes:
-  opam:
   build:
-  db:
+  opam-5.5.2-2.6:
+  db-mariadb:
+  db-postgres:
